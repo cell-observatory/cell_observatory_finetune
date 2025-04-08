@@ -1,0 +1,18 @@
+# Ignore build artifacts and metadata
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Ignore compiled Python files and cache
+__pycache__/
+*.py[cod]
+*.so
+
+# Ignore compiled ops3d extension
+src/ops3d/_C.*.so
+
+# Ignore VSCode, Jupyter, and system clutter
+.vscode/
+.ipynb_checkpoints/
+.DS_Store

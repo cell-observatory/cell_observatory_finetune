@@ -5,7 +5,7 @@
 #SBATCH --job-name=train_seg
 #SBATCH --output=/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/logs/train_seg.log
 #SBATCH --error=/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/logs/train_seg.err
-#SBATCH --gres=gpu:a100:1
+#SBATCH --gres=gpu:a100:4
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-cpu=31000
 #SBATCH --ntasks-per-node=1

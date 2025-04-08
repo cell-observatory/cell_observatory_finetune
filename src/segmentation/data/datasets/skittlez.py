@@ -1,6 +1,7 @@
 import os
 import logging
 import sqlite3
+import warnings
 
 from sqlite3 import Connection, Cursor
 from typing import Optional, Callable, Dict
@@ -53,7 +54,7 @@ class Skittlez_Database:
         """
         # Construct default DataConfig if batch_config is not provided (defaults to color_mode = "AVG")
         if batch_config is None:
-            raise Warning("Batch config is not provided. Defaulting to color_mode = 'AVG'")
+            warnings.warn("Batch config is not provided. Defaulting to color_mode = 'AVG'")
             batch_config = DataConfig()
 
         self.batch_config = batch_config
@@ -296,7 +297,7 @@ class Skittlez_Database:
 
         logging.info(f"[SkittlesDatabase] Found {self.length} crops in the database.")
 
-    # TODO: A band-aid solution. Redo once dataset is updated. Obviously, trainig is bottlenecked by dataloading 
+    # TODO: A band-aid solution. Redo once dataset is updated. Trainig is bottlenecked by dataloading 
     #       for larger batch size currently.
     def indices_to_instances(self, indices, y0, x0, label_item):
         valid_indices = []
@@ -329,7 +330,7 @@ class Skittlez_Database:
                 bboxes.append(bboxes_crop) # list of list of lists (image -> crop -> bboxes)
                 mask_ids.append(mask_ids_crop) # list of list of ints (image -> crop -> mask ids)
         
-        return list(valid_indices), bboxes, mask_ids
+        return valid_indices, bboxes, mask_ids
 
     def __len__(self):
         return self.length
