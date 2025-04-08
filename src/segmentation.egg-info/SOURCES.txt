@@ -1,0 +1,14 @@
+pyproject.toml
+setup.py
+csrc/vision.cpp
+csrc/cuda/nms_3d_cuda.cu
+csrc/cuda/roi_align_3d_cuda.cu
+src/ops3d/__init__.py
+src/segmentation/__init__.py
+src/segmentation.egg-info/PKG-INFO
+src/segmentation.egg-info/SOURCES.txt
+src/segmentation.egg-info/__init__.py
+src/segmentation.egg-info/dependency_links.txt
+src/segmentation.egg-info/requires.txt
+src/segmentation.egg-info/top_level.txt
+src/segmentation.egg-info/zip-safe

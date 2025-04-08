@@ -1,0 +1,84 @@
+import os
+import sys
+import logging
+
+from torch.utils.data import DataLoader, random_split
+from torch.utils.data.distributed import DistributedSampler
+
+from omegaconf import DictConfig
+from hydra.utils import instantiate, get_method
+
+from segmentation.data.data_utils import Dtypes
+from segmentation.data.transforms.transforms import Compose
+
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+def gather_dataset(
+    config: DictConfig
+):
+    transforms = Compose([instantiate(t) for t in config.datasets.transforms]) if config.datasets.transforms else None
+    dataset = instantiate(config.datasets.database,
+                          transforms = transforms,
+                          batch_config=config.datasets.database.batch_config, # Hydra doesn’t merge sub-dicts recursively
+                          dtype=Dtypes[config.amp].value,
+                          )
+    
+    if config.datasets.return_dataloader:
+        collate_fn = get_method(config.datasets.collate_fn)
+        db_worker_init_fn = get_method(config.datasets.worker_init_fn)
+
+        if config.datasets.split is not None:
+            val_size = round(len(dataset) * config.datasets.split)
+            train, val = random_split(dataset, lengths=[len(dataset) - val_size, val_size])
+
+            train = DataLoader(
+                train,
+                collate_fn=collate_fn,
+                batch_size=config.datasets.batch_size,
+                shuffle=False,
+                pin_memory=True,
+                num_workers=config.gpu_workers,
+                prefetch_factor=2,
+                persistent_workers=False,
+                sampler=DistributedSampler(train),
+                worker_init_fn=db_worker_init_fn
+            )
+            val = DataLoader(
+                val,
+                collate_fn=collate_fn,
+                batch_size=config.datasets.batch_size,
+                shuffle=False,
+                pin_memory=True,
+                num_workers=config.gpu_workers,
+                prefetch_factor=2,
+                persistent_workers=False,
+                sampler=DistributedSampler(val, shuffle=False),
+                worker_init_fn=db_worker_init_fn
+            )
+
+            return train, val
+
+        else:
+
+            data = DataLoader(
+                dataset,
+                collate_fn=collate_fn,
+                batch_size=config.datasets.batch_size,
+                shuffle=False,
+                pin_memory=True,
+                num_workers=config.gpu_workers,
+                prefetch_factor=2,
+                persistent_workers=False,
+                sampler=DistributedSampler(dataset),
+                worker_init_fn=db_worker_init_fn
+            )
+
+            return data
+    else:
+        return dataset
