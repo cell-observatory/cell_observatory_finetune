@@ -2,8 +2,6 @@ defaults:
   - _self_
 
 _target_: segmentation.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
-ckpt_loss_key: ap@50
-lower_is_better: false 
 
 metrics:
   ap@50:

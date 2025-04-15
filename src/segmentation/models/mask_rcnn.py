@@ -185,7 +185,7 @@ class MaskRCNN(FasterRCNN):
 
     def __init__(
         self,
-        backbone,
+        backbones,
         channels,
         num_classes=None,
         # transform parameters
@@ -234,10 +234,8 @@ class MaskRCNN(FasterRCNN):
             if mask_predictor is not None:
                 raise ValueError("num_classes should be None when mask_predictor is specified")
 
-        if backbone is None:
-            backbone = resnet50(channel_in = channels)
-
-        out_channels = backbone.out_channels
+        if backbones is None:
+            backbones = resnet50(channel_in = channels)
 
         if mask_roi_pool is None:
             mask_roi_pool = MultiScaleRoIAlign(featmap_names=["0", "1", "2", "3"], output_size=14, sampling_ratio=2)
@@ -245,6 +243,7 @@ class MaskRCNN(FasterRCNN):
         if mask_head is None:
             mask_layers = (256, 256, 256, 256)
             mask_dilation = 1
+            out_channels = 2048
             mask_head = MaskRCNNHeads(out_channels, mask_layers, mask_dilation)
 
         if mask_predictor is None:
@@ -253,7 +252,7 @@ class MaskRCNN(FasterRCNN):
             mask_predictor = MaskRCNNPredictor(mask_predictor_in_channels, mask_dim_reduced, num_classes)
 
         super().__init__(
-            backbone,
+            backbones,
             num_classes,
             # transform parameters
             min_size,

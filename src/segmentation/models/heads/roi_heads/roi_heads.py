@@ -125,6 +125,7 @@ def maskrcnn_loss(mask_logits, proposals, gt_masks, gt_labels, mask_matched_idxs
 
     discretization_size = mask_logits.shape[-1]
     labels = [gt_label[idxs] for gt_label, idxs in zip(gt_labels, mask_matched_idxs)]
+
     # match gt masks with size of proposal logits
     mask_targets = [
         project_masks_on_boxes(m, p, i, discretization_size) for m, p, i in zip(gt_masks, proposals, mask_matched_idxs)
@@ -202,10 +203,16 @@ def paste_mask_in_image(mask, box, im_d, im_h, im_w):
     h = max(h, 1)
     d = max(d, 1)
 
+    # if box is totally outside the image, return empty mask
+    if (box[3] < 0 or box[0] >= im_w or  
+        box[4] < 0 or box[1] >= im_h or 
+        box[5] < 0 or box[2] >= im_d): 
+        return torch.zeros((im_d, im_h, im_w), dtype=mask.dtype, device=mask.device)
+
     # Set shape to [batchxCxDxHxW]
     mask = mask.expand((1, 1, -1, -1, -1))
 
-    # Resize mask
+    # Resize mask 
     mask = F.interpolate(mask, size=(d, h, w), mode="trilinear", align_corners=False)
     mask = mask[0][0]
 
@@ -217,8 +224,15 @@ def paste_mask_in_image(mask, box, im_d, im_h, im_w):
     z_0 = max(box[2], 0)
     z_1 = min(box[5] + 1, im_d)
 
+    # if box is invalid, return empty mask (consider box[2] = 2, box[5] = 30, im_d = 25) 
+    # TODO: is this fully covered by first check?
+    if x_1 <= x_0 or y_1 <= y_0 or z_1 <= z_0:
+        return im_mask 
+
+    # mask[0, 0, 0] corresponds to im_mask[z0, y0, x0] hence shift 
     im_mask[z_0: z_1, y_0:y_1, x_0:x_1] = mask[(z_0 - box[2]) : (z_1 - box[2]), (y_0 - box[1]) : (y_1 - box[1]), (x_0 - box[0]) : (x_1 - box[0])]
     return im_mask
+
 
 def paste_masks_in_image(masks, boxes, img_shape, padding=1):
     # type: (Tensor, Tensor, Tuple[int, int, int], int) -> Tensor
@@ -226,10 +240,6 @@ def paste_masks_in_image(masks, boxes, img_shape, padding=1):
     boxes = expand_boxes(boxes, scale).to(dtype=torch.int64)
     im_d, im_h, im_w = img_shape
 
-    # if torchvision._is_tracing():
-    #     return _onnx_paste_masks_in_image_loop(
-    #         masks, boxes, torch.scalar_tensor(im_h, dtype=torch.int64), torch.scalar_tensor(im_w, dtype=torch.int64)
-    #     )[:, None]
     res = [paste_mask_in_image(m[0], b, im_d, im_h, im_w) for m, b in zip(masks, boxes)]
     if len(res) > 0:
         ret = torch.stack(res, dim=0)[:, None]
@@ -397,8 +407,10 @@ class RoIHeads(nn.Module):
 
         # get matching gt indices for each proposal
         matched_idxs, labels = self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels)
+
         # sample a fixed proportion of positive-negative proposals
         sampled_inds = self.subsample(labels)
+
         matched_gt_boxes = []
         num_images = len(proposals)
         for img_id in range(num_images):
@@ -575,6 +587,10 @@ class RoIHeads(nn.Module):
 
             losses.update(loss_mask)
 
+        return result, losses
+
+############################################################ LEGACY ############################################################
+
         # # keep none checks in if conditional so torchscript will conditionally
         # # compile each branch
         # if (
@@ -624,7 +640,7 @@ class RoIHeads(nn.Module):
         #             r["keypoints_scores"] = kps
         #     losses.update(loss_keypoint)
 
-        return result, losses
+        # return result, losses
     
     # def filter_boxes(self, boxes, eps=1e-4):
     #     if len(boxes) == 0:

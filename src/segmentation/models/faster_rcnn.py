@@ -230,9 +230,9 @@ class FasterRCNN(GeneralizedRCNN):
 
         if box_head is None:
             representation_size = 1024
-            d, h, w = box_roi_pool.output_size  # e.g. (7, 7, 7)
-            in_channels = out_channels * d * h * w
-            box_head = TwoMLPHead(in_channels, representation_size)
+            # d, h, w = box_roi_pool.output_size  # e.g. (7, 7, 7)
+            # in_channels = out_channels * d * h * w
+            box_head = TwoMLPHead(out_channels, box_roi_pool.output_size, representation_size)
 
         if box_predictor is None:
             representation_size = 1024
@@ -269,12 +269,16 @@ class TwoMLPHead(nn.Module):
     Standard heads for FPN-based models
 
     Args:
-        in_channels (int): number of input channels
+        backbone_out_channels (int): number of backbone output channels
+        roi_pool_output_size (Tuple[int, int, int]): output size of the RoI pooler
         representation_size (int): size of the intermediate representation
     """
 
-    def __init__(self, in_channels, representation_size):
+    def __init__(self, backbone_out_channels, roi_pool_output_size, representation_size):
         super().__init__()
+
+        d, h, w = roi_pool_output_size  # e.g. (7, 7, 7)
+        in_channels = backbone_out_channels * d * h * w
 
         self.fc6 = nn.Linear(in_channels, representation_size)
         self.fc7 = nn.Linear(representation_size, representation_size)

@@ -29,7 +29,7 @@ os.environ["NCCL_CROSS_NIC"] = "1"
 os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "3600"
 
 
-@hydra.main(config_path="../configs", config_name="config", version_base="1.2")
+@hydra.main(config_path="../configs", config_name="config_mrcnn_vitDet", version_base="1.2") 
 def main(cfg: DictConfig):
     # Print full configuration (for debugging)
     logger.info("\n" + OmegaConf.to_yaml(cfg))

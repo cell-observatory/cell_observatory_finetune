@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 def gather_dataset(
     config: DictConfig
 ):
-    transforms = Compose([instantiate(t) for t in config.datasets.transforms]) if config.datasets.transforms else None
+    # TODO: Support registry enabled dataset and transform instantiation
+    transforms = Compose([instantiate(t) for t in config.transforms.transforms_list]) if config.transforms.transforms_list else None
     dataset = instantiate(config.datasets.database,
                           transforms = transforms,
                           batch_config=config.datasets.database.batch_config, # Hydra doesn’t merge sub-dicts recursively
@@ -40,7 +41,7 @@ def gather_dataset(
             train = DataLoader(
                 train,
                 collate_fn=collate_fn,
-                batch_size=config.datasets.batch_size,
+                batch_size=config.worker_batch_size,
                 shuffle=False,
                 pin_memory=True,
                 num_workers=config.gpu_workers,
@@ -52,7 +53,7 @@ def gather_dataset(
             val = DataLoader(
                 val,
                 collate_fn=collate_fn,
-                batch_size=config.datasets.batch_size,
+                batch_size=config.worker_batch_size,
                 shuffle=False,
                 pin_memory=True,
                 num_workers=config.gpu_workers,
@@ -65,17 +66,16 @@ def gather_dataset(
             return train, val
 
         else:
-
             data = DataLoader(
                 dataset,
                 collate_fn=collate_fn,
-                batch_size=config.datasets.batch_size,
+                batch_size=config.worker_batch_size,
                 shuffle=False,
                 pin_memory=True,
                 num_workers=config.gpu_workers,
                 prefetch_factor=2,
                 persistent_workers=False,
-                sampler=DistributedSampler(dataset),
+                sampler=DistributedSampler(dataset) if config.distributed_sampler else None,
                 worker_init_fn=db_worker_init_fn
             )
 

@@ -33,6 +33,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
+
 from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -47,7 +48,6 @@ from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.feature_pyramid_network import ExtraFPNBlock, FeaturePyramidNetwork, LastLevelMaxPool
 
 
-# TODO: Integrate and review
 class BackboneWithFPN(nn.Module):
     """
     Adds a FPN on top of a model.
@@ -55,7 +55,7 @@ class BackboneWithFPN(nn.Module):
     extract a submodel that returns the feature maps specified in return_layers.
     The same limitations of IntermediateLayerGetter apply here.
     Args:
-        backbone (nn.Module)
+        backbone (nn.Module): 
         return_layers (Dict[name, new_name]): a dict containing the names
             of the modules for which the activations will be returned as
             the key of the dict, and the value of the dict is the name
@@ -82,7 +82,13 @@ class BackboneWithFPN(nn.Module):
         if extra_blocks is None:
             extra_blocks = LastLevelMaxPool()
 
-        self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        # IntermediateLayerGetter is more general abstraction
+        # but will require some work to support properly
+        # self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        
+        self.return_layers = return_layers
+        self.body = backbone
+
         self.fpn = FeaturePyramidNetwork(
             in_channels_list=in_channels_list,
             out_channels=out_channels,
@@ -92,10 +98,16 @@ class BackboneWithFPN(nn.Module):
         self.out_channels = out_channels
 
     def forward(self, x: Tensor) -> Dict[str, Tensor]:
-        x = self.body(x)
-        x = self.fpn(x)
+        # expected to return Dict[str, Tensor]
+        # of feature names : feature maps
+        # TODO: implement IntermediateLayerGetter logic 
+        _, intermediates = self.body(x, return_intermediates=True)
+        # reshape to (B,C,D,H,W)
+        intermediates = {k: v.permute(0,4,1,2,3) for k, v in intermediates.items() if k in self.return_layers}
+        x = self.fpn(intermediates)
         return x
-    
+
+
 class ExtraFPNBlock(nn.Module):
     """
     Base class for the extra block in the FPN.
@@ -153,7 +165,7 @@ class FeaturePyramidNetwork(nn.Module):
         norm_layer: Optional[Callable[..., nn.Module]] = None,
     ):
         super().__init__()
-        # _log_api_usage_once(self)
+
         self.inner_blocks = nn.ModuleList()
         self.layer_blocks = nn.ModuleList()
         for in_channels in in_channels_list:
@@ -180,66 +192,6 @@ class FeaturePyramidNetwork(nn.Module):
                 raise TypeError(f"extra_blocks should be of type ExtraFPNBlock not {type(extra_blocks)}")
         self.extra_blocks = extra_blocks
 
-    def _load_from_state_dict(
-        self,
-        state_dict,
-        prefix,
-        local_metadata,
-        strict,
-        missing_keys,
-        unexpected_keys,
-        error_msgs,
-    ):
-        version = local_metadata.get("version", None)
-
-        if version is None or version < 2:
-            num_blocks = len(self.inner_blocks)
-            for block in ["inner_blocks", "layer_blocks"]:
-                for i in range(num_blocks):
-                    for type in ["weight", "bias"]:
-                        old_key = f"{prefix}{block}.{i}.{type}"
-                        new_key = f"{prefix}{block}.{i}.0.{type}"
-                        if old_key in state_dict:
-                            state_dict[new_key] = state_dict.pop(old_key)
-
-        super()._load_from_state_dict(
-            state_dict,
-            prefix,
-            local_metadata,
-            strict,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        )
-
-    def get_result_from_inner_blocks(self, x: Tensor, idx: int) -> Tensor:
-        """
-        This is equivalent to self.inner_blocks[idx](x),
-        but torchscript doesn't support this yet
-        """
-        num_blocks = len(self.inner_blocks)
-        if idx < 0:
-            idx += num_blocks
-        out = x
-        for i, module in enumerate(self.inner_blocks):
-            if i == idx:
-                out = module(x)
-        return out
-
-    def get_result_from_layer_blocks(self, x: Tensor, idx: int) -> Tensor:
-        """
-        This is equivalent to self.layer_blocks[idx](x),
-        but torchscript doesn't support this yet
-        """
-        num_blocks = len(self.layer_blocks)
-        if idx < 0:
-            idx += num_blocks
-        out = x
-        for i, module in enumerate(self.layer_blocks):
-            if i == idx:
-                out = module(x)
-        return out
-
     def forward(self, x: Dict[str, Tensor]) -> Dict[str, Tensor]:
         """
         Computes the FPN for a set of feature maps.
@@ -255,17 +207,27 @@ class FeaturePyramidNetwork(nn.Module):
         names = list(x.keys())
         x = list(x.values())
 
-        last_inner = self.get_result_from_inner_blocks(x[-1], -1)
+        # last_inner = self.get_result_from_inner_blocks(x[-1], -1)
+        # in_channels -> out_channels
+        last_inner = self.inner_blocks[-1](x[-1])
 
         results = []
-        results.append(self.get_result_from_layer_blocks(last_inner, -1))
+        # kernel_size = 3
+        results.append(self.layer_blocks[-1](last_inner))
+        # results.append(self.get_result_from_layer_blocks(last_inner, -1))
 
+        # top-down path from second highest resolution
         for idx in range(len(x) - 2, -1, -1):
-            inner_lateral = self.get_result_from_inner_blocks(x[idx], idx)
+            # inner_lateral = self.get_result_from_inner_blocks(x[idx], idx)
+            # second highest feature map -> second highest fpn feature map
+            # moving horizontally across fpn 
+            inner_lateral = self.inner_blocks[idx](x[idx])
             feat_shape = inner_lateral.shape[-3:]
-            inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest")
+            # interpolate to match top-down and lateral feature map sizes
+            inner_top_down = F.interpolate(last_inner, size=feat_shape, mode="nearest") 
             last_inner = inner_lateral + inner_top_down
-            results.insert(0, self.get_result_from_layer_blocks(last_inner, idx))
+            # results.insert(0, self.get_result_from_layer_blocks(last_inner, idx))
+            results.insert(0, self.layer_blocks[idx](last_inner))
 
         if self.extra_blocks is not None:
             results, names = self.extra_blocks(results, x, names)
@@ -274,11 +236,71 @@ class FeaturePyramidNetwork(nn.Module):
         out = OrderedDict([(k, v) for k, v in zip(names, results)])
 
         return out
+    
+    # def _load_from_state_dict(
+    #     self,
+    #     state_dict,
+    #     prefix,
+    #     local_metadata,
+    #     strict,
+    #     missing_keys,
+    #     unexpected_keys,
+    #     error_msgs,
+    # ):
+    #     version = local_metadata.get("version", None)
+
+    #     if version is None or version < 2:
+    #         num_blocks = len(self.inner_blocks)
+    #         for block in ["inner_blocks", "layer_blocks"]:
+    #             for i in range(num_blocks):
+    #                 for type in ["weight", "bias"]:
+    #                     old_key = f"{prefix}{block}.{i}.{type}"
+    #                     new_key = f"{prefix}{block}.{i}.0.{type}"
+    #                     if old_key in state_dict:
+    #                         state_dict[new_key] = state_dict.pop(old_key)
+
+    #     super()._load_from_state_dict(
+    #         state_dict,
+    #         prefix,
+    #         local_metadata,
+    #         strict,
+    #         missing_keys,
+    #         unexpected_keys,
+    #         error_msgs,
+    #     )
+
+    # def get_result_from_inner_blocks(self, x: Tensor, idx: int) -> Tensor:
+    #     """
+    #     This is equivalent to self.inner_blocks[idx](x),
+    #     but torchscript doesn't support this yet
+    #     """
+    #     num_blocks = len(self.inner_blocks)
+    #     if idx < 0:
+    #         idx += num_blocks
+    #     out = x
+    #     for i, module in enumerate(self.inner_blocks):
+    #         if i == idx:
+    #             out = module(x)
+    #     return out
+
+    # def get_result_from_layer_blocks(self, x: Tensor, idx: int) -> Tensor:
+    #     """
+    #     This is equivalent to self.layer_blocks[idx](x),
+    #     but torchscript doesn't support this yet
+    #     """
+    #     num_blocks = len(self.layer_blocks)
+    #     if idx < 0:
+    #         idx += num_blocks
+    #     out = x
+    #     for i, module in enumerate(self.layer_blocks):
+    #         if i == idx:
+    #             out = module(x)
+    #     return out
 
 
 class LastLevelMaxPool(ExtraFPNBlock):
     """
-    Applies a max_pool3d (not actual max_pool3d, we just subsample) on top of the last feature map
+    Applies a max_pool3d on top of the last feature map
     """
 
     def forward(
@@ -293,31 +315,30 @@ class LastLevelMaxPool(ExtraFPNBlock):
         return x, names
 
 
-# class LastLevelP6P7(ExtraFPNBlock):
-#     """
-#     This module is used in RetinaNet to generate extra layers, P6 and P7.
-#     """
+class LastLevelP6P7(ExtraFPNBlock):
+    """
+    This module is used in RetinaNet to generate extra layers, P6 and P7.
+    """
 
-#     def __init__(self, in_channels: int, out_channels: int):
-#         super().__init__()
-#         self.p6 = nn.Conv2d(in_channels, out_channels, 3, 2, 1)
-#         self.p7 = nn.Conv2d(out_channels, out_channels, 3, 2, 1)
-#         for module in [self.p6, self.p7]:
-#             nn.init.kaiming_uniform_(module.weight, a=1)
-#             nn.init.constant_(module.bias, 0)
-#         self.use_P5 = in_channels == out_channels
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.p6 = nn.Conv2d(in_channels, out_channels, 3, 2, 1)
+        self.p7 = nn.Conv2d(out_channels, out_channels, 3, 2, 1)
+        for module in [self.p6, self.p7]:
+            nn.init.kaiming_uniform_(module.weight, a=1)
+            nn.init.constant_(module.bias, 0)
+        self.use_P5 = in_channels == out_channels
 
-#     def forward(
-#         self,
-#         p: List[Tensor],
-#         c: List[Tensor],
-#         names: List[str],
-#     ) -> Tuple[List[Tensor], List[str]]:
-#         p5, c5 = p[-1], c[-1]
-#         x = p5 if self.use_P5 else c5
-#         p6 = self.p6(x)
-#         p7 = self.p7(F.relu(p6))
-#         p.extend([p6, p7])
-#         names.extend(["p6", "p7"])
-#         return p, names
-    
+    def forward(
+        self,
+        p: List[Tensor],
+        c: List[Tensor],
+        names: List[str],
+    ) -> Tuple[List[Tensor], List[str]]:
+        p5, c5 = p[-1], c[-1]
+        x = p5 if self.use_P5 else c5
+        p6 = self.p6(x)
+        p7 = self.p7(F.relu(p6))
+        p.extend([p6, p7])
+        names.extend(["p6", "p7"])
+        return p, names

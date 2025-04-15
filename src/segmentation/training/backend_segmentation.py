@@ -28,8 +28,10 @@ from ray.train import Checkpoint, report, get_context, get_checkpoint
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
+from segmentation.utils.comm import inference_context
 from segmentation.data.gather_dataset import gather_dataset
-
+from segmentation.checkpoint.checkpoint import load_checkpoint
+from segmentation.training.registry import build_dependency_graph_and_instantiate
 
 logger = logging.getLogger("ray")
 logger.setLevel(logging.DEBUG)
@@ -244,53 +246,25 @@ def get_optimizer(params, config: DictConfig, optimizer: str, steps_per_epoch: i
         return opt
 
 
-def find_and_instantiate_modules(cfg, keys=("backbone")):
-    modules = {}
-
-    def _recursive_search(node):
-        if not isinstance(node, (dict, DictConfig)):
-            return
-        for k, v in node.items():
-            if k in keys and OmegaConf.is_dict(v) and k not in modules:
-                if "_target_" in v:
-                    print(f"Instantiating module: {k} -> {v['_target_']}")
-                    modules[k] = instantiate(v)
-                else:
-                    print(f"Found key {k} but no _target_ to instantiate")
-            elif OmegaConf.is_dict(v):
-                print(f"Recursing into {k}")
-                _recursive_search(v)
-
-    _recursive_search(cfg.models)
-    return modules
-
-
-def load_checkpoint(model_engine, opt, config, logger):
+def _load_checkpoint(model_engine, opt, config, logger):
     checkpoint = get_checkpoint() 
     if checkpoint is not None:
         checkpointdir = checkpoint.as_directory()
-        logger.info(f"Loading pretrained model @ resumed checkpoint -> {checkpointdir}")
+        load_checkpoint(model_engine, opt, config, logger, checkpointdir)
     else:
         checkpointdir = Path(config.checkpointdir)
-        logger.info(f"Loading pretrained model from default checkpoint -> {checkpointdir}")
+        load_checkpoint(model_engine, opt, config, logger, checkpointdir)
 
-    if config.deepspeed_config.zero_optimization.stage == 3:
-        load_path, _ = model_engine.load_checkpoint(checkpointdir)
-        if load_path is None:
-            raise RuntimeError(f"Failed to load DeepSpeed checkpoint from {checkpointdir}")
-    else:
-        model_state = torch.load(Path(checkpointdir) / "best_model.bin", map_location="cpu")
-        model_engine.load_state_dict(model_state)
-        
-        optimizer_path = Path(checkpointdir) / "best_optimizer.bin"
-        if optimizer_path.exists():
-            optimizer_state = torch.load(optimizer_path, map_location="cpu")
-            opt.load_state_dict(optimizer_state)
 
 def supervised(config: DictConfig):
     restored, latest_checkpoint, best_loss, overall_step, starting_epoch, step_logbook, epoch_logbook = restore_model(config)
     
-    train_dataloader, val_dataloader = gather_dataset(config)
+    if config.datasets.split:
+        train_dataloader, val_dataloader = gather_dataset(config) 
+    else: 
+        train_dataloader = gather_dataset(config)
+        val_dataloader = None
+    
     steps_per_epoch = int(np.ceil(len(train_dataloader) / (config.gpu_workers * config.workers)))
     val_steps_per_epoch = int(np.ceil(len(val_dataloader) / (config.gpu_workers * config.workers))) if val_dataloader else None
 
@@ -299,13 +273,7 @@ def supervised(config: DictConfig):
 
     # TODO: Better way to do this is probably with a registry as in: https://mmengine.readthedocs.io/en/latest/advanced_tutorials/registry.html
     #       But this works for now.
-
-    # Collect only the non-null components and instantiate them
-    modules = find_and_instantiate_modules(config, keys=("backbone", # backbone
-                                                         "box_roi_pool", "box_head", "box_predictor", # box roi
-                                                         "mask_roi_pool", "mask_predictor", "mask_head", # mask roi
-                                                         "rpn_head", "rpn_anchor_generator")) # rpn 
-    model = instantiate(config.models, **modules)
+    model = build_dependency_graph_and_instantiate(config.models)
     
     # Skipping the model summary for now
     # input_shape = tuple(OmegaConf.to_container(config.datasets.inputs, resolve=True))
@@ -336,17 +304,17 @@ def supervised(config: DictConfig):
     )
 
     if restored:
-        load_checkpoint(
+        _load_checkpoint(
             model_engine=model,
             opt=opt,
             config=config,
             logger=logger,
         )
 
-    metrics = instantiate(config.metrics)
+    evaluator = instantiate(config.metrics)
     
-    ray_context = get_context()
     loss_nans = 0
+    ray_context = get_context()
     with torch.autograd.set_detect_anomaly(True, check_nan=False):
         with torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CUDA, torch.profiler.ProfilerActivity.CPU],
@@ -366,8 +334,11 @@ def supervised(config: DictConfig):
                 step_times, step_utilization, step_vram = [], [], []
 
                 for step, (inputs, targets) in enumerate(train_dataloader):
+                    if step > 2:
+                        break
                     step_time = time.time()
                     lr_value = opt.param_groups[0]["lr"]
+                    # TODO: More modular loss computation design
                     loss_dict, outputs = model(inputs, targets)
 
                     # TODO: Make this logic more general
@@ -446,26 +417,24 @@ def supervised(config: DictConfig):
                 }
 
                 if val_dataloader is not None and (epoch + 1) % config.val_interval == 0:
-                    model.eval()
+                    
                     val_step_times = []
+                    with inference_context(model):
+                        with torch.no_grad():
+                            for val_step, (inputs, targets) in enumerate(val_dataloader):
+                                val_step_time = time.time()
+                                loss_dict, outputs  = model(inputs, targets)
+                                evaluator.process(targets, outputs)
+                                val_step_times.append(time.time() - val_step_time)
+                                if val_step % config.val_log_step == 0:
+                                    metric_results, _ = evaluator.evaluate()
+                                    logger.info(f"│ Epoch (val): {epoch+1}/{config.epochs}")
+                                    logger.info(f"│ Step (val): {val_step}/{val_steps_per_epoch}")
+                                    for k, v in metric_results.items():
+                                        logger.info(f"│ val_{k}: {v}")
 
-                    with torch.no_grad():
-                        for val_step, (inputs, targets) in enumerate(val_dataloader):
-                            val_step_time = time.time()
-                            loss_dict, outputs  = model(inputs, targets)
-                            metrics(outputs, targets)
-                            val_step_times.append(time.time() - val_step_time)
-                            if val_step % config.val_log_step == 0:
-                                metric_results, metric_agg = metrics.aggregate()
-                                logger.info(f"│ Epoch (val): {epoch}")
-                                logger.info(f"│ Step (val): {val_step}/{val_steps_per_epoch}")
-                                for k, v in metric_results.items():
-                                    logger.info(f"│ val_{k}: {v}")
-
-                    metric_results, metric_agg = metrics.aggregate()
-                    metrics.reset()
-
-                    model.train()
+                    metric_results, ckpt_loss = evaluator.evaluate()
+                    evaluator.reset()
 
                     val_step_timer_avg = np.mean(val_step_times)
 
@@ -479,13 +448,14 @@ def supervised(config: DictConfig):
                         **{f"val_{k}": v for k, v in metric_results.items()},
                     })
 
-                    if metric_agg < best_loss:
-                        best_loss = metric_agg
-                        torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
-                        torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
+                    if ckpt_loss < best_loss:
+                        best_loss = ckpt_loss
 
                         if config.deepspeed_config.zero_optimization.stage == 3:
                             model.save_checkpoint(config.checkpointdir, tag="best_model")
+                        else:
+                            torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
+                            torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
 
                 pd.DataFrame.from_dict(epoch_logbook, orient='index').to_csv(Path(config.logdir) / 'logbook.csv')
                 pd.DataFrame.from_dict(step_logbook, orient='index').to_csv(Path(config.logdir) / 'steplogbook.csv')
@@ -499,11 +469,14 @@ def supervised(config: DictConfig):
                 if config.profile:
                     profiler.step()
 
-        torch.save(model.state_dict(), Path(config.checkpointdir) / "last_model.bin")
-        torch.save(opt.state_dict(), Path(config.checkpointdir) / "last_optimizer.bin")
-
         if config.deepspeed_config.zero_optimization.stage == 3:
             model.save_checkpoint(config.checkpointdir, tag="last_model")
+        else:
+            # weights on each rank are placeholders in deepspeed stage 3
+            # and hence cannot be saved directly with torch.save
+            # instead convert with convert_zero_checkpoint (see checkpoint.py)
+            torch.save(model.state_dict(), Path(config.checkpointdir) / "last_model.bin")
+            torch.save(opt.state_dict(), Path(config.checkpointdir) / "last_optimizer.bin")
 
         checkpoint = Checkpoint.from_directory(config.checkpointdir)
         report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)

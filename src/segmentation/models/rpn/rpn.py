@@ -54,6 +54,7 @@ def permute_and_flatten(layer: Tensor, N: int, A: int, C: int, D: int, H: int, W
 def concat_box_prediction_layers(box_cls: List[Tensor], box_regression: List[Tensor]) -> Tuple[Tensor, Tensor]:
     box_cls_flattened = []
     box_regression_flattened = []
+    
     # for each feature level, permute the outputs to make them be in the
     # same format as the labels. Note that the labels are computed for
     # all feature levels concatenated, so we keep the same representation
@@ -331,7 +332,7 @@ class RegionProposalNetwork(torch.nn.Module):
         features = list(features.values())
 
         # NOTE: Number of objectness preds. only matches nr. of anchors
-        # if rpn_head is initialized correctly
+        #       if rpn_head is initialized correctly
         objectness, pred_bbox_deltas = self.head(features) # classification scores & box diff (RPNHead preds)
         anchors = self.anchor_generator(images, features) # generate centers and create boxes of diff aspect ratios and scales
 

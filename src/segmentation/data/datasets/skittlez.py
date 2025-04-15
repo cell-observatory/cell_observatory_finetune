@@ -37,6 +37,7 @@ class Skittlez_Database:
                  dtype = np.uint16,
                  with_zarr = False,
                  with_tiff = True,
+                 training: bool = True
                  ):
         """
         Skittlez Dataset.
@@ -71,6 +72,7 @@ class Skittlez_Database:
         os.makedirs(self.train_db_savedir, exist_ok=True)
 
         self.transforms = transforms
+        self.training = "train" if training else "test"
 
         # instantiate fields that will be populated later for bookkeeping
         self.con: Connection = None
@@ -136,17 +138,17 @@ class Skittlez_Database:
             self.con = None
             self.cur = None
 
-    @staticmethod
-    def _query_db(db_path: Path) -> pd.DataFrame:
+
+    def _query_db(self, db_path: Path) -> pd.DataFrame:
         # Connect to SQLite database
         conn = sqlite3.connect(str(db_path))
 
         query = """
             SELECT file_path, filename, mask_type_synthetic_data, experiment_name, fish_name, roi, tile
             FROM annotations 
-            WHERE train_val_test = 'train' AND cp_grade = '1' AND testing = '1' 
+            WHERE train_val_test = ? AND cp_grade = '1' AND testing = '1' 
         """
-        metadata = pd.read_sql_query(query, conn)
+        metadata = pd.read_sql_query(query, conn, params=[self.training])
 
         conn.close()
         return metadata
@@ -233,7 +235,7 @@ class Skittlez_Database:
 
 
     def _init_local_db(self):
-        local_db_name = os.path.join(self.train_db_savedir, repr(self.batch_config) + ".db")
+        local_db_name = os.path.join(self.train_db_savedir, self.training + "_" + repr(self.batch_config) + ".db")
         self.local_db_name = local_db_name
 
         # if force creating db, we need to delete the existing one first

@@ -1,5 +1,6 @@
 _target_: segmentation.models.mask_rcnn.MaskRCNN
 
+
 channels: ${datasets.channel_in}
 image_mean: ${datasets.dataset_mean}
 image_std: ${datasets.dataset_std}
@@ -11,15 +12,18 @@ max_size: 256
 rpn_anchor_generator:
   _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
   sizes:
-    - [32, 64, 128]
+    - [32]
+    - [64]
   aspect_ratios:
     - [0.5, 1.0, 2.0]
+    - [0.5, 1.0, 2.0]
   aspect_ratios_z:
+    - [0.5, 1.0, 2.0]
     - [0.5, 1.0, 2.0]
 rpn_head: 
   _target_: segmentation.models.rpn.rpn_head.RPNHead
   in_channels: ${backbone_out_channels} 
-  num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  num_anchors: 18 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
   # num_anchors: rpn_anchor_generator.num_anchors_per_location()[0]
 rpn_pre_nms_top_n_train: 2000 # NOTE: Don't be confused with these number when debugging, it's per image not per batch
 rpn_pre_nms_top_n_test: 1000 #100 # TODO: Normally 1000, need to update cuda kernels for that to work
@@ -35,7 +39,7 @@ rpn_score_thresh: 0.0 # filter out low scoring objects
 # Box config
 box_roi_pool:
   _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
-  featmap_names: ["0"]
+  featmap_names: ${output_features} # for VitDet: adapt accordingly
   output_size: 7
   sampling_ratio: 2
 box_head: 
@@ -63,7 +67,7 @@ bbox_reg_weights: null # weights for encoding/decoding of bboxes (see det_utils)
 # Mask config
 mask_roi_pool:
   _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
-  featmap_names: ["0"]
+  featmap_names: ${output_features} # for VitDet: adapt accordingly
   output_size: 14 # usually 14 # ROI pooling output size
   sampling_ratio: 2 # grid subsampling 
 mask_head: 
