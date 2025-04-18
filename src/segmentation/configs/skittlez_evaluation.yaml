@@ -11,10 +11,12 @@ backbone_out_channels: 512 # C5 = 2048
 backbone_target: segmentation.models.backbones.resnet.resnet50
 
 eval_type: skittlez_eval
+data_dir: /clusterfs/nvme/segment_4d/test_4
 results_dir: /clusterfs/nvme/segment_4d/test_5/evaluation
-train_db_savedir: /clusterfs/nvme/segment_4d/test_5/db
 
-checkpointdir: /clusterfs/nvme/segment_4d/test_5/checkpoints
+train_db_savedir: ${data_dir}/db
+checkpointdir: /clusterfs/nvme/segment_4d/test_4/checkpoints
+# checkpointdir: ${data_dir}/checkpoints
 ckpt_suffix: "best" # generally, "last" or "best"
 
 # evaluator parameters

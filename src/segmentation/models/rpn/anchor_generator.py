@@ -196,5 +196,9 @@ class AnchorGenerator(nn.Module):
             anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
             anchors.append(anchors_in_image)
 
+        # for anchor in anchors_in_image[0]: 
+        #     print(anchor)
+        # raise ValueError("DEBUG anchors")
+
         anchors = [torch.cat(anchors_per_image) for anchors_per_image in anchors] # over images & feature maps
         return anchors

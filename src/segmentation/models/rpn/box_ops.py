@@ -150,7 +150,7 @@ def nms(boxes: Tensor, scores: Tensor, iou_threshold: float) -> Tensor:
     to the behavior of argsort in PyTorch when repeated values are present.
 
     Args:
-        boxes (Tensor[N, 4])): boxes to perform NMS on. They
+        boxes (Tensor[N, 6])): boxes to perform NMS on. They
             are expected to be in ``(x1, y1, z1, x2, y2, z2)`` format with ``0 <= x1 < x2`` and
             ``0 <= y1 < y2`` and ``0 <= z1 < z2.
         scores (Tensor[N]): scores for each one of the boxes
@@ -159,15 +159,14 @@ def nms(boxes: Tensor, scores: Tensor, iou_threshold: float) -> Tensor:
     Returns:
         Tensor: int64 tensor with the indices of the elements that have been kept
         by NMS, sorted in decreasing order of scores
-    """
-    # if not torch.jit.is_scripting() and not torch.jit.is_tracing():
-        # _log_api_usage_once(nms)
-    # _assert_has_ops()
-    
+    """    
     device = boxes.device
     boxes = boxes.to("cuda")
     scores = scores.to("cuda")
-    
+
+    # need to recast boxes to float32
+    # for IOU calculation in 3D NMS
+    boxes = boxes.to(torch.float32) 
     keep = nms_3d(boxes, scores, iou_threshold)
     return keep.to(device)
 

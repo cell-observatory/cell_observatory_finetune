@@ -68,6 +68,19 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
                 pred_masks.append(np.zeros_like(target_mask))
             gt_masks.append(merge_instance_masks_binary(target_mask).cpu().numpy())
 
+            # import skimage
+            # from segmentation.utils.plot import plot_boxes
+            # gt_box = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
+            # t_box = [outputs[0]["boxes"][i].cpu().numpy() for i in range(len(outputs[0]["boxes"]))]
+            # print("DEBUG GT BOXES:", gt_box[:1])
+            # print("DEBUG PRED BOXES:", t_box[:1])
+            # plot_boxes(gt_box, image_shape= pred_masks[0].shape, save_path="/clusterfs/nvme/segment_4d/test_5/all_gt_test_box.tif")
+            # plot_boxes(gt_box, sample_indices=[0], image_shape= pred_masks[0].shape, sample_num=5, save_path="/clusterfs/nvme/segment_4d/test_5/gt_test_box.tif")
+            # plot_boxes(t_box, sample_indices=[0], image_shape=pred_masks[0].shape, sample_num=5, save_path="/clusterfs/nvme/segment_4d/test_5/pred_test_box.tif")
+            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/pred_test.tif", pred_masks[0].astype(np.uint16))
+            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/gt_test.tif", gt_masks[0])
+            # raise ValueError("Debugging maskrcnn_inference") 
+
         for metric_name, metric in self.metrics.items():
             result = metric(pred_masks, gt_masks)
             # TODO: more generic way to handle different metric results

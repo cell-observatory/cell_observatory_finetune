@@ -79,7 +79,9 @@ def main(cfg: DictConfig):
         init(
             address=f"{address}:{port}",
             log_to_driver=True,
-            runtime_env={"NCCL_DEBUG": "INFO", "NCCL_DEBUG_SUBSYS": "GRAPH", "NCCL_P2P_LEVEL": "NVL"}
+            runtime_env={"NCCL_DEBUG": "INFO", "NCCL_DEBUG_SUBSYS": "GRAPH", "NCCL_P2P_LEVEL": "NVL"},
+            # N minutes = N * 60 * 1000 ms
+            _system_config={"worker_heartbeat_timeout_ms": cfg.max_worker_heartbeat_timeout * 60 * 1000},
         )
     except KeyError:
         logger.info("Starting a new local Ray cluster")

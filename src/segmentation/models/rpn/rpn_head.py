@@ -59,6 +59,8 @@ class RPNHead(nn.Module):
             convs.append(Conv3dNormActivation(in_channels, in_channels, kernel_size=3, norm_layer=None))
         self.conv = nn.Sequential(*convs)
         self.cls_logits = nn.Conv3d(in_channels, num_anchors, kernel_size=1, stride=1)
+        # since the anchor positions are given, bbox_pred learns to shift each bbox 
+        # based on feature map
         self.bbox_pred = nn.Conv3d(in_channels, num_anchors * 6, kernel_size=1, stride=1)
 
         for layer in self.modules():

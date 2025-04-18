@@ -402,13 +402,16 @@ class RoIHeads(nn.Module):
         gt_boxes = [t["boxes"].to(dtype) for t in targets]
         gt_labels = [t["labels"] for t in targets]
 
-        # append ground-truth bboxes to propos
+        # append ground-truth bboxes to propos (on per image level, proposals and gt_boxes
+        # need to match 1-1)
         proposals = self.add_gt_proposals(proposals, gt_boxes)
 
         # get matching gt indices for each proposal
         matched_idxs, labels = self.assign_targets_to_proposals(proposals, gt_boxes, gt_labels)
 
         # sample a fixed proportion of positive-negative proposals
+        # -1 values are ignored, 0 are considered as negatives 
+        # and > 0 as positives
         sampled_inds = self.subsample(labels)
 
         matched_gt_boxes = []
@@ -475,6 +478,9 @@ class RoIHeads(nn.Module):
             boxes, scores, labels = boxes[keep], scores[keep], labels[keep]
 
             # non-maximum suppression, independently done per class
+            # NOTE: boxes, scores, labels are all flattened 1D tensors
+            # hence a given ROI can in theory have multiple boxes, scores and labels
+            # that are retained after NMS 
             keep = box_ops.batched_nms(boxes, scores, labels, self.nms_thresh)
             # keep only topk scoring predictions
             keep = keep[: self.detections_per_img]

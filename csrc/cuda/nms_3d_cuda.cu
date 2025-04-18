@@ -125,6 +125,8 @@ at::Tensor nms_3d_cuda(const at::Tensor boxes, float nms_overlap_thresh) {
             (unsigned long long*)mask.data<int64_t>());
       });
 
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+
   at::Tensor mask_cpu = mask.to(at::kCPU);
   unsigned long long* mask_host = (unsigned long long*)mask_cpu.data<int64_t>();
 

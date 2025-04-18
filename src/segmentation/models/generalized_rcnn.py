@@ -99,7 +99,7 @@ class GeneralizedRCNN(nn.Module):
             )
             original_image_sizes.append((val[0], val[1], val[2]))
 
-        # normalize, resize, pad and batch images
+        # normalize (optional), resize (optional), pad and batch images
         images, targets = self.transform(images, targets)
 
         # Check for degenerate boxes (NOTE: MOVED TO PREPROCESSING TO PREVENT CUDA ERROR)
@@ -128,6 +128,17 @@ class GeneralizedRCNN(nn.Module):
         proposals, proposal_losses = self.rpn(images, features, targets)
         detections, detector_losses = self.roi_heads(features, proposals, images.image_sizes, targets)
         
+        # import skimage
+        # import numpy as np
+        # from segmentation.utils.plot import plot_boxes
+        # from ray.train import get_context
+        # if get_context().get_world_rank() == 0:
+        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_train.tif", targets[0]["masks"][0].cpu().numpy())
+        #     box_test = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
+        #     plot_boxes(box_test, sample_indices=[0], image_shape=images.tensors.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/bx_after_full_pred.tif")
+        # # raise ValueError("DEBUG")
+        # # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_input.tif", images.tensors[0,0].cpu().numpy())
+
         # if testing, resize boxes and masks to original image size
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)  # type: ignore[operator]
 

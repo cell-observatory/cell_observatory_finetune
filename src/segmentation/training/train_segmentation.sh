@@ -3,8 +3,8 @@
 #SBATCH --partition=abc_a100
 #SBATCH --account=co_abc
 #SBATCH --job-name=train_seg
-#SBATCH --output=/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/logs/train_seg_mn.log
-#SBATCH --error=/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/logs/train_seg_mn.err
+#SBATCH --output=/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/logs/train_seg_%A_%a.log
+#SBATCH --error=/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/logs/train_seg_%A_%a.err
 #SBATCH --gres=gpu:a100:4
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-cpu=31000

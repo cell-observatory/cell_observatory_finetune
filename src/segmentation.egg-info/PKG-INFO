@@ -3,6 +3,7 @@ Name: segmentation
 Version: 0.1.0
 Summary: 4D & 5D segmentation pipelines with custom CUDA ops
 Author-email: Hugo Hamilton <hph@berkeley.edu>
+License-File: LICENSE
 Requires-Dist: torch==2.4.1+cu124
 Requires-Dist: torchvision==0.19.1+cu124
 Requires-Dist: hydra-core
@@ -25,3 +26,4 @@ Requires-Dist: timm==1.0.15
 Requires-Dist: torchinfo
 Requires-Dist: tqdm
 Requires-Dist: ujson
+Dynamic: license-file

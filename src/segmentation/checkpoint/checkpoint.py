@@ -42,12 +42,13 @@ def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffi
             raise ValueError(f"Unsupported dtype '{dtype}'. Valid: {list(_DTYPES)}")
 
     if getattr(config.deepspeed_config.zero_optimization, "stage", None) == 3:
-        # load_checkpointreturns a tuple (load_dir, client_states) with load_dir
+        # load_checkpoint returns a tuple (load_dir, client_states) with load_dir
         # not being None if the checkpoint was loaded successfully
-        load_path, _ = model_engine.load_checkpoint(checkpointdir)
+        load_path, _ = model_engine.load_checkpoint(checkpointdir, tag=f"{ckpt_suffix}_model")
+        logger.info(f"DeepSpeed.load_checkpoint returned load_path={load_path!r}")
         if load_path is None:
             raise RuntimeError(f"Failed to load DeepSpeed checkpoint from {checkpointdir}")
-        if target_dtype is not None:
+        if dtype is not None:
             model_engine.module.to(target_dtype)
         return 
     
@@ -56,10 +57,12 @@ def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffi
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
     model_state = torch.load(Path(checkpointdir) / f"{ckpt_suffix}_model.bin", map_location="cpu")
-    model_state = _strip_prefix(model_state, prefix="module.")
+    # only strip prefix from saved model if current model is not wrapped in a module
+    if not any(key.startswith("module.") for key in model_engine.state_dict().keys()):
+        model_state = _strip_prefix(model_state, prefix="module.")
     model_engine.load_state_dict(model_state)
 
-    if target_dtype is not None:
+    if dtype is not None:
         module = getattr(model_engine, "module", model_engine)
         module.to(target_dtype)
     

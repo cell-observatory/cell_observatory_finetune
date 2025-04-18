@@ -20,6 +20,8 @@ from tensorstore import TensorStore
 
 from segmentation.data.data_utils import index_mapper, middle_out_crop_start_index, ColorMode, DataConfig
 
+import torch.distributed as dist
+
 
 class Skittlez_Database:
     """
@@ -37,7 +39,8 @@ class Skittlez_Database:
                  dtype = np.uint16,
                  with_zarr = False,
                  with_tiff = True,
-                 training: bool = True
+                 training: bool = True,
+                 distributed: bool = True,
                  ):
         """
         Skittlez Dataset.
@@ -131,7 +134,10 @@ class Skittlez_Database:
             raise ValueError("Invalid file format. Only zarr and tiff are supported.")
 
         # A local sqlite3 database is created with tables to hold index mapping and slicing information.
-        self._init_local_db()
+        if distributed:
+            self._init_local_db_distributed()
+        else:
+            self._init_local_db()
 
         if self.con:
             self.con.close()
@@ -234,6 +240,8 @@ class Skittlez_Database:
         self.cur.execute(cmd)
 
 
+    # TODO: join distributed and non-distributed code to prevent
+    #       code duplication
     def _init_local_db(self):
         local_db_name = os.path.join(self.train_db_savedir, self.training + "_" + repr(self.batch_config) + ".db")
         self.local_db_name = local_db_name
@@ -246,7 +254,7 @@ class Skittlez_Database:
         create_db = not os.path.isfile(local_db_name)
 
         logging.info(f"[SkittlesDatabase] Local db file {local_db_name} exists: {not create_db}")
-        
+
         self.con = sqlite3.connect(local_db_name)
         self.cur = self.con.cursor()
 
@@ -298,6 +306,88 @@ class Skittlez_Database:
         self.length = res.fetchone()[0]
 
         logging.info(f"[SkittlesDatabase] Found {self.length} crops in the database.")
+
+
+    def _init_local_db_distributed(self):
+        local_db_name = os.path.join(self.train_db_savedir, self.training + "_" + repr(self.batch_config) + ".db")
+        self.local_db_name = local_db_name
+
+        # if force creating db, we need to delete the existing one first
+        if self.force_create_db and os.path.isfile(local_db_name):
+            os.remove(local_db_name)
+
+        # check db exists before .connect since it would create the db if it didn't
+        create_db = not os.path.isfile(local_db_name)
+
+        logging.info(f"[SkittlesDatabase] Local db file {local_db_name} exists: {not create_db}")
+
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+
+        if rank == 0:
+            self.con = sqlite3.connect(local_db_name)
+            self.cur = self.con.cursor()
+
+            if create_db or self.force_create_db:
+                logging.info(f"[SkittlesDatabase] Creating local db file {local_db_name}...")
+
+                self._create_local_db_tables()
+
+                for file_path, label_path in tqdm(zip(self.file_paths, self.label_files), desc="Updating DB with target info...", total=len(self.file_paths)):
+                    label_item = tifffile.memmap(label_path)
+                    data_item_shape = tifffile.memmap(file_path).shape
+                    indices = index_mapper(data_item_shape, self.batch_config)
+
+                    if indices is None:
+                        continue
+
+                    y0, x0 = middle_out_crop_start_index(data_item_shape, self.batch_config)
+
+                    valid_indices, bboxes, mask_ids = self.indices_to_instances(indices, y0, x0, label_item)
+
+                    for idx, bbox_list, mask_id_list in zip(valid_indices, bboxes, mask_ids):
+                        # store_index_map db update
+                        z, y, x, c = idx
+                        cmd = "INSERT INTO store_index_map(file_path, label_path, z, y, x, c) VALUES (?, ?, ?, ?, ?, ?)"
+                        self.cur.execute(cmd,(str(file_path), str(label_path), int(z), int(y), int(x), int(c)))
+                        crop_id = self.cur.lastrowid  # get rowid of inserted crop
+
+                        # bboxes db update
+                        for bbox in bbox_list:
+                            x1, y1, z1, x2, y2, z2 = bbox
+                            cmd = "INSERT INTO bboxes(crop_id, x1, y1, z1, x2, y2, z2) VALUES (?, ?, ?, ?, ?, ?, ?)"
+                            self.cur.execute(cmd, (int(crop_id), int(x1), int(y1), int(z1), int(x2), int(y2), int(z2)))
+
+                        # masks db update
+                        for mask_id in mask_id_list:
+                            cmd = "INSERT INTO masks(crop_id, mask_id) VALUES (?, ?)"
+                            self.cur.execute(cmd, (int(crop_id), int(mask_id)))
+
+                        # middle_out_table db update
+                        self.cur.execute(
+                            "INSERT INTO middle_out_table(crop_id, y0, x0) VALUES (?, ?, ?)",
+                            (int(crop_id), int(y0), int(x0))
+                        )
+                # need to commit the changes to the database for workers in dataloader to see them        
+                self.con.commit()
+
+            # update dataset length
+            res = self.cur.execute("SELECT COUNT(*) FROM store_index_map")
+            self.length = res.fetchone()[0]
+
+            logging.info(f"PROCESS {rank}: [SkittlesDatabase] Found {self.length} crops in the database.")
+
+        # all processes wait here until db is fully written
+        # only process 0 will create the db to prevent race conditions
+        if world_size > 1:
+            dist.barrier()
+        
+        if rank != 0:
+            self.con = sqlite3.connect(local_db_name)
+            self.cur = self.con.cursor()
+            res = self.cur.execute("SELECT COUNT(*) FROM store_index_map")
+            self.length = res.fetchone()[0]
+            logging.info(f"PROCESS {rank}: [SkittlesDatabase] Found {self.length} crops in the database.")
 
     # TODO: A band-aid solution. Redo once dataset is updated. Trainig is bottlenecked by dataloading 
     #       for larger batch size currently.
@@ -404,9 +494,25 @@ class Skittlez_Database:
                       "labels": torch.tensor(labels, dtype=torch.int64),
                       "masks": torch.tensor(masks, dtype=torch.uint8)}
         
+        # import skimage
+        # from segmentation.utils.plot import plot_boxes
+        # from ray.train import get_context
+        # if get_context().get_world_rank() == 0:
+        #     print(f"SIZE OF IMAGE: {data_item.shape}")
+        #     box_dl = [label_item["boxes"][i].cpu().numpy() for i in range(len(label_item["boxes"]))]
+        #     plot_boxes(box_dl, sample_indices=[0], image_shape=data_item.shape[1:], save_path="/clusterfs/nvme/segment_4d/test_5/box_b_transform.tif")        
+        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_b_transform.tif", label_item["masks"][0].cpu().numpy())
+        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_b_transform.tif", data_item[0].cpu().numpy())
+        
         if self.transforms:
             item = self.transforms(data_item, label_item)
-        
+
+        # if get_context().get_world_rank() == 0:
+        #     box_dl = [label_item["boxes"][i].cpu().numpy() for i in range(len(label_item["boxes"]))]
+        #     plot_boxes(box_dl, sample_indices=[0], image_shape=data_item.shape[1:], save_path="/clusterfs/nvme/segment_4d/test_5/box_after_transform.tif")        
+        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_transform.tif", label_item["masks"][0].cpu().numpy())
+        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_after_transform.tif", data_item[0].cpu().numpy())
+
         return item 
 
     def mask_ids_to_masks(self, mask_ids, label_item):

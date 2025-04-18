@@ -21,8 +21,9 @@ inputs:
 
 database:
   _target_: segmentation.data.datasets.skittlez.Skittlez_Database
+  distributed: true # true # set to true for distributed training (Ray or DDP)
   db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
-  train_db_savedir: ${...train_db_savedir} # defer interpolation to eval config
+  train_db_savedir: ${...train_db_savedir} # defer interpolation to main config
   selection_criteria: {"volume" : 8000}  # Minimum volume in pixels to accept instance
   force_create_db: false
   clean_up_db: false
@@ -32,8 +33,8 @@ database:
   batch_config:
     _target_: segmentation.data.data_utils.DataConfig
     z: 128 #128
-    y: 256
-    x: 256
+    y: 128
+    x: 128
     c: 3
     color_mode: MATCH  
 

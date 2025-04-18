@@ -333,8 +333,26 @@ class RegionProposalNetwork(torch.nn.Module):
 
         # NOTE: Number of objectness preds. only matches nr. of anchors
         #       if rpn_head is initialized correctly
+        #       objectness: (class, BS, num_anchors, D, H, W)
         objectness, pred_bbox_deltas = self.head(features) # classification scores & box diff (RPNHead preds)
         anchors = self.anchor_generator(images, features) # generate centers and create boxes of diff aspect ratios and scales
+
+        # DEBUG1:
+        # from segmentation.utils.plot import plot_boxes
+        # anchors_0 = anchors[0]
+        # print(anchors[0].shape)
+        # print(anchors_0[:5])
+        # plot_boxes(list(anchors_0.cpu().numpy()), sample_indices=[0,1,2,3,4], image_shape=images.tensors.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/test_anchors.tif")
+        # print(f"anchors_0 shape: {anchors_0.shape}")
+        # raise ValueError("DEBUG: anchors_0 shape")
+        # print("NMS THRESHOLD: ", self.nms_thresh)
+
+        # DEBUG2:
+        # import skimage
+        # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_objectness.tif", objectness[0][0][0].cpu().numpy())
+        # print(f"Length of objectness: {len(objectness)}")
+        # print("objectness shape: ", objectness[0].shape)
+        # raise ValueError("DEBUG: objectness shape")
 
         num_images = len(anchors)
 
@@ -342,6 +360,14 @@ class RegionProposalNetwork(torch.nn.Module):
         num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness] 
         num_anchors_per_level = [s[0] * s[1] * s[2] * s[3] for s in num_anchors_per_level_shape_tensors] # total anchors = anchors per level * D*H*W
         objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness, pred_bbox_deltas)
+
+        # DEBUG 3:
+        # expected shape: (FxNxAxDxHxW, C) for F feature levels, N images,
+        # A anchors per level, D*H*W spatial dimensions
+        # print(f"objectness shape: {objectness.shape}")
+        # print(f"pred_bbox_deltas shape: {pred_bbox_deltas.shape}")
+        # print(f"anchors shape: {anchors[0].shape}")
+        # raise ValueError("DEBUG: objectness shape")
         
         # apply pred_bbox_deltas (predicted diff in x,y,z to shift anchors towards gt boxes) to anchors
         # to obtain the decoded proposals. Note that we detach the deltas because Faster R-CNN

@@ -17,9 +17,10 @@ backbone_target: segmentation.models.backbones.resnet.resnet50 # options: resnet
 backbone_out_channels: 512 # C5 = 2048
 
 # Paths
-outdir: /clusterfs/nvme/segment_4d/test_4
+outdir: /clusterfs/nvme/segment_4d/test_6
 logdir: ${outdir}/logs
-checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: we look for checkpoints in the outdir but load via this directory
+load_checkpointdir: null # /clusterfs/nvme/segment_4d/test_4/checkpoints # null # specify if we want to load a checkpoint from a previous run that is not latest local run
+checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: specify where to save the checkpoints
 train_db_savedir: ${outdir}/db
 db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
 
@@ -55,6 +56,7 @@ workers: 1 # number of worker nodes
 gpu_workers: 4 #4 # number of gpus per worker
 cpu_workers: 16 #16 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
 distributed_sampler: true # use distributed sampler for training (standard for Ray/DDP)
+max_worker_heartbeat_timeout: 2 # in minutes (to prevent indefinite hang if one process fails)
 
 # DeepSpeed config (Hydra will pass it to training loop)
 deepspeed_config:
@@ -70,7 +72,7 @@ deepspeed_config:
     enabled: false 
     auto_cast: false
   zero_optimization:
-    stage: 3 # full ZeRO-3 with parameter + gradient + optimizer partitioning
+    stage: 0 # full ZeRO-3 with parameter + gradient + optimizer partitioning
     reduce_bucket_size: auto # controls how many elements are grouped before being reduced
     reduce_scatter: true # fused reduce + scatter ops
     contiguous_gradients: true # gradients allocated in a contiguous memory block

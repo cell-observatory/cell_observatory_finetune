@@ -168,7 +168,7 @@ def merge_instance_masks_binary(masks: torch.Tensor) -> torch.Tensor:
     return merged
 
 
-def merge_instance_masks_logits(mask_probs: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
+def merge_instance_masks_logits(mask_probs: torch.Tensor, threshold: float = 0.0) -> torch.Tensor:
     masked_probs = torch.where(mask_probs > threshold, mask_probs, torch.tensor(0.0, device=mask_probs.device, dtype=mask_probs.dtype))
     max_vals, max_ids = masked_probs.max(dim=0) # get instance id with max prob for each voxel
     return torch.where(max_vals > 0, max_ids + 1, torch.tensor(0, device=mask_probs.device, dtype=max_ids.dtype))

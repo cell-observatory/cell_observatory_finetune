@@ -1,3 +1,5 @@
+from typing import Dict
+
 import torch
 import torch.nn.functional as F
 
@@ -47,7 +49,19 @@ class Resize:
             targets['boxes'] = boxes * scale
 
         return image, targets
+    
+    
+class RandomSampleInstances:
+    def __init__(self, max_instances: int):
+        self.max_instances = max_instances
 
+    def __call__(self, image: torch.Tensor, targets: Dict[str, torch.Tensor]):
+        N = targets["boxes"].shape[0]
+        if N > self.max_instances:
+            idx = torch.randperm(N)[: self.max_instances]
+            targets['boxes'] = targets['boxes'][idx]
+            targets['masks'] = targets['masks'][idx]
+        return image, targets
 
 class Compose:
     def __init__(self, transforms):
