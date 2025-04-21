@@ -6,10 +6,12 @@ defaults:
 _target_: segmentation.models.backbones.fpn.BackboneWithFPN
 # NOTE: By default FPN adds an extra LastLevelMaxPool layer to the last feature map
 # Hence, the output feature maps will have len(return_layers) + 1 maps
-return_layers: {"p0": "p0"} # , "p1": "p1", "p2": "p2" 
-in_channels_list: [96] # , 192, 384 , 768 # matches embed_dim * stage sequence
+# return layers specifies which feature maps to run through the FPN
+return_layers: {"p0": "p0", "p1": "p1"} # , "p2": "p2" # , "p1": "p1", "p2": "p2" # 2x downsample per return layer used + LastLevelMaxPool
+in_channels_list: [96, 192] # , 192, 384 , 768 # matches embed_dim * stage sequence
 out_channels: ${backbone_out_channels}
 norm_layer: null
+# extra_blocks # NOTE: FPN adds an extra LastLevelMaxPool layer to the last feature map if none given
 
 backbone:
   # Hiera
@@ -21,8 +23,9 @@ backbone:
   num_heads: 1  # initial number of heads
   num_classes: 2
 
-  stages: [2, 3, 16, 3]
-  q_pool: 3 # number of q_pool stages
+  # patch_embed -> stage 0 => 64x64x64, stage 1 => 32x32x32, stage 2 => 16x16x16 due to q-pooling 
+  stages: [2, 3, 16] # , 3
+  q_pool: 2 # 3 # number of q_pool stages
   q_stride: [2, 2, 2]
   mask_unit_size: [8, 8, 8]  # must divide q_stride ** (#stages-1)
   # mask_unit_attn: which stages use mask unit attention?

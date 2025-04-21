@@ -31,48 +31,48 @@ def main(cfg: DictConfig):
     model = model.cuda()
 
     rpn = model.rpn
-    # backbone = model.backbone
-    # transform = model.transform
+    backbone = model.backbone
+    transform = model.transform
 
-    # datloader = gather_dataset(cfg)
-    # image, targets = next(iter(datloader))
+    datloader = gather_dataset(cfg)
+    image, targets = next(iter(datloader))
 
-    # image = image.cuda().float()  
-    # targets = [{k: v.cuda().float() for k, v in t.items()} for t in targets] 
+    image = image.cuda().float()  
+    targets = [{k: v.cuda().float() for k, v in t.items()} for t in targets] 
     
-    # image, targets = transform(image, targets)
-    # features = backbone(image.tensors)
-    # if isinstance(features, torch.Tensor):
-    #         features = OrderedDict([("0", features)])
+    image, targets = transform(image, targets)
+    features = backbone(image.tensors)
+    if isinstance(features, torch.Tensor):
+            features = OrderedDict([("0", features)])
 
-    # features = list(features.values())
-    # objectness, pred_bbox_deltas = rpn.head(features) 
-    # anchors = rpn.anchor_generator(image, features) 
+    features = list(features.values())
+    objectness, pred_bbox_deltas = rpn.head(features) 
+    anchors = rpn.anchor_generator(image, features) 
 
-    # num_images = len(anchors)
+    num_images = len(anchors)
 
-    # num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness] 
-    # num_anchors_per_level = [s[0] * s[1] * s[2] * s[3] for s in num_anchors_per_level_shape_tensors]
-    # objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness, pred_bbox_deltas)
+    num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness] 
+    num_anchors_per_level = [s[0] * s[1] * s[2] * s[3] for s in num_anchors_per_level_shape_tensors]
+    objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness, pred_bbox_deltas)
 
-    # proposals = rpn.box_coder.decode(pred_bbox_deltas.detach(), anchors)
-    # proposals = proposals.view(num_images, -1, 6)
+    proposals = rpn.box_coder.decode(pred_bbox_deltas.detach(), anchors)
+    proposals = proposals.view(num_images, -1, 6)
     
-    # boxes, scores = rpn.filter_proposals(proposals, objectness, image.image_sizes, num_anchors_per_level)
+    boxes, scores = rpn.filter_proposals(proposals, objectness, image.image_sizes, num_anchors_per_level)
    
-    # print(f"Boxes shape: {boxes[0].shape}")
-    # print(f"Scores shape: {scores[0].shape}")
+    print(f"Boxes shape: {boxes[0].shape}")
+    print(f"Scores shape: {scores[0].shape}")
 
-    # # plot top 5 boxes by confidence score to test rpn outputs
-    # # together with the image
-    # sorted_indices = torch.argsort(scores[0], descending=True)
-    # boxes = boxes[0][sorted_indices]
-    # plot_boxes(boxes=boxes.cpu().numpy(), 
-    #            sample_indices=[0,1,2,3,4,5], 
-    #            image_shape=image.image_sizes[0],
-    #            save_path="/clusterfs/nvme/segment_4d/test_5/test_rpn_boxes.tif")  
+    # plot top 5 boxes by confidence score to test rpn outputs
+    # together with the image
+    sorted_indices = torch.argsort(scores[0], descending=True)
+    boxes = boxes[0][sorted_indices]
+    plot_boxes(boxes=boxes.cpu().numpy(), 
+               sample_indices=[0,1,2,3,4,5], 
+               image_shape=image.image_sizes[0],
+               save_path="/clusterfs/nvme/segment_4d/test_5/test_rpn_boxes.tif")  
 
-    # io.imsave("/clusterfs/nvme/segment_4d/test_5/test_rpn_im.tif", image.tensors[0][0].cpu().numpy())
+    io.imsave("/clusterfs/nvme/segment_4d/test_5/test_rpn_im.tif", image.tensors[0][0].cpu().numpy())
 
     # TODO:
     # test filter proposals function separately from rpn

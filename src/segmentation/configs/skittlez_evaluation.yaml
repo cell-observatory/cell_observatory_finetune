@@ -15,7 +15,7 @@ data_dir: /clusterfs/nvme/segment_4d/test_4
 results_dir: /clusterfs/nvme/segment_4d/test_5/evaluation
 
 train_db_savedir: ${data_dir}/db
-checkpointdir: /clusterfs/nvme/segment_4d/test_4/checkpoints
+checkpointdir: /clusterfs/nvme/segment_4d/test_4/checkpoints # test_5/checkpoints best so far
 # checkpointdir: ${data_dir}/checkpoints
 ckpt_suffix: "best" # generally, "last" or "best"
 

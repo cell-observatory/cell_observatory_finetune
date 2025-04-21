@@ -28,6 +28,7 @@ from ray.train import Checkpoint, report, get_context, get_checkpoint
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
+from segmentation.utils.comm import inference_context
 from segmentation.data.gather_dataset import gather_dataset
 from segmentation.checkpoint.checkpoint import load_checkpoint
 from segmentation.training.registry import build_dependency_graph_and_instantiate
@@ -49,6 +50,8 @@ dtypes = {
 def is_main_process():
     return get_context().get_world_rank() == 0
 
+def process_rank():
+    return get_context().get_world_rank()
 
 def summarize_model(model: nn.Module, inputs: tuple, batch_size: int, logdir: Path):
     model_logbook = {}
@@ -123,8 +126,9 @@ def restore_model(config: DictConfig):
         checkpoints = [
             d for d in outdir.rglob('checkpoint*')
             if d.is_dir() and (
-                (d / 'best_model' / 'zero_pp_rank_0_mp_rank_00_model_states.pt').exists() or
-                (d / 'best_model.bin').exists()
+                any((d/'best_model').glob('*model_states.pt'))
+                or any((d/'latest_model').glob('*model_states.pt'))
+                or (d/'best_model.bin').exists()
             )
         ]
         checkpoints.sort(key=os.path.getctime)
@@ -139,7 +143,9 @@ def restore_model(config: DictConfig):
         starting_epoch = training_history.index.values[-1]
 
         overall_step = 0
-        best_loss = training_history.loc[starting_epoch, 'loss']
+        
+        loss_record = training_history[f"val_{config.metrics.ckpt_loss_key}"]
+        best_loss = loss_record.min()
         logger.info(f"Restoring from {latest_checkpoint} epoch {starting_epoch} with loss {best_loss}")
 
         starting_epoch += 1
@@ -324,11 +330,13 @@ def supervised(config: DictConfig):
             config=config,
             logger=logger,
             latest_checkpoint=latest_checkpoint,
+            # distributed=config.distributed_sampler,
         )
 
     evaluator = instantiate(config.metrics)
     
     loss_nans = 0
+    oom_count = 0
     ray_context = get_context()
     with torch.autograd.set_detect_anomaly(True, check_nan=False):
         with torch.profiler.profile(
@@ -357,21 +365,46 @@ def supervised(config: DictConfig):
                     # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_mask.tif",targets[0]["masks"][0].cpu().numpy())
                     step_time = time.time()
                     lr_value = opt.param_groups[0]["lr"]
-                    # TODO: More modular loss computation design
-                    loss_dict, outputs = model(inputs, targets)
 
-                    # TODO: Make this logic more general
-                    step_loss = sum(loss_dict.values())
+                    try:
+                        # TODO: More modular loss computation design
+                        loss_dict, outputs = model(inputs, targets)
 
-                    if torch.isnan(step_loss):
-                        loss_nans += 1
-                        logger.warning(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
-                        if loss_nans > 5:
-                            raise Exception(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
+                        # TODO: Make this logic more general
+                        step_loss = sum(loss_dict.values())
 
-                    model.backward(step_loss)
-                    model.step()
-                    scheduler.step(epoch)
+                        if torch.isnan(step_loss):
+                            loss_nans += 1
+                            logger.warning(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
+                            if loss_nans > 5:
+                                raise Exception(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
+
+                        model.backward(step_loss)
+                        model.step()
+                        scheduler.step(epoch)
+
+                        # reset oom count if no OOM
+                        # ensures that we only count consecutive OOMs
+                        oom_count = 0
+                    
+                    except RuntimeError as e:
+                        if 'out of memory' in str(e):
+                            if oom_count > config.oom_limit:
+                                raise e
+                            oom_count += 1
+                            
+                            logger.warning(f"[Rank {process_rank()} OOM] Epoch {epoch} step {step}: skipping batch")
+                            logger.warning(f"OOM count: {oom_count}")
+                            
+                            # reset internals so next batch is clean
+                            try:
+                                model.zero_grad()
+                            except:
+                                pass
+                            torch.cuda.empty_cache()
+                            continue
+                        else:
+                            raise e
 
                     cuda_util = torch.cuda.utilization()
                     cuda_vram = torch.cuda.max_memory_allocated() / (1024 ** 3)
@@ -402,8 +435,10 @@ def supervised(config: DictConfig):
 
                 mem_log = torch.cuda.memory_summary()
                 logger.info(mem_log)
-                with (Path(config.logdir) / 'memory.log').open('w') as f:
-                    f.write(str(mem_log))
+
+                if is_main_process():
+                    with (Path(config.logdir) / 'memory.log').open('w') as f:
+                        f.write(str(mem_log))
 
                 loss = loss.item() / steps_per_epoch
                 step_timer_avg = np.mean(step_times)
@@ -435,87 +470,99 @@ def supervised(config: DictConfig):
                     "eta": eta,
                 }
 
-                # if val_dataloader is not None and (epoch + 1) % config.val_interval == 0:
+                if val_dataloader is not None and (epoch + 1) % config.val_interval == 0:
                     
-                #     val_step_times = []
-                #     with inference_context(model):
-                #         with torch.no_grad():
-                #             for val_step, (inputs, targets) in enumerate(val_dataloader):
-                #                 val_step_time = time.time()
+                    val_step_times = []
+                    with inference_context(model):
+                        with torch.no_grad():
+                            for val_step, (inputs, targets) in enumerate(val_dataloader):
+                                val_step_time = time.time()
 
-                #                 # from segmentation.utils.plot import plot_boxes
-                #                 # import skimage
-                #                 # if is_main_process():
-                #                 #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_after_ld.tif", inputs[0,0].cpu().numpy())
-                #                 #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_ld.tif", targets[0]["masks"][0].cpu().numpy())
-                #                 #     box_test = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
-                #                 #     plot_boxes(box_test, sample_indices=[0], image_shape= inputs.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/bx_after_ld.tif")
-                #                 #     print(f"MAXIMUM: {inputs.max()} {inputs.min()} {inputs.mean()} {inputs.std()}")
+                                # from segmentation.utils.plot import plot_boxes
+                                # import skimage
+                                # if is_main_process():
+                                #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_after_ld.tif", inputs[0,0].cpu().numpy())
+                                #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_ld.tif", targets[0]["masks"][0].cpu().numpy())
+                                #     box_test = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
+                                #     plot_boxes(box_test, sample_indices=[0], image_shape= inputs.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/bx_after_ld.tif")
+                                #     print(f"MAXIMUM: {inputs.max()} {inputs.min()} {inputs.mean()} {inputs.std()}")
 
-                #                 loss_dict, outputs  = model(inputs, targets)
-                #                 evaluator.process(targets, outputs)
-                #                 val_step_times.append(time.time() - val_step_time)
-                #                 if val_step % config.val_log_step == 0:
-                #                     metric_results, _ = evaluator.evaluate()
-                #                     logger.info(f"│ Epoch (val): {epoch+1}/{config.epochs}")
-                #                     logger.info(f"│ Step (val): {val_step}/{val_steps_per_epoch}")
-                #                     for k, v in metric_results.items():
-                #                         logger.info(f"│ val_{k}: {v}")
+                                loss_dict, outputs  = model(inputs, targets)
+                                evaluator.process(targets, outputs)
+                                val_step_times.append(time.time() - val_step_time)
+                                if val_step % config.val_log_step == 0:
+                                    metric_results, _ = evaluator.evaluate()
+                                    logger.info(f"│ Epoch (val): {epoch+1}/{config.epochs}")
+                                    logger.info(f"│ Step (val): {val_step}/{val_steps_per_epoch}")
+                                    for k, v in metric_results.items():
+                                        logger.info(f"│ val_{k}: {v}")
 
-                #     metric_results, ckpt_loss = evaluator.evaluate()
-                #     evaluator.reset()
+                            metric_results, ckpt_loss = evaluator.evaluate()
+                            evaluator.reset()
 
-                #     val_step_timer_avg = np.mean(val_step_times)
+                            val_step_timer_avg = np.mean(val_step_times)
 
-                #     logger.info(f"│ epoch (val): {epoch+1}/{config.epochs}")
-                #     logger.info(f"│ step_timer (val): {val_step_timer_avg * 1000:.0f}ms")
-                #     for k, v in metric_results.items():
-                #         logger.info(f"│ val_{k}: {v}")
+                            logger.info(f"│ epoch (val): {epoch+1}/{config.epochs}")
+                            logger.info(f"│ step_timer (val): {val_step_timer_avg * 1000:.0f}ms")
+                            for k, v in metric_results.items():
+                                logger.info(f"│ val_{k}: {v}")
 
-                #     epoch_logbook[epoch].update({
-                #         "val_step_timer": val_step_timer_avg,
-                #         **{f"val_{k}": v for k, v in metric_results.items()},
-                #     })
+                            epoch_logbook[epoch].update({
+                                "val_step_timer": val_step_timer_avg,
+                                **{f"val_{k}": v for k, v in metric_results.items()},
+                            })
 
-                #     if ckpt_loss < best_loss:
-                #         best_loss = ckpt_loss
+                            if ckpt_loss < best_loss:
+                                best_loss = ckpt_loss
 
-                #         if config.deepspeed_config.zero_optimization.stage == 3:
-                #             model.save_checkpoint(config.checkpointdir, tag="best_model")
-                #         else:
-                #             torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
-                #             torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
+                                if config.deepspeed_config.zero_optimization.stage == 3:
+                                    model.save_checkpoint(config.checkpointdir, tag="best_model")
+                                else:
+                                    if is_main_process():
+                                        torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
+                                        torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
 
                 # DEBUG ONLY!
-                if loss < best_loss:
-                    best_loss = loss
+                # if loss < best_loss:
+                #     best_loss = loss
 
+                #     if config.deepspeed_config.zero_optimization.stage == 3:
+                #         model.save_checkpoint(config.checkpointdir, tag="best_model")
+                #     else:
+                #         torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
+                #         torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
+
+                if is_main_process():
+                    pd.DataFrame.from_dict(epoch_logbook, orient='index').to_csv(Path(config.logdir) / 'logbook.csv')
+                    pd.DataFrame.from_dict(step_logbook, orient='index').to_csv(Path(config.logdir) / 'steplogbook.csv')
+
+                    logger.info(epoch_logbook[epoch])
+
+                    if config.profile:
+                        profiler.step()
+
+                # save model weights for latest model every checkpoint_update_interval epochs
+                if (epoch + 1) % config.checkpoint_update_interval == 0:
                     if config.deepspeed_config.zero_optimization.stage == 3:
-                        model.save_checkpoint(config.checkpointdir, tag="best_model")
+                                    model.save_checkpoint(config.checkpointdir, tag="latest_model")
                     else:
-                        torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
-                        torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
+                        if is_main_process():
+                            torch.save(model.state_dict(), Path(config.checkpointdir) / "latest_model.bin")
+                            torch.save(opt.state_dict(), Path(config.checkpointdir) / "latest_optimizer.bin")
 
-                pd.DataFrame.from_dict(epoch_logbook, orient='index').to_csv(Path(config.logdir) / 'logbook.csv')
-                pd.DataFrame.from_dict(step_logbook, orient='index').to_csv(Path(config.logdir) / 'steplogbook.csv')
-                
                 checkpoint = Checkpoint.from_directory(config.checkpointdir)
                 report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)
 
-                if is_main_process():
-                    logger.info(epoch_logbook[epoch])
-
-                if config.profile:
-                    profiler.step()
-
+        # save model weights for last model  
         if config.deepspeed_config.zero_optimization.stage == 3:
             model.save_checkpoint(config.checkpointdir, tag="last_model")
         else:
             # weights on each rank are placeholders in deepspeed stage 3
             # and hence cannot be saved directly with torch.save
             # instead convert with convert_zero_checkpoint (see checkpoint.py)
-            torch.save(model.state_dict(), Path(config.checkpointdir) / "last_model.bin")
-            torch.save(opt.state_dict(), Path(config.checkpointdir) / "last_optimizer.bin")
+            if is_main_process():
+                torch.save(model.state_dict(), Path(config.checkpointdir) / "last_model.bin")
+                torch.save(opt.state_dict(), Path(config.checkpointdir) / "last_optimizer.bin")
 
         checkpoint = Checkpoint.from_directory(config.checkpointdir)
         report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)

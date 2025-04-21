@@ -6,6 +6,6 @@ transforms_list:
     # mean: ${dataset_mean}
     # std: ${dataset_std}
   - _target_: segmentation.data.transforms.transforms.Resize
-    size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
+    size: [256, 256, 256] # ensure that z-axis is length L in case z-axis image len is smaller than L
   # - _target_: segmentation.data.transforms.transforms.RandomSampleInstances
   #   max_instances: 10 # number of instances to sample from the image per batch per image

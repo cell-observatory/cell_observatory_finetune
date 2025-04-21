@@ -1,0 +1,100 @@
+defaults:
+  - /models: maskrcnn_fpn        # Loads configs/models/mask_rcnn.yaml
+  - /models/backbones: resnet_fpn     # Loads configs/models/backbones/resnet.yaml
+  - /datasets: skittlez_eval       # Loads configs/datasets/skittlez.yaml
+  - /metrics: metrics_skittlez_eval        # Loads configs/metrics/metrics_skittlez_eval.yaml
+  - /transforms: transforms_skittlez_eval # Loads configs/transforms/transforms_skittlez_eval.yaml
+  - _self_
+
+# overrides
+# ----------------
+models:
+  min_size: 128 # images rescaled such that shorter size is min_size
+  max_size: 128
+  mask_roi_pool:
+    _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
+    featmap_names: ${output_features} # for VitDet: adapt accordingly
+    output_size: 14 # usually 14 # ROI pooling output size
+    sampling_ratio: 2 # grid subsampling 
+    canonical_scale: 128
+    canonical_level: 4 # 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of 256x256x256 input
+  rpn_anchor_generator:
+    _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
+    sizes:
+      - [16, 24, 32]
+      - [32, 48, 64]
+      - [64, 96, 128]
+    aspect_ratios:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+    aspect_ratios_z:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+  rpn_head: 
+    _target_: segmentation.models.rpn.rpn_head.RPNHead
+    in_channels: ${backbone_out_channels} 
+    num_anchors: 27 # 3x3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+
+datasets:
+  batch_size: 4 # 4 # total batch size (batch_size per gpu * number of gpus) 
+  database:
+    _target_: segmentation.data.datasets.skittlez.Skittlez_Database
+    training: true 
+    distributed: false # true # set to true for distributed training (Ray or DDP)
+    db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
+    train_db_savedir: ${...train_db_savedir} # defer interpolation to main config
+    selection_criteria: {"volume" : 8000}  # Minimum volume in pixels to accept instance
+    force_create_db: false
+    clean_up_db: false
+    with_zarr: false
+    with_tiff: true
+    metadata: null
+    batch_config:
+      _target_: segmentation.data.data_utils.DataConfig
+      z: 128 #128
+      y: 256
+      x: 256
+      c: 3
+      color_mode: MATCH  
+
+transforms_list:
+  - _target_: segmentation.data.transforms.transforms.Normalize
+    # mean: ${dataset_mean}
+    # std: ${dataset_std}
+  - _target_: segmentation.data.transforms.transforms.Resize
+    size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
+
+# ----------------
+
+# Skittlez eval parameters
+backbone_target: segmentation.models.backbones.resnet.resnet50 # options: resnet50, resnet101, resnet152
+backbone_out_channels: 256 # C5 = 2048
+output_features: ["p2", "p3"] # , "p3", "p4", "pool" 
+
+eval_type: skittlez_eval
+data_dir: /clusterfs/nvme/segment_4d/test_10
+results_dir: /clusterfs/nvme/segment_4d/test_10/evaluation
+
+train_db_savedir: ${data_dir}/db
+checkpointdir: /clusterfs/nvme/segment_4d/test_10/checkpoints
+# checkpointdir: /clusterfs/nvme/segment_4d/test_8/ # ${data_dir}/checkpoints
+ckpt_suffix: "best" # generally, "last" or "best"
+
+# evaluator parameters
+warmup_iters: 1
+
+# Compute resources
+workers: 1 # number of worker nodes
+gpu_workers: 1 #4 # number of gpus per worker
+cpu_workers: 4 #16 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
+distributed_sampler: false
+
+# Quantization
+amp: fp16  # ["no", "fp16", "bf16", "fp8"]
+
+# DeepSpeed config for checkpoint loading
+deepspeed_config:
+  zero_optimization:
+    stage: null # run eval on 1 gpu, no need for zero optimization 

@@ -149,6 +149,8 @@ class AnchorGenerator(nn.Module):
         )
 
         for size, stride, base_anchors in zip(grid_sizes, strides, cell_anchors):
+            # print(f"size: {size}, stride: {stride}, base_anchors: {base_anchors}")
+            # raise ValueError("DEBUG anchors")
             grid_depth, grid_height, grid_width = size
             stride_depth, stride_height, stride_width = stride
             device = base_anchors.device

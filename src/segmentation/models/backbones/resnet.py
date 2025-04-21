@@ -275,32 +275,34 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _forward_impl(self, x: Tensor) -> Tensor:
+    def _forward_impl(self, x: Tensor, return_intermediates=True) -> Tensor:
         # See note [TorchScript super()]
-        # stages = []
+        intermediates = []
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
+        x = self.maxpool(x) # stride 4 (stem/p1)
 
-        x = self.layer1(x)
-        # stages.append(x)
-        x = self.layer2(x)
-        # stages.append(x)
-        # x = self.layer3(x) # NOTE: skipping C4 & C5 due to memory issues
-        # stages.append(x)
+        x = self.layer1(x) # stride 4 (p2)
+
+        if return_intermediates:
+            intermediates.append(x)
+
+        x = self.layer2(x) # # stride 8 (p3)
+        if return_intermediates:
+            intermediates.append(x)
+        # x = self.layer3(x) # NOTE: skipping C4 & C5 (i.e. p4 and p5) due to memory/resolution issues
         # x = self.layer4(x)
-        # stages.append(x)
 
         # x = self.avgpool(x)
         # x = torch.flatten(x, 1)
         # x = self.fc(x)
 
-        return x
+        return x, {f"p{s+2}": feature for s, feature in enumerate(intermediates)} if return_intermediates else x 
         # return stages
 
-    def forward(self, x: Tensor) -> Tensor:
-        return self._forward_impl(x)
+    def forward(self, x: Tensor, return_intermediates=True) -> Tensor:
+        return self._forward_impl(x, return_intermediates)
 
 def _resnet(
     block: Type[Union[BasicBlock, Bottleneck]],

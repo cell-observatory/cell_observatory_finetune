@@ -97,6 +97,7 @@ class LevelMapper:
 def _convert_to_roi_format(boxes: List[Tensor]) -> Tensor:
     concat_boxes = torch.cat(boxes, dim=0)
     device, dtype = concat_boxes.device, concat_boxes.dtype
+    # append image id to bbox tensor
     ids = torch.cat(
         [torch.full_like(b[:, :1], i, dtype=dtype, layout=torch.strided, device=device) for i, b in enumerate(boxes)],
         dim=0,
@@ -127,11 +128,12 @@ def _setup_scales(
     max_y = 0
     max_z = 0
     
+    # TODO: Double check indexing
     for shape in image_shapes:
-        max_x = max(shape[0], max_x)
+        max_z = max(shape[0], max_z)
         max_y = max(shape[1], max_y)
-        max_z = max(shape[2], max_z)
-    original_input_shape = (max_x, max_y, max_z)
+        max_x = max(shape[2], max_x)
+    original_input_shape = (max_z, max_y, max_x)
 
     scales = [_infer_scale(feat, original_input_shape) for feat in features]
 
@@ -140,12 +142,25 @@ def _setup_scales(
     lvl_min = -torch.log2(torch.tensor(scales[0], dtype=torch.float32)).item()
     lvl_max = -torch.log2(torch.tensor(scales[-1], dtype=torch.float32)).item()
 
+    # print(f"Scales: {scales}")
+    # print(f"original_input_shape: {original_input_shape}")
+    # print(f"features: {[f.shape for f in features]}")
+    # print(f"max_x: {max_x}, max_y: {max_y}, max_z: {max_z}")
+    # print(f"lvl_min: {lvl_min}, lvl_max: {lvl_max}")
+    # raise ValueError("DEBUG")
+
     map_levels = initLevelMapper(
         int(lvl_min),
         int(lvl_max),
         canonical_scale=canonical_scale,
         canonical_level=canonical_level,
     )
+
+    # print(f"Scales: {scales}")
+    # test_box = [torch.tensor([[0, 0, 0, max_x, max_y, max_z]], dtype=torch.float32)]
+    # print(f"Map levels: {map_levels(test_box)}")
+    # raise ValueError("DEBUG")
+
     return scales, map_levels
 
 
@@ -223,11 +238,26 @@ def _multiscale_roi_align(
     tracing_results = []
     for level, (per_level_feature, scale) in enumerate(zip(x_filtered, scales)):
         idx_in_level = torch.where(levels == level)[0]
+        # in case a given feature map level is assigned to no RoIs
+        if idx_in_level.numel() == 0:
+            continue 
+
         rois_per_level = rois[idx_in_level]
 
         # Move tensors to GPU
         per_level_feature_gpu = per_level_feature.to('cuda')
         rois_per_level_gpu = rois_per_level.to('cuda')
+
+        # print(f"Level {level}: {per_level_feature.shape}, {rois_per_level.shape}")
+        # print(f"ROIs: {rois_per_level}")
+        # print('test level:')
+        # box = rois_per_level[0]
+        # val = torch.pow((box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2]), 1/3)
+        # print(f"Volume: {val}")
+        # print(f"Idx in level: {idx_in_level}")
+        # print(f"levels: {levels.shape}, {levels}")
+        # print(f"BOXES: {boxes[0:20]}")
+        # raise ValueError("DEBUG")
 
         result_idx_in_level = roi_align_3d(
             per_level_feature_gpu,
@@ -250,6 +280,8 @@ def _multiscale_roi_align(
             # We need to cast manually (can't rely on autocast to cast for us) because
             # the op acts on result in-place, and autocast only affects out-of-place ops.
             result[idx_in_level] = result_idx_in_level.to(result.dtype)
+
+    # raise ValueError("DEBUG")
 
     return result
 
@@ -317,11 +349,22 @@ class MultiScaleRoIAlign(nn.Module):
         Returns:
             result (Tensor)
         """
+        # print(f"featmap_names: {self.featmap_names}")
+        # print(f"image shapes: {image_shapes}")
+        # print("X dict shapes: ")
+        # for k, v in x.items():
+        #     print(f"{k}: {v.shape}")
+        # print("Boxes shapes: ")
+        # for i, b in enumerate(boxes):
+        #     print(f"Box {i}: {b.shape}")
         x_filtered = _filter_input(x, self.featmap_names)
         if self.scales is None or self.map_levels is None:
             self.scales, self.map_levels = _setup_scales(
                 x_filtered, image_shapes, self.canonical_scale, self.canonical_level
             )
+
+        # print(f"Scales: {self.scales}")
+        # print(f"Map levels: {self.map_levels}")
 
         return _multiscale_roi_align(
             x_filtered,

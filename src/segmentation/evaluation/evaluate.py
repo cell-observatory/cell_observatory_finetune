@@ -114,20 +114,16 @@ def inference_on_dataset(
 
             # DEBUG
             # print(f"MODEL MDE: {model.training}")
-            # idx = 1
+            # print(f"OUTPUTS: {outputs}")
+            # idx = 0
             # boxes_test = [outputs[idx]['boxes'][i].cpu().numpy() for i in range(len(outputs[idx]['boxes']))]
             # import segmentation.utils.plot as plot_boxes
             # plot_boxes.plot_boxes(boxes_test, inputs.shape[-3:], save_path='/clusterfs/nvme/segment_4d/test_5/bx_test.tif')
             # import skimage
             # import numpy as np
             # from segmentation.metrics.utils import merge_instance_masks_logits, merge_instance_masks_binary         
-            # print(f"MAX OUTPUTS: {outputs[idx]['masks'][0].max()}")
-            # print(f"MAX OUTPUTS: {outputs[idx]['masks'][1].max()}")
-            # print(f"MAX OUTPUTS: {outputs[idx]['masks'][2].max()}")
             # test_gt_mask = merge_instance_masks_binary(targets[idx]['masks']).cpu().numpy()
-            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/gt_mask_test.tif", test_gt_mask.astype(np.uint16))
-            # test_full_mask = merge_instance_masks_logits(outputs[idx]['masks'], threshold=0.2).cpu().numpy()
-            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/full_mask_test.tif", test_full_mask.astype(np.uint16))  
+            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/gt_mask_test.tif", test_gt_mask.astype(np.uint16))  
             # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/mask_test.tif", outputs[idx]['masks'][0].cpu().numpy())
             # inputs = inputs[idx][0].cpu().numpy()
             # zmin, zmax = inputs.min(), inputs.max()
@@ -136,7 +132,12 @@ def inference_on_dataset(
             # s16 = u16 - 32768
             # final = np.clip(s16, -32768, 32767).astype(np.int16)
             # print(f"INPUTS MAX: {inputs.max()}")
-            # skimage.io.imsave('/clusterfs/nvme/segment_4d/test_5/gt_bx_im.tif', final)
+            # skimage.io.imsave('/clusterfs/nvme/segment_4d/test_5/gt_im.tif', final)
+            # test_full_mask = merge_instance_masks_logits(outputs[idx]['masks'], threshold=0.2).cpu().numpy()
+            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/full_mask_test.tif", test_full_mask.astype(np.uint16))
+            # print(f"MAX OUTPUTS: {outputs[idx]['masks'][0].max()}")
+            # print(f"MAX OUTPUTS: {outputs[idx]['masks'][1].max()}")
+            # print(f"MAX OUTPUTS: {outputs[idx]['masks'][2].max()}")
             # raise ValueError("DEBUG")
 
             # invoke after_inference callback if exists

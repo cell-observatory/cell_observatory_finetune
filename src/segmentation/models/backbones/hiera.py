@@ -239,9 +239,13 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
             # norm_layer = partial(getattr(nn, norm_layer), eps=1e-6)
             norm_layer = get_norm(norm_layer, channel_dim=-1, partial_init=True)
 
+        # total number of blocks across all stages 
         depth = sum(stages)
         self.patch_stride = patch_stride
+        # (D,H,W) after 3D patch‑embedding conv
         self.tokens_spatial_shape = [i // s for i, s in zip(input_size, patch_stride)]
+        # total number of tokens after 3D patch embedding, total token num. for one 
+        # mask, and q_stride
         num_tokens = math.prod(self.tokens_spatial_shape)
         flat_mu_size = math.prod(mask_unit_size)
         flat_q_stride = math.prod(q_stride)
@@ -249,18 +253,24 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         assert q_pool < len(stages)
         self.q_pool, self.q_stride = q_pool, q_stride
         self.mu_size, self.mask_unit_size = flat_mu_size, mask_unit_size
+        # size of grid in masks (mask units)
         self.mask_spatial_shape = [
             i // s for i, s in zip(self.tokens_spatial_shape, self.mask_unit_size)
         ]
+        # where each stage ends (ex. 1, 4, 20) for stages [2,3,16]
         self.stage_ends = [sum(stages[:i]) - 1 for i in range(1, len(stages) + 1)]
 
+        # module for embedding pixel space image into patches with 3d conv
+        # usually 4x downsample (conv7x7x7, s=4x4x4, p=3x3x3)
+        # flattened to sequence: [B, L=64x64x64=262 144,C=96]
         self.patch_embed = PatchEmbed(
             in_chans, embed_dim, patch_kernel, patch_stride, patch_padding
         )
 
-        # separate pos. embeddings by axis flag 
+        # separate pos. embeddings by axis flag (NOTE: not currently suppoorted!)
         self.sep_pos_embed = sep_pos_embed
         if sep_pos_embed:
+            raise NotImplementedError("Separate positional embeddings not supported yet.")
             self.pos_embed_spatial = nn.Parameter(
                 torch.zeros(
                     1,
@@ -272,6 +282,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
                 torch.zeros(1, self.tokens_spatial_shape[0], embed_dim)
             )
         else:
+            # table for positional embeddings
             self.pos_embed = nn.Parameter(torch.zeros(1, num_tokens, embed_dim))
 
         # Setup roll and reroll modules
@@ -285,7 +296,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
             self.stage_ends,
             q_pool,
         )
-        # q_pool locations
+        # q_pool locations (take first q_pool ends and add 1 => apply q-pool after stage end)
         q_pool_blocks = [x + 1 for x in self.stage_ends[:q_pool]]
         
         # stochastic depth decay rule
@@ -302,6 +313,11 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
             # applied post pooling on lower resolution
             use_mask_unit_attn = mask_unit_attn[cur_stage]
 
+            # stage_end -> stage_end + 1 = inc. dim_out, num_heads
+            # and if we do q_pool (may limit q_pool to first q_pool stages)
+            # then apply q_stride max pooling and decrease spatial (token) dims
+            # (B, C, D, H, W) -> (B, C, D//q_stride, H//q_stride, W//q_stride)
+            # we adapt mask unit size accordingly
             if i - 1 in self.stage_ends:
                 dim_out = int(embed_dim * dim_mul)
                 num_heads = int(num_heads * head_mul)
@@ -328,7 +344,8 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         self.head = Head(embed_dim, num_classes, dropout_rate=head_dropout)
 
         # Initialize everything
-        if sep_pos_embed:
+        if self.sep_pos_embed:
+            raise NotImplementedError("Separate positional embeddings not supported yet.")
             nn.init.trunc_normal_(self.pos_embed_spatial, std=0.02)
             nn.init.trunc_normal_(self.pos_embed_temporal, std=0.02)
         else:
@@ -349,6 +366,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
     @torch.jit.ignore
     def no_weight_decay(self):
         if self.sep_pos_embed:
+            raise NotImplementedError("Separate positional embeddings not supported yet.")
             return ["pos_embed_spatial", "pos_embed_temporal"]
         else:
             return ["pos_embed"]
@@ -381,6 +399,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
 
     def get_pos_embed(self) -> torch.Tensor:
         if self.sep_pos_embed:
+            raise NotImplementedError("Separate positional embeddings not supported yet.")
             return self.pos_embed_spatial.repeat(
                 1, self.tokens_spatial_shape[0], 1
             ) + torch.repeat_interleave(
@@ -427,11 +446,19 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         for i, blk in enumerate(self.blocks):
             x = blk(x)
 
+            # we return intermediates at stage_ends but q-pool
+            # happens at the end of the stage => intermediate spatial dims
+            # lag by 1 in stride
             if return_intermediates and i in self.stage_ends:
                 intermediates.append(self.reroll(x, i, mask=mask))
 
+        if return_intermediates:
+            # reshape to (B,C,D,H,W)
+            intermediates = [intermediate.permute(0,4,1,2,3) for intermediate in intermediates]
+
         return x, {f"p{s}": feature for s, feature in enumerate(intermediates)} if return_intermediates else x 
 
+        # NOTE: removing linear probing layer
         # if mask is None:
         #     x = x.mean(dim=1)
         #     x = self.norm(x)
@@ -498,6 +525,7 @@ def hiera_huge_224(**kwdargs):
 
 
 # Video models
+
 
 @pretrained_model({
     "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_base_16x224.pth",

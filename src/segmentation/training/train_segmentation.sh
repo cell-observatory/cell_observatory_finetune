@@ -18,8 +18,9 @@ conda activate 4d_seg
 # using tmp/torch_extensions causes stalling in DeepSpeed init 
 export TORCH_EXTENSIONS_DIR="/tmp/torch_extensions_$$"
 
-CFG="config_mrcnn_resnet.yaml"
+# CFG="config_mrcnn_resnet.yaml"
 # CFG="config_mrcnn_vitDet.yaml"
 # CFG="config_mrcnn_hiera.yaml"
+CFG="config_mrcnn_resnet_fpn.yaml"
 
 python3 /clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/src/segmentation/training/train_segmentation.py --config-name=${CFG}

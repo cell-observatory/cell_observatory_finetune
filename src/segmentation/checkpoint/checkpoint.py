@@ -1,6 +1,8 @@
 import os
 import warnings
 from pathlib import Path 
+
+from typing import Dict
 from collections import OrderedDict
 
 import torch 
@@ -31,6 +33,18 @@ def _strip_prefix(state_dict: dict, prefix: str = "module.") -> dict:
         return new_state
     else:
         return state_dict
+    
+
+def _add_prefix(state_dict: Dict[str, torch.Tensor],
+                prefix: str = "module.") -> Dict[str, torch.Tensor]:
+    """
+    If none of the keys start with `prefix`, add it to every key.
+    Otherwise return the dict unchanged.
+    """
+    if all(k.startswith(prefix) for k in state_dict):
+        return state_dict          # already has the prefix
+    return OrderedDict((f"{prefix}{k}", v) for k, v in state_dict.items() if not k.startswith(prefix))
+
 
 def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffix="best", dtype=None):
     logger.info(f"Loading pretrained model @ resumed checkpoint -> {checkpointdir}")
@@ -57,9 +71,17 @@ def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffi
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
     model_state = torch.load(Path(checkpointdir) / f"{ckpt_suffix}_model.bin", map_location="cpu")
-    # only strip prefix from saved model if current model is not wrapped in a module
-    if not any(key.startswith("module.") for key in model_engine.state_dict().keys()):
+    
+    ckpt_has_module   = any(k.startswith("module.") for k in model_state)
+    model_expects_mod = any(k.startswith("module.") for k in model_engine.state_dict())
+
+    if ckpt_has_module and not model_expects_mod:
+        # Loading a DDP checkpoint into a non‑DDP model
         model_state = _strip_prefix(model_state, prefix="module.")
+    elif not ckpt_has_module and model_expects_mod:
+        # Loading a non‑DDP checkpoint into a DDP‑wrapped model
+        model_state = _add_prefix(model_state, prefix="module.")
+    
     model_engine.load_state_dict(model_state)
 
     if dtype is not None:
@@ -73,6 +95,7 @@ def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffi
             opt.load_state_dict(optimizer_state)
         else:
             warnings.warn(FileNotFoundError(f"Optimizer file not found: {optimizer_path}"))
+
 
 def convert_zero_checkpoint(checkpoint_path: str, output_dir: str, tag: str = "best_model", ckpt_prefix: str = "best"):
     state = get_fp32_state_dict_from_zero_checkpoint(checkpoint_path, tag)

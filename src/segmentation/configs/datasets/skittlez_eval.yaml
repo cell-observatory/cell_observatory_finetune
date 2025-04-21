@@ -3,9 +3,6 @@ defaults:
 
 name: skittlez
 
-training: true #false (set to true to check model ability to overfit on train dataset) 
-distributed: false # true # set to true for distributed training (Ray or DDP)
-
 batch_size: 4 # 4 # total batch size (batch_size per gpu * number of gpus) 
 
 dataset_mean: [1000.0] # not currently used, placeholder for dataset mean
@@ -24,6 +21,7 @@ inputs:
 
 database:
   _target_: segmentation.data.datasets.skittlez.Skittlez_Database
+  training: true # use train or test dataset files
   distributed: false # true # set to true for distributed training (Ray or DDP)
   db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
   train_db_savedir: ${...train_db_savedir} # defer interpolation to eval config

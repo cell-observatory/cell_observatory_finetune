@@ -4,6 +4,7 @@ defaults:
   - models/backbones: vitDet     # Loads configs/models/backbones/vitDet.yaml
   - datasets: skittlez       # Loads configs/datasets/skittlez.yaml
   - metrics: metrics        # Loads configs/metrics/metrics.yaml
+  - transforms: transforms_skittlez # Loads configs/transforms/transforms.yaml
 
 # Model type
 network: maskrcnn

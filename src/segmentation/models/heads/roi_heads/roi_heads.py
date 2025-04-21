@@ -33,24 +33,28 @@ def fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
         classification_loss (Tensor): 
         box_loss (Tensor): 
     """
+    labels = torch.cat(labels, dim=0) # (N, )
+    regression_targets = torch.cat(regression_targets, dim=0) # (N,6)
 
-    labels = torch.cat(labels, dim=0)
-    regression_targets = torch.cat(regression_targets, dim=0)
-
-    classification_loss = F.cross_entropy(class_logits, labels)
+    classification_loss = F.cross_entropy(class_logits, labels) 
 
     # get indices that correspond to the regression targets for
     # the corresponding ground truth labels, to be used with
     # advanced indexing
-    sampled_pos_inds_subset = torch.where(labels > 0)[0]
+    sampled_pos_inds_subset = torch.where(labels > 0)[0] 
     labels_pos = labels[sampled_pos_inds_subset]
     N, num_classes = class_logits.shape
-    box_regression = box_regression.reshape(N, box_regression.size(-1) // 6, 6)
+    box_regression = box_regression.reshape(N, box_regression.size(-1) // 6, 6) # (N, Kx6) -> (N, K, 6) for K classes
 
+    # print(f"Number of sampled positive indices: {sampled_pos_inds_subset.shape}")
+    # print(f"Number of sampled negative indices: {labels.shape[0] - sampled_pos_inds_subset.shape[0]}")
+    # raise ValueError("Number of sampled positive indices: {sampled_pos_inds_subset.shape}")
+
+    # class-aware loss (i.e. predictions supervised for the correct class)
     box_loss = F.smooth_l1_loss(
-        box_regression[sampled_pos_inds_subset, labels_pos],
+        box_regression[sampled_pos_inds_subset, labels_pos], # get regression preds for correct class  
         regression_targets[sampled_pos_inds_subset],
-        beta=1 / 9, # TODO: Check if this is valid
+        beta=1 / 9, 
         reduction="sum",
     )
     box_loss = box_loss / labels.numel()
@@ -122,23 +126,24 @@ def maskrcnn_loss(mask_logits, proposals, gt_masks, gt_labels, mask_matched_idxs
     Return:
         mask_loss (Tensor): scalar tensor containing the loss
     """
-
-    discretization_size = mask_logits.shape[-1]
+    discretization_size = mask_logits.shape[-1] # mask: (M, M, M)
+    # get the indices of the positive proposals (correct class)
     labels = [gt_label[idxs] for gt_label, idxs in zip(gt_labels, mask_matched_idxs)]
 
-    # match gt masks with size of proposal logits
+    # match gt masks with size of proposal logits (uses ROIAlign under the hood)
     mask_targets = [
         project_masks_on_boxes(m, p, i, discretization_size) for m, p, i in zip(gt_masks, proposals, mask_matched_idxs)
     ]
 
-    labels = torch.cat(labels, dim=0)
-    mask_targets = torch.cat(mask_targets, dim=0)
+    labels = torch.cat(labels, dim=0) # (N,)
+    mask_targets = torch.cat(mask_targets, dim=0) # (N, M, M, M)
 
     # torch.mean (in binary_cross_entropy_with_logits) doesn't
     # accept empty tensors, so handle it separately
     if mask_targets.numel() == 0:
         return mask_logits.sum() * 0
 
+    # class-aware loss (i.e. predictions supervised for the correct class)
     mask_loss = F.binary_cross_entropy_with_logits(
         mask_logits[torch.arange(labels.shape[0], device=labels.device), labels], mask_targets
     )
@@ -363,6 +368,11 @@ class RoIHeads(nn.Module):
     def subsample(self, labels):
         # type: (List[Tensor]) -> List[Tensor]
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
+
+        # print(f"Number of sampled positive indices: {sampled_pos_inds.shape}")
+        # print(f"Number of sampled negative indices: {sampled_neg_inds.shape}")
+        # raise ValueError("Number of sampled positive indices: {sampled_pos_inds}")
+
         sampled_inds = []
         for img_idx, (pos_inds_img, neg_inds_img) in enumerate(zip(sampled_pos_inds, sampled_neg_inds)):
             img_sampled_inds = torch.where(pos_inds_img | neg_inds_img)[0]

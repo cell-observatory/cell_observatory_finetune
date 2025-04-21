@@ -59,6 +59,7 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
         for output, target in zip(outputs, targets):
             pred_mask = output["masks"]
             target_mask = target["masks"]
+            target_mask = merge_instance_masks_binary(target_mask).cpu().numpy()
             if len(pred_mask) > 0:
                 if self.detection_mode:
                     pred_masks.append(merge_instance_masks_logits(pred_mask).cpu().numpy())
@@ -66,7 +67,7 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
                     pred_masks.append(pred_mask.cpu().numpy())
             else:
                 pred_masks.append(np.zeros_like(target_mask))
-            gt_masks.append(merge_instance_masks_binary(target_mask).cpu().numpy())
+            gt_masks.append(target_mask)
 
             # import skimage
             # from segmentation.utils.plot import plot_boxes
@@ -95,6 +96,8 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
         # TODO: Consider incorporating more advanced
         #       evaluation logic
         self.aggregate()
+        self._predictions = {k: v[0] for k, v in self._predictions.items()}
         if self.ckpt_loss_key is not None:
-            ckpt_loss = self._predictions[self.ckpt_loss_key][0] if self.lower_is_better else -self._predictions[self.ckpt_loss_key][0]
-        return self._predictions, ckpt_loss if self.ckpt_loss_key is not None else self._predictions
+            ckpt_loss = self._predictions[self.ckpt_loss_key] if self.lower_is_better else -self._predictions[self.ckpt_loss_key]
+            return self._predictions, ckpt_loss 
+        return self._predictions

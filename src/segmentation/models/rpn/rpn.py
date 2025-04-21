@@ -128,7 +128,10 @@ class RegionProposalNetwork(torch.nn.Module):
     ) -> None:
         super().__init__()
         self.anchor_generator = anchor_generator
+        
         self.head = head
+        self.head.num_anchors = self.anchor_generator.num_anchors_per_location()[0]
+        
         self.box_coder = det_utils.BoxCoder(weights=(1.0, 1.0, 1.0, 1.0, 1.0, 1.0))
 
         # used during training
@@ -284,25 +287,27 @@ class RegionProposalNetwork(torch.nn.Module):
         """
 
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-        sampled_pos_inds = torch.where(torch.cat(sampled_pos_inds, dim=0))[0]
-        sampled_neg_inds = torch.where(torch.cat(sampled_neg_inds, dim=0))[0]
+        sampled_pos_inds = torch.where(torch.cat(sampled_pos_inds, dim=0))[0] # (Num Positives,)
+        sampled_neg_inds = torch.where(torch.cat(sampled_neg_inds, dim=0))[0] # (Num Negatives,)
 
-        sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0)
+        # print(f"Number of sampled positive indices: {sampled_pos_inds.shape}")
+        # print(f"Number of sampled negative indices: {sampled_neg_inds.shape}")
 
-        objectness = objectness.flatten()
+        sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0) # (Num Positives + Num Negatives,)
 
-        labels = torch.cat(labels, dim=0)
-        regression_targets = torch.cat(regression_targets, dim=0)
+        objectness = objectness.flatten() # (Num Positives + Num Negatives,) 
+
+        labels = torch.cat(labels, dim=0) # (Num Positives + Num Negatives,)
+        regression_targets = torch.cat(regression_targets, dim=0) # (Num Positives, 6)
 
         box_loss = F.smooth_l1_loss(
-            pred_bbox_deltas[sampled_pos_inds],
-            regression_targets[sampled_pos_inds],
+            pred_bbox_deltas[sampled_pos_inds], # (Positives, 6)
+            regression_targets[sampled_pos_inds], # (Positives, 6)
             beta=1 / 9,
             reduction="sum",
         ) / (sampled_inds.numel())
 
-        objectness_loss = F.binary_cross_entropy_with_logits(objectness[sampled_inds], labels[sampled_inds])
-
+        objectness_loss = F.binary_cross_entropy_with_logits(objectness[sampled_inds], labels[sampled_inds]) 
         return objectness_loss, box_loss
 
     def forward(
@@ -332,10 +337,21 @@ class RegionProposalNetwork(torch.nn.Module):
         features = list(features.values())
 
         # NOTE: Number of objectness preds. only matches nr. of anchors
-        #       if rpn_head is initialized correctly
-        #       objectness: (class, BS, num_anchors, D, H, W)
+        #       if rpn_head is initialized correctly (very important and may lead to silent errors)
+        #       objectness: (BS, num_anchors, D, H, W) and pred_bbox_deltas: (BS, num_anchors*6, D, H, W)
         objectness, pred_bbox_deltas = self.head(features) # classification scores & box diff (RPNHead preds)
         anchors = self.anchor_generator(images, features) # generate centers and create boxes of diff aspect ratios and scales
+
+        # # TODO: Change init of RPN Head so we can skip this check
+        # for lvl, obj in enumerate(objectness):
+        #     A_pred = obj.shape[1]
+        #     A_real = self.anchor_generator.cell_anchors[lvl].shape[0]
+        #     assert (
+        #         A_pred == A_real
+        #     ), (
+        #         f"Level {lvl}: RPNHead predicts {A_pred} anchors/loc "
+        #         f"but AnchorGenerator.cell_anchors[{lvl}] has {A_real}"
+        #     )
 
         # DEBUG1:
         # from segmentation.utils.plot import plot_boxes
@@ -346,6 +362,10 @@ class RegionProposalNetwork(torch.nn.Module):
         # print(f"anchors_0 shape: {anchors_0.shape}")
         # raise ValueError("DEBUG: anchors_0 shape")
         # print("NMS THRESHOLD: ", self.nms_thresh)
+
+        # print(f"objectness shape: {objectness[0].shape}")
+        # print(f"pred_bbox_deltas shape: {pred_bbox_deltas[0].shape}")
+        # print(f"anchors shape: {anchors[0].shape}")
 
         # DEBUG2:
         # import skimage
