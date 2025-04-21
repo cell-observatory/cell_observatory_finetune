@@ -47,8 +47,9 @@ def gather_dataset(
                 num_workers=config.gpu_workers,
                 prefetch_factor=2,
                 persistent_workers=False,
-                sampler=DistributedSampler(train),
-                worker_init_fn=db_worker_init_fn
+                sampler=DistributedSampler(train, drop_last=True),
+                worker_init_fn=db_worker_init_fn,
+                drop_last=True
             )
             val = DataLoader(
                 val,
@@ -59,8 +60,9 @@ def gather_dataset(
                 num_workers=config.gpu_workers,
                 prefetch_factor=2,
                 persistent_workers=False,
-                sampler=DistributedSampler(val, shuffle=False),
-                worker_init_fn=db_worker_init_fn
+                sampler=DistributedSampler(val, shuffle=False, drop_last=True),
+                worker_init_fn=db_worker_init_fn,
+                drop_last=True
             )
 
             return train, val
@@ -75,8 +77,9 @@ def gather_dataset(
                 num_workers=config.gpu_workers,
                 prefetch_factor=2,
                 persistent_workers=False,
-                sampler=DistributedSampler(dataset) if config.distributed_sampler else None,
-                worker_init_fn=db_worker_init_fn
+                sampler=DistributedSampler(dataset, drop_last=True) if config.distributed_sampler else None,
+                worker_init_fn=db_worker_init_fn,
+                drop_last=True,
             )
 
             return data

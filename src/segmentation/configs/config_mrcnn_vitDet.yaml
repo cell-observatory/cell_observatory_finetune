@@ -1,10 +1,86 @@
 defaults:
-  - _self_
   - models: maskrcnn_fpn        # Loads configs/models/mask_rcnn.yaml
   - models/backbones: vitDet     # Loads configs/models/backbones/vitDet.yaml
   - datasets: skittlez       # Loads configs/datasets/skittlez.yaml
   - metrics: metrics        # Loads configs/metrics/metrics.yaml
   - transforms: transforms_skittlez # Loads configs/transforms/transforms.yaml
+  - _self_
+
+# overrides
+# ----------------
+models:
+  backbones:
+    _target_: segmentation.models.backbones.fpn.BackboneWithFPN
+    # NOTE: By default FPN adds an extra LastLevelMaxPool layer to the last feature map
+    # Hence, the output feature maps will have len(return_layers) + 1 maps
+    # return layers specifies which feature maps to run through the FPN
+    return_layers: {"p2": "p2", "p3": "p3"} # , "p1": "p1", "p2": "p2" # 2x downsample per return layer used + LastLevelMaxPool
+    in_channels_list: [256, 512] # , 1024, 2048 # matches embed_dim * stage sequence
+    out_channels: ${backbone_out_channels}
+    norm_layer: null
+  min_size: 128 # images rescaled such that shorter size is min_size
+  max_size: 128
+  mask_roi_pool:
+    _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
+    featmap_names: ${output_features} # for VitDet: adapt accordingly
+    output_size: 14 # usually 14 # ROI pooling output size
+    sampling_ratio: 2 # grid subsampling 
+    canonical_scale: 128
+    canonical_level: 4 # 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of 256x256x256 input
+  rpn_anchor_generator:
+    _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
+    sizes:
+      - [16, 24, 32]
+      - [32, 48, 64]
+      # - [64, 96, 128]
+    aspect_ratios:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      # - [0.5, 1.0, 2.0]
+    aspect_ratios_z:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      # - [0.5, 1.0, 2.0]
+  rpn_head: 
+    _target_: segmentation.models.rpn.rpn_head.RPNHead
+    in_channels: ${backbone_out_channels} 
+    num_anchors: 27 # 3x3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  # NOTE: consider chaning the number of positive samples considered if the model is not learning
+  # and only predicts background
+  # rpn_fg_iou_thresh: 0.5 # too high of a value will cause the model to not learn anything and always predict the background
+  # rpn_bg_iou_thresh: 0.3
+  # box_positive_fraction: 0.25 # positive fraction of samples in subsampling
+
+datasets:
+  batch_size: 1 # 4 # total batch size (batch_size per gpu * number of gpus) 
+  database:
+    _target_: segmentation.data.datasets.skittlez.Skittlez_Database
+    training: true 
+    distributed: true # true # set to true for distributed training (Ray or DDP)
+    db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
+    train_db_savedir: ${...train_db_savedir} # defer interpolation to main config
+    selection_criteria: {"volume" : 8000}  # Minimum volume in pixels to accept instance
+    force_create_db: false
+    clean_up_db: false
+    with_zarr: false
+    with_tiff: true
+    metadata: null
+    batch_config:
+      _target_: segmentation.data.data_utils.DataConfig
+      z: 128 #128
+      y: 256
+      x: 256
+      c: 3
+      color_mode: MATCH  
+
+transforms_list:
+  - _target_: segmentation.data.transforms.transforms.Normalize
+    # mean: ${dataset_mean}
+    # std: ${dataset_std}
+  - _target_: segmentation.data.transforms.transforms.Resize
+    size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
+
+# ----------------
 
 # Model type
 network: maskrcnn
@@ -18,9 +94,13 @@ backbone_out_channels: 256 # C5 = 2048
 output_features: ["p2", "p3"]
 
 # Paths
-outdir: /clusterfs/nvme/segment_4d/test_4
+outdir: /clusterfs/nvme/segment_4d/test_13
 logdir: ${outdir}/logs
-checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: we look for checkpoints in the outdir but load via this directory
+
+load_checkpointdir: null # /clusterfs/nvme/segment_4d/test_4/checkpoints # null # specify if we want to load a checkpoint from a previous run that is not latest local run
+checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: specify where to save the checkpoints
+checkpoint_update_interval: 1 # save checkpoint every N epochs
+
 train_db_savedir: ${outdir}/db
 db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
 
@@ -35,7 +115,7 @@ clip_grad: 0.5
 ema: [0.998, 1.0]
 
 # Training loop parameters
-epochs: 500
+epochs: 2000
 val_interval: 1
 log_step: 100
 val_log_step: 20
@@ -44,6 +124,7 @@ cooldown: 50
 fixedlr: false
 dropout: 0.1
 fixed_dropout_depth: false
+oom_limit: 3 # number of consecutive OOMs before stopping training
 
 # Quantization
 amp: fp16  # ["no", "fp16", "bf16", "fp8"]
@@ -55,7 +136,8 @@ profile: false
 workers: 1 # number of worker nodes
 gpu_workers: 1 #4 # number of gpus per worker
 cpu_workers: 4 #16 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
-distributed_sampler: true
+distributed_sampler: true # use distributed sampler for training (standard for Ray/DDP)
+max_worker_heartbeat_timeout: 2 # in minutes (to prevent indefinite hang if one process fails)
 
 # DeepSpeed config (Hydra will pass it to training loop)
 deepspeed_config:

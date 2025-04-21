@@ -336,7 +336,6 @@ def supervised(config: DictConfig):
     evaluator = instantiate(config.metrics)
     
     loss_nans = 0
-    oom_count = 0
     ray_context = get_context()
     with torch.autograd.set_detect_anomaly(True, check_nan=False):
         with torch.profiler.profile(
@@ -365,46 +364,22 @@ def supervised(config: DictConfig):
                     # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_mask.tif",targets[0]["masks"][0].cpu().numpy())
                     step_time = time.time()
                     lr_value = opt.param_groups[0]["lr"]
-
-                    try:
-                        # TODO: More modular loss computation design
-                        loss_dict, outputs = model(inputs, targets)
-
-                        # TODO: Make this logic more general
-                        step_loss = sum(loss_dict.values())
-
-                        if torch.isnan(step_loss):
-                            loss_nans += 1
-                            logger.warning(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
-                            if loss_nans > 5:
-                                raise Exception(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
-
-                        model.backward(step_loss)
-                        model.step()
-                        scheduler.step(epoch)
-
-                        # reset oom count if no OOM
-                        # ensures that we only count consecutive OOMs
-                        oom_count = 0
                     
-                    except RuntimeError as e:
-                        if 'out of memory' in str(e):
-                            if oom_count > config.oom_limit:
-                                raise e
-                            oom_count += 1
-                            
-                            logger.warning(f"[Rank {process_rank()} OOM] Epoch {epoch} step {step}: skipping batch")
-                            logger.warning(f"OOM count: {oom_count}")
-                            
-                            # reset internals so next batch is clean
-                            try:
-                                model.zero_grad()
-                            except:
-                                pass
-                            torch.cuda.empty_cache()
-                            continue
-                        else:
-                            raise e
+                    # TODO: More modular loss computation design
+                    loss_dict, outputs = model(inputs, targets)
+
+                    # TODO: Make this logic more general
+                    step_loss = sum(loss_dict.values())
+
+                    if torch.isnan(step_loss):
+                        loss_nans += 1
+                        logger.warning(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
+                        if loss_nans > 5:
+                            raise Exception(f"Step loss is {step_loss} for step {step} in epoch {epoch}")
+
+                    model.backward(step_loss)
+                    model.step()
+                    scheduler.step(epoch)
 
                     cuda_util = torch.cuda.utilization()
                     cuda_vram = torch.cuda.max_memory_allocated() / (1024 ** 3)
@@ -550,6 +525,7 @@ def supervised(config: DictConfig):
                             torch.save(model.state_dict(), Path(config.checkpointdir) / "latest_model.bin")
                             torch.save(opt.state_dict(), Path(config.checkpointdir) / "latest_optimizer.bin")
 
+            if is_main_process():
                 checkpoint = Checkpoint.from_directory(config.checkpointdir)
                 report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)
 
@@ -564,5 +540,6 @@ def supervised(config: DictConfig):
                 torch.save(model.state_dict(), Path(config.checkpointdir) / "last_model.bin")
                 torch.save(opt.state_dict(), Path(config.checkpointdir) / "last_optimizer.bin")
 
-        checkpoint = Checkpoint.from_directory(config.checkpointdir)
-        report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)
+        if is_main_process():
+            checkpoint = Checkpoint.from_directory(config.checkpointdir)
+            report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)

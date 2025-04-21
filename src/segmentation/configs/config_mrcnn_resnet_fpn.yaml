@@ -68,17 +68,18 @@ datasets:
     batch_config:
       _target_: segmentation.data.data_utils.DataConfig
       z: 128 #128
-      y: 256
-      x: 256
+      y: 128
+      x: 128
       c: 3
       color_mode: MATCH  
 
-transforms_list:
-  - _target_: segmentation.data.transforms.transforms.Normalize
-    # mean: ${dataset_mean}
-    # std: ${dataset_std}
-  - _target_: segmentation.data.transforms.transforms.Resize
-    size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
+transforms:
+  transforms_list:
+    - _target_: segmentation.data.transforms.transforms.Normalize
+      # mean: ${dataset_mean}
+      # std: ${dataset_std}
+    - _target_: segmentation.data.transforms.transforms.Resize
+      size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
 
 # ----------------
 
@@ -99,7 +100,7 @@ logdir: ${outdir}/logs
 
 load_checkpointdir: null # /clusterfs/nvme/segment_4d/test_4/checkpoints # null # specify if we want to load a checkpoint from a previous run that is not latest local run
 checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: specify where to save the checkpoints
-checkpoint_update_interval: 1 # save checkpoint every N epochs
+checkpoint_update_interval: 100 # save checkpoint every N epochs
 
 train_db_savedir: ${outdir}/db
 db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
@@ -124,7 +125,6 @@ cooldown: 50
 fixedlr: false
 dropout: 0.1
 fixed_dropout_depth: false
-oom_limit: 3 # number of consecutive OOMs before stopping training
 
 # Quantization
 amp: fp16  # ["no", "fp16", "bf16", "fp8"]

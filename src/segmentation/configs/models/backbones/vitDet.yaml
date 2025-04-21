@@ -19,6 +19,7 @@ top_block: null
 #   _target_: segmentation.models.backbones.vitDet.LastLevelMaxPool
 norm: "LN"
 square_pad: null # not used
+
 net:
   # ViTDet Backbone
   _target_: segmentation.models.backbones.vitDet.ViT

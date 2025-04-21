@@ -12,10 +12,8 @@ defaults:
 models:
   backbones:
     _target_: segmentation.models.backbones.fpn.BackboneWithFPN
-    return_layers:
-      p0: p0
-      p1: p1
-    in_channels_list: [96, 192] # , 192, 384 , 768 # matches embed_dim * stage sequence
+    return_layers: {"p0": "p0", "p1": "p1", "p2": "p2"}
+    in_channels_list: [96, 192, 384] # , 192, 384 , 768 # matches embed_dim * stage sequence
     out_channels: ${backbone_out_channels}
     norm_layer: null
     backbone:
@@ -73,8 +71,8 @@ models:
   rpn_head: 
     _target_: segmentation.models.rpn.rpn_head.RPNHead
     in_channels: ${backbone_out_channels} 
-    num_anchors: 81 # 3 x 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
-  box_score_thresh: 0.0
+    num_anchors: 27 # 3 x 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  # box_score_thresh: 0.0
 
 datasets:
   batch_size: 1 # 4 # total batch size (batch_size per gpu * number of gpus) 
@@ -103,16 +101,16 @@ transforms:
 # Skittlez eval parameters
 backbone_out_channels: 256 # C5 = 2048
 backbone_target: segmentation.models.backbones.hiera.Hiera
-output_features: ["p0", "p1", "pool"] # , "pool" # , "p1" , "p2", "p3", "pool" (pi downsamples starting shape by 2^i+1 on top of 4x conv downsample)
+output_features: ["p0", "p1", "p2"] # , "pool" # , "p1" , "p2", "p3", "pool" (pi downsamples starting shape by 2^i+1 on top of 4x conv downsample)
 
 eval_type: skittlez_eval
-data_dir: /clusterfs/nvme/segment_4d/test_10
-results_dir: /clusterfs/nvme/segment_4d/test_10/evaluation
+data_dir: /clusterfs/nvme/segment_4d/test_12
+results_dir: /clusterfs/nvme/segment_4d/test_12/evaluation
 
 train_db_savedir: ${data_dir}/db
-checkpointdir: /clusterfs/nvme/segment_4d/test_9/checkpoints
+checkpointdir: /clusterfs/nvme/segment_4d/test_12/checkpoints
 # checkpointdir: /clusterfs/nvme/segment_4d/test_8/ # ${data_dir}/checkpoints
-ckpt_suffix: "last" # generally, "last" or "best"
+ckpt_suffix: "best" # generally, "last" or "best"
 
 # evaluator parameters
 warmup_iters: 1
