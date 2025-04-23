@@ -16,17 +16,18 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSI
 """
 
 
-from typing import Dict, Callable
+from typing import List, Union
 
 import numpy as np
 from numba import jit
+
 from scipy.optimize import linear_sum_assignment
 
 import torch
 
 
 @jit(nopython=True)
-def _label_overlap(x, y):
+def _label_overlap(x: np.ndarray, y: np.ndarray):
     """
     Compute the pixel-wise overlap matrix between two labeled mask arrays.
 
@@ -48,7 +49,8 @@ def _label_overlap(x, y):
         overlap[x[i], y[i]] += 1
     return overlap
 
-def _intersection_over_union(masks_true, masks_pred):
+
+def _intersection_over_union(masks_true: np.ndarray, masks_pred: np.ndarray):
     """
     Calculate the intersection over union (IoU) between all pairs of ground truth and predicted masks.
 
@@ -73,7 +75,7 @@ def _intersection_over_union(masks_true, masks_pred):
     return iou
 
 
-def _true_positive(iou, th):
+def _true_positive(iou: np.ndarray, th: float):
     """
     Calculate the number of true positives given a pairwise IoU matrix and a threshold.
 
@@ -98,7 +100,10 @@ def _true_positive(iou, th):
     return tp
 
 
-def average_precision(masks_true, masks_pred, threshold=[0.5, 0.6, 0.7, 0.8, 0.9]):
+def average_precision(masks_true: Union[List[np.ndarray], np.ndarray],
+                      masks_pred: Union[List[np.ndarray], np.ndarray], 
+                      threshold: Union[List[float], float] = [0.5, 0.6, 0.7, 0.8, 0.9]
+):
     """
     Average precision estimation: AP = TP / (TP + FP + FN)
 
@@ -162,6 +167,7 @@ def average_precision(masks_true, masks_pred, threshold=[0.5, 0.6, 0.7, 0.8, 0.9
 
 
 def merge_instance_masks_binary(masks: torch.Tensor) -> torch.Tensor:
+    # TODO: add check for empty masks
     merged = torch.zeros_like(masks[0], dtype=torch.int32)
     for idx, m in enumerate(masks):
         merged[m.bool()] = idx + 1
@@ -169,9 +175,11 @@ def merge_instance_masks_binary(masks: torch.Tensor) -> torch.Tensor:
 
 
 def merge_instance_masks_logits(mask_probs: torch.Tensor, threshold: float = 0.0) -> torch.Tensor:
+    # TODO: add check for empty mask_probs
     masked_probs = torch.where(mask_probs > threshold, mask_probs, torch.tensor(0.0, device=mask_probs.device, dtype=mask_probs.dtype))
     max_vals, max_ids = masked_probs.max(dim=0) # get instance id with max prob for each voxel
     return torch.where(max_vals > 0, max_ids + 1, torch.tensor(0, device=mask_probs.device, dtype=max_ids.dtype))
+
 
 def compute_mean(x):
     return sum(x) / len(x) if len(x) > 0 else 0.0

@@ -34,6 +34,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
+
 from typing import Tuple
 
 import torch
@@ -166,6 +167,7 @@ def nms(boxes: Tensor, scores: Tensor, iou_threshold: float) -> Tensor:
 
     # need to recast boxes to float32
     # for IOU calculation in 3D NMS
+    # to protect against numerical overflows
     boxes = boxes.to(torch.float32) 
     keep = nms_3d(boxes, scores, iou_threshold)
     return keep.to(device)
@@ -337,8 +339,6 @@ def box_convert(boxes: Tensor, in_fmt: str, out_fmt: str) -> Tensor:
         "xyxy",
         "xywh",
         "cxcywh",
-        # "xywhr",
-        # "cxcywhr",
         "xyxyxyxy",
     )
     if in_fmt not in allowed_fmts or out_fmt not in allowed_fmts:
@@ -436,9 +436,6 @@ def generalized_box_iou(boxes1: Tensor, boxes2: Tensor) -> Tensor:
         Tensor[N, M]: the NxM matrix containing the pairwise generalized IoU values
         for every element in boxes1 and boxes2
     """
-    # if not torch.jit.is_scripting() and not torch.jit.is_tracing():
-    #     _log_api_usage_once(generalized_box_iou)
-
     inter, union = _box_inter_union(boxes1, boxes2)
     iou = inter / union
 

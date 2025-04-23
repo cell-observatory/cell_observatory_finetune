@@ -2,10 +2,11 @@ defaults:
   - _self_
 
 _target_: segmentation.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
-ckpt_loss_key: ap@50
+ckpt_loss_key: ap@50 # key to use for selecting the best checkpoint
 lower_is_better: false 
 
 metrics:
+  # TODO: would be more efficient to use a single AveragePrecision metric with multiple thresholds
   ap@50:
     _target_: segmentation.metrics.metrics.AveragePrecision
     iou_threshold: 0.5

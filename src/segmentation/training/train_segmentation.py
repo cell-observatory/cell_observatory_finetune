@@ -18,6 +18,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 logger = logging.getLogger("ray")
 logger.setLevel(logging.DEBUG)
 
+
 os.environ["RAY_DEDUP_LOGS"] = "0"
 os.environ["NCCL_DEBUG"] = "TRACE"
 os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
@@ -29,9 +30,10 @@ os.environ["NCCL_CROSS_NIC"] = "1"
 os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "3600"
 
 
+# modify Hydra config on cmd line to use different models
 @hydra.main(config_path="../configs", config_name="config_mrcnn_vitDet", version_base="1.2") 
 def main(cfg: DictConfig):
-    # Print full configuration (for debugging)
+    # print full configuration (for debugging)
     logger.info("\n" + OmegaConf.to_yaml(cfg))
 
     Path(cfg.outdir).mkdir(exist_ok=True, parents=True)
@@ -48,12 +50,9 @@ def main(cfg: DictConfig):
         cfg.worker_batch_size = cfg.datasets.batch_size // (
             cfg.workers * cfg.gpu_workers
             )
-        
-    with open_dict(cfg):
         cfg.scaling_config.num_workers = int(cfg.workers) * int(cfg.gpu_workers)
         cfg.scaling_config.resources_per_worker["CPU"] = int(cfg.cpu_workers) // int(cfg.gpu_workers)
     
-    # Build Ray Train configuration objects using the Hydra config values
     scaling_config = ScalingConfig(
         num_workers=cfg.scaling_config.num_workers,
         resources_per_worker=cfg.scaling_config.resources_per_worker,
@@ -71,7 +70,6 @@ def main(cfg: DictConfig):
     
     torch_config = TorchConfig(timeout_s=cfg.torch_config.timeout_s)
 
-    # Connect to an existing Ray cluster if available, else start a local cluster.
     try:
         address = os.environ["head_node_ip"]
         port = os.environ["port"]
@@ -80,7 +78,7 @@ def main(cfg: DictConfig):
             address=f"{address}:{port}",
             log_to_driver=True,
             runtime_env={"NCCL_DEBUG": "INFO", "NCCL_DEBUG_SUBSYS": "GRAPH", "NCCL_P2P_LEVEL": "NVL"},
-            # N minutes = N * 60 * 1000 ms
+            # N minutes = N * 60 * 1000 ms (to prevent indefinite hang if processes fail)
             _system_config={"worker_heartbeat_timeout_ms": cfg.max_worker_heartbeat_timeout * 60 * 1000},
         )
     except KeyError:

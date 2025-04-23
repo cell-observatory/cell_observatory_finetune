@@ -1,13 +1,27 @@
 """
 https://github.com/facebookresearch/detectron2/blob/9604f5995cc628619f0e4fd913453b4d7d61db3f/detectron2/modeling/backbone/vit.py
 
-(ADD COPYRIGHT HERE)
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 """
 
 
 import math
 import logging
+from typing import Optional, Union, Callable, List
 
 import torch
 import torch.nn as nn
@@ -34,12 +48,12 @@ class Attention(nn.Module):
 
     def __init__(
         self,
-        dim,
-        num_heads=8,
-        qkv_bias=True,
-        use_rel_pos=False,
-        rel_pos_zero_init=True,
-        input_size=None,
+        dim: int,
+        num_heads: int = 8,
+        qkv_bias: bool = True,
+        use_rel_pos: bool = False,
+        rel_pos_zero_init: bool = True,
+        input_size: Optional[int] = None,
     ):
         """
         Args:
@@ -74,7 +88,7 @@ class Attention(nn.Module):
         B, D, H, W, _ = x.shape
         # qkv with shape (3, B, nHead, D * H * W, C)
         qkv = self.qkv(x).reshape(B, D * H * W, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
-        # q, k, v with shape (B * nHead, H * W, C)
+        # q, k, v with shape (B * nHead, D * H * W, C)
         q, k, v = qkv.reshape(3, B * self.num_heads, D * H * W, -1).unbind(0)
 
         attn = (q * self.scale) @ k.transpose(-2, -1)
@@ -97,11 +111,11 @@ class ResBottleneckBlock(CNNBlockBase):
 
     def __init__(
         self,
-        in_channels,
-        out_channels,
-        bottleneck_channels,
-        norm="LN",
-        act_layer=nn.GELU,
+        in_channels: int,
+        out_channels: int,
+        bottleneck_channels: int,
+        norm: Union[str, Callable] = "LN",
+        act_layer: Callable = nn.GELU,
     ):
         """
         Args:
@@ -140,7 +154,7 @@ class ResBottleneckBlock(CNNBlockBase):
             layer.weight.data.fill_(1.0)
             layer.bias.data.zero_()
 
-        # zero init last norm layer.
+        # zero init last norm layer
         self.norm3.weight.data.zero_()
         self.norm3.bias.data.zero_()
 
@@ -148,7 +162,6 @@ class ResBottleneckBlock(CNNBlockBase):
         out = x
         for layer in self.children():
             out = layer(out)
-
         out = x + out
         return out
 
@@ -158,18 +171,18 @@ class Block(nn.Module):
 
     def __init__(
         self,
-        dim,
-        num_heads,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        drop_path=0.0,
-        norm_layer="LN",
-        act_layer=nn.GELU,
-        use_rel_pos=False,
-        rel_pos_zero_init=True,
-        window_size=0,
-        use_residual_block=False,
-        input_size=None,
+        dim: int,
+        num_heads: int,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = True,
+        drop_path: float = 0.0,
+        norm_layer: str = "LN",
+        act_layer: Callable = nn.GELU,
+        use_rel_pos: bool = False,
+        rel_pos_zero_init: bool = True,
+        window_size: int = 0,
+        use_residual_block: bool = False,
+        input_size: Optional[int] = None,
     ):
         """
         Args:
@@ -189,7 +202,7 @@ class Block(nn.Module):
                 parameter size.
         """
         super().__init__()
-        self.norm1 = get_norm(norm_layer, dim, channel_dim=4)
+        self.norm1 = get_norm(norm_layer, out_channels = dim, channel_dim=4)
         self.attn = Attention(
             dim,
             num_heads=num_heads,
@@ -200,14 +213,14 @@ class Block(nn.Module):
         )
 
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-        self.norm2 = get_norm(norm_layer, dim, channel_dim=4)
+        self.norm2 = get_norm(norm_layer, out_channels = dim, channel_dim=4)
         self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer)
 
         self.window_size = window_size
 
         self.use_residual_block = use_residual_block
         if use_residual_block:
-            # Use a residual block with bottleneck channel as dim // 2
+            # use a residual block with bottleneck channel as dim // 2
             self.residual = ResBottleneckBlock(
                 in_channels=dim,
                 out_channels=dim,
@@ -220,7 +233,7 @@ class Block(nn.Module):
         shortcut = x
         x = self.norm1(x)
 
-        # Window partition x post patch embedding
+        # window partition x post patch embedding
         if self.window_size > 0:
             D, H, W = x.shape[1], x.shape[2], x.shape[3]
             # returns: (num_windows, window_size, window_size, window_size, C)
@@ -228,7 +241,7 @@ class Block(nn.Module):
 
         x = self.attn(x)
 
-        # Reverse window partition
+        # reverse window partition
         if self.window_size > 0:
             x = window_unpartition(x, self.window_size, pad_dhw, (D, H, W))
 
@@ -251,26 +264,26 @@ class ViT(nn.Module):
     def __init__(
         self,
         weights=None,
-        img_size=1024,
-        patch_size=16,
-        channel_in=3,
-        embed_dim=768,
-        depth=12,
-        num_heads=12,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        drop_path_rate=0.0,
-        norm_layer="LN",
-        act_layer=nn.GELU, # TODO: Switch to same logic as get_norm
-        use_abs_pos=True,
-        use_rel_pos=False,
-        rel_pos_zero_init=True,
-        window_size=0,
+        img_size: int = 1024,
+        patch_size: int = 16,
+        channel_in: int = 3,
+        embed_dim: int = 768,
+        depth: int = 12,
+        num_heads: int = 12,
+        mlp_ratio: float = 4.0,
+        qkv_bias: bool = True,
+        drop_path_rate: float = 0.0,
+        norm_layer: str = "LN",
+        act_layer: nn.Module = nn.GELU, # TODO: Switch to same logic as get_norm
+        use_abs_pos: bool = True,
+        use_rel_pos: bool =False,
+        rel_pos_zero_init: bool = True,
+        window_size: int = 0,
         window_block_indexes=(),
         residual_block_indexes=(),
-        pretrain_img_size=224,
-        pretrain_use_cls_token=True,
-        out_feature="last_feat",
+        pretrain_img_size: int = 224,
+        pretrain_use_cls_token: bool = True,
+        out_feature: str = "last_feat",
     ):
         """
         Args:
@@ -306,7 +319,7 @@ class ViT(nn.Module):
         )
 
         if use_abs_pos:
-            # Initialize absolute positional embedding with pretrain image size.
+            # initialize absolute positional embedding with pretrain image size
             num_patches = (pretrain_img_size // patch_size) * (pretrain_img_size // patch_size) * (pretrain_img_size // patch_size)
             num_positions = (num_patches + 1) if pretrain_use_cls_token else num_patches
             self.pos_embed = nn.Parameter(torch.zeros(1, num_positions, embed_dim))
@@ -343,22 +356,23 @@ class ViT(nn.Module):
         if self.pos_embed is not None:
             nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
-        if weights is not None:
-            if isinstance(weights, str):
-                checkpoint = torch.load(weights, map_location="cpu")
-                # if "model" in checkpoint:
-                #     # Some checkpoints save under a "model" key 
-                #     checkpoint = checkpoint["model"]
-                missing, unexpected = self.load_state_dict(checkpoint, strict=False)
-                print(f"[ViT] Loaded weights from {weights}")
-                if missing:
-                    print(f"[ViT] Missing keys: {missing}")
-                if unexpected:
-                    print(f"[ViT] Unexpected keys: {unexpected}")
-            else:
-                raise ValueError(f"'weights' must be a path string, got {type(weights)}")
-        else:
-            self.apply(self._init_weights)
+        # TODO: unify pretrained weight loading logic across models 
+        # if weights is not None:
+        #     if isinstance(weights, str):
+        #         checkpoint = torch.load(weights, map_location="cpu")
+        #         # if "model" in checkpoint:
+        #         #     # Some checkpoints save under a "model" key 
+        #         #     checkpoint = checkpoint["model"]
+        #         missing, unexpected = self.load_state_dict(checkpoint, strict=False)
+        #         print(f"[ViT] Loaded weights from {weights}")
+        #         if missing:
+        #             print(f"[ViT] Missing keys: {missing}")
+        #         if unexpected:
+        #             print(f"[ViT] Unexpected keys: {unexpected}")
+        #     else:
+        #         raise ValueError(f"'weights' must be a path string, got {type(weights)}")
+        # else:
+        self.apply(self._init_weights)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -383,10 +397,13 @@ class ViT(nn.Module):
             for name in self._out_features
         }
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         # 3D Conv with stride=kernel_size=patch_size
         x = self.patch_embed(x)
         if self.pos_embed is not None:
+            # get_abs_pos (see utils.py) retrieves absolute positional embedding
+            # it will interpolate the positional embedding to the input size
+            # if needed (i.e. if pretrain_img_size != img_size)
             x = x + get_abs_pos(
                 self.pos_embed, self.pretrain_use_cls_token, (x.shape[1], x.shape[2], x.shape[3])
             )
@@ -408,13 +425,13 @@ class SimpleFeaturePyramid(nn.Module):
 
     def __init__(
         self,
-        net,
-        in_feature,
-        out_channels,
-        scale_factors,
-        top_block=None,
-        norm="LN",
-        square_pad=0,
+        net: nn.Module,
+        in_feature: str,
+        out_channels: int,
+        scale_factors: List[float],
+        top_block: Optional[Callable] = None,
+        norm: str = "LN",
+        square_pad: int = 0,
     ):
         """
         Args:
@@ -439,18 +456,25 @@ class SimpleFeaturePyramid(nn.Module):
         self.scale_factors = scale_factors
 
         input_shapes = net.output_shape()
+        # input_shapes ex: {"last_features": {"channels": 256, "stride": 4}, ...}
+        # divide output stride by scale factor to get the stride of the feature map
+        # after upsampling/downsampling in the pyramid for VitDet (power of 2 required)
         strides = [int(input_shapes[in_feature]["stride"] / scale) for scale in scale_factors]
         _assert_strides_are_log2_contiguous(strides)
 
         dim = input_shapes[in_feature]["channels"]
         self.stages = []
         use_bias = norm == ""
+        # the scale factors are in descending order 4x -> 2x -> ....
         for idx, scale in enumerate(scale_factors):
             out_dim = dim
+            # ConvTranspose3d is used for upsampling, maxpool3d for downsampling
+            # we decrease the number of channels by 2 for each 2x upsampling
+            # scale dictates the amount of upsampling/downsampling in the pyramid 
             if scale == 4.0:
                 layers = [
                     nn.ConvTranspose3d(dim, dim // 2, kernel_size=2, stride=2),
-                    get_norm(norm, dim // 2),
+                    get_norm(norm, out_channels = dim // 2, channel_dim = 1),
                     nn.GELU(),
                     nn.ConvTranspose3d(dim // 2, dim // 4, kernel_size=2, stride=2),
                 ]
@@ -465,6 +489,8 @@ class SimpleFeaturePyramid(nn.Module):
             else:
                 raise NotImplementedError(f"scale_factor={scale} is not supported yet.")
 
+            # irrespective of the scale factor, we always apply 1x1 -> 3x3 conv layers
+            # to set channel_dim to out_channels
             layers.extend(
                 [
                     Conv3d(
@@ -472,7 +498,7 @@ class SimpleFeaturePyramid(nn.Module):
                         out_channels,
                         kernel_size=1,
                         bias=use_bias,
-                        norm=get_norm(norm, out_channels),
+                        norm=get_norm(norm, out_channels = out_channels, channel_dim = 1),
                     ),
                     Conv3d(
                         out_channels,
@@ -480,7 +506,7 @@ class SimpleFeaturePyramid(nn.Module):
                         kernel_size=3,
                         padding=1,
                         bias=use_bias,
-                        norm=get_norm(norm, out_channels),
+                        norm=get_norm(norm, out_channels = out_channels, channel_dim = 1),
                     ),
                 ]
             )
@@ -495,21 +521,26 @@ class SimpleFeaturePyramid(nn.Module):
         self.top_block = top_block
         
         # Return feature names are "p<stage>", like ["p2", "p3", ..., "p6"]
+        # in accordance with resnet naming conventions
         self._out_feature_strides = {"p{}".format(int(math.log2(s))): s for s in strides}
         
         # top block output feature maps.
+        # if top_block is not None, extend out_feature_strides by
+        # the number of levels in the top block
         if self.top_block is not None:
             for s in range(stage, stage + self.top_block.num_levels):
                 self._out_feature_strides["p{}".format(s + 1)] = 2 ** (s + 1)
 
+        # decrease/increase input strides from ViT backbone by scale factors
+        # p2, p3, p4, p5, p6, ... are the resulting feature map names (log2 stride denomination)
         self._out_features = list(self._out_feature_strides.keys())
         self._out_feature_channels = {k: out_channels for k in self._out_features}
         self._size_divisibility = strides[-1]
         self._square_pad = square_pad
 
-        self.out_channels = out_channels # accessible for other modules, e.g., mask head
+        self.out_channels = out_channels # make accessible for other modules, e.g., mask head
 
-    # TODO: Fix! 
+    # TODO: implement padding constraints logic
     # @property
     # def padding_constraints(self):
     #     return {
@@ -517,7 +548,7 @@ class SimpleFeaturePyramid(nn.Module):
     #         "square_size": self._square_pad,
     #     }
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """
         Args:
             x: Tensor of shape (N,C,D,H,W). D,H,W must be a multiple of ``self.size_divisibility``.
@@ -531,24 +562,32 @@ class SimpleFeaturePyramid(nn.Module):
         """
         bottom_up_features = self.net(x)
         # retrieve specified feature stage from backbone 
+        # generally returns "last_feat": feat_map
         features = bottom_up_features[self.in_feature]
         results = []
 
         # apply the deconv/conv stages to the input feature map 
+        # defined in the constructor according to the scale factors
         for stage in self.stages:
             results.append(stage(features))
 
+        # optionally apply the top block to the last feature maps 
+        # in in_feature list
         if self.top_block is not None:
+            # retrieve the input feature map for the top block
+            # if the top block input feature is in the bottom up features
+            # use the bottom up feature map, else use feature map from fpn
             if self.top_block.in_feature in bottom_up_features:
                 top_block_in_feature = bottom_up_features[self.top_block.in_feature]
             else:
                 top_block_in_feature = results[self._out_features.index(self.top_block.in_feature)]
             results.extend(self.top_block(top_block_in_feature))
         assert len(self._out_features) == len(results)
+        # return dict of feat map names (p2,p3,...) and corresponding feature map
         return {f: res for f, res in zip(self._out_features, results)}
 
 
-def get_vit_lr_decay_rate(name, lr_decay_rate=1.0, num_layers=12):
+def get_vit_lr_decay_rate(name: str, lr_decay_rate: float = 1.0, num_layers: int = 12):
     """
     Calculate lr decay rate for different ViT blocks.
     Args:
@@ -568,6 +607,8 @@ def get_vit_lr_decay_rate(name, lr_decay_rate=1.0, num_layers=12):
 
     return lr_decay_rate ** (num_layers + 1 - layer_id)
 
+
+# TODO: deduplicate with FPN
 class LastLevelMaxPool(nn.Module):
     """
     This module is used in the original FPN to generate a downsampled
@@ -579,5 +620,5 @@ class LastLevelMaxPool(nn.Module):
         self.num_levels = 1
         self.in_feature = "p5"
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         return [F.max_pool3d(x, kernel_size=1, stride=2, padding=0)]

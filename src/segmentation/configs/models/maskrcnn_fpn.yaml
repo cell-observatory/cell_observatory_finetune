@@ -10,6 +10,11 @@ image_std: ${datasets.dataset_std}
 min_size: 256 # images rescaled such that shorter size is min_size
 max_size: 256
 
+# NOTE: many of the parameters are (and must be) overwritten 
+#       in the main config file for each model configuration
+#       the contents below are the default values that need to
+#       be specified
+
 # RPN config
 rpn_anchor_generator:
   _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
@@ -25,12 +30,11 @@ rpn_anchor_generator:
 rpn_head: 
   _target_: segmentation.models.rpn.rpn_head.RPNHead
   in_channels: ${backbone_out_channels} 
-  num_anchors: 27 # 2x3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
-  # num_anchors: rpn_anchor_generator.num_anchors_per_location()[0]
-rpn_pre_nms_top_n_train: 2000 # NOTE: Don't be confused with these number when debugging, it's per image not per batch
-rpn_pre_nms_top_n_test: 1000 #100 # TODO: Normally 1000, need to update cuda kernels for that to work
+  num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+rpn_pre_nms_top_n_train: 2000 # per image not per batch
+rpn_pre_nms_top_n_test: 1000
 rpn_post_nms_top_n_train: 2000
-rpn_post_nms_top_n_test: 1000 # 100 # TODO: Normally 1000, need to update cuda kernels for that to work
+rpn_post_nms_top_n_test: 1000
 rpn_nms_thresh: 0.7
 rpn_fg_iou_thresh: 0.7
 rpn_bg_iou_thresh: 0.3
@@ -41,13 +45,12 @@ rpn_score_thresh: 0.0 # filter out low scoring objects
 # Box config
 box_roi_pool:
   _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
-  featmap_names: ${output_features} # for VitDet: adapt accordingly
+  featmap_names: ${output_features}
   output_size: 7
   sampling_ratio: 2
 box_head: 
   _target_: segmentation.models.faster_rcnn.TwoMLPHead
   representation_size: 1024
-  # in_channels: 175616  # EX: 702464 = 2048 * 7 * 7 * 7 = backbone_out_channels * box_roi_pool.output_size (e.g. 7,7,7) for C5 
   backbone_out_channels: ${backbone_out_channels} 
   roi_pool_output_size:
     - ${models.box_roi_pool.output_size}
@@ -64,13 +67,13 @@ box_fg_iou_thresh: 0.5
 box_bg_iou_thresh: 0.5
 box_batch_size_per_image: 512 # used in subsampling of positive and negative samples for training of ROI_Heads (only used in training)
 box_positive_fraction: 0.25 # positive fraction of samples in subsampling
-bbox_reg_weights: null # weights for encoding/decoding of bboxes (see det_utils) 
+bbox_reg_weights: null # weights for encoding/decoding of bboxes 
 
 # Mask config
 mask_roi_pool:
   _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
-  featmap_names: ${output_features} # for VitDet: adapt accordingly
-  output_size: 14 # usually 14 # ROI pooling output size
+  featmap_names: ${output_features}
+  output_size: 14 # ROI pooling output size
   sampling_ratio: 2 # grid subsampling 
 mask_head: 
   _target_: segmentation.models.mask_rcnn.MaskRCNNHeads

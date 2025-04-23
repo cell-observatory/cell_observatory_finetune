@@ -1,16 +1,27 @@
 import random
+from typing import List, Tuple, Optional
+
 import skimage.io
 import numpy as np
 
-def plot_boxes(boxes, image_shape, thickness=1, sample_num=None, sample_indices=None, save_path='output_boxes.tif'):
+
+def plot_boxes(
+    boxes: List[Tuple[float, float, float, float, float, float]],
+    image_shape: Tuple[int, int, int],
+    save_path: str,
+    thickness: int = 1,
+    sample_num: Optional[int] = None,
+    sample_indices: Optional[List[int]] = None,
+) -> np.ndarray:
     """
-    Creates a plot with predicted bounding box edges drawn.
+    Create plot with predicted bounding box edges drawn.
     
     Args:
-        boxes (dict): List of bounding boxes.
-                       Each box must have the format [x, y, z, x2, y2, z2].
+        boxes (list): List of bounding boxes. Each box must have the format [x1, y1, z1, x2, y2, z2].
         image_shape (tuple): Desired shape of the output image as (depth, height, width).
         thickness (int): The thickness (in pixels) of the edges. Default is 1.
+        sample_num (int): Number of boxes to sample from the list. If None, all boxes are used.
+        sample_indices (list): Indices of boxes to sample from the list. If None, all boxes are used.
         save_path (str): File path where the resulting TIFF image is saved.
         
     Returns:
@@ -24,12 +35,10 @@ def plot_boxes(boxes, image_shape, thickness=1, sample_num=None, sample_indices=
         boxes = random.sample(boxes, sample_num)
 
     for box in boxes:
-        # boxes must have exactly 6 values.
         if len(box) != 6:
             print("Skipping invalid box (incorrect format):", box)
             continue
         
-        # convert box coords to integers (rounding if needed)
         try:
             x_min, y_min, z_min, x_max, y_max, z_max = [int(round(v)) for v in box]
         except Exception as e:

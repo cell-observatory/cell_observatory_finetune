@@ -1,12 +1,17 @@
 import os
+import logging
 import warnings
 from pathlib import Path 
 
-from typing import Dict
+from typing import Dict, Optional, Union, Literal
 from collections import OrderedDict
 
-import torch 
+from omegaconf import DictConfig
 
+import torch 
+from torch.optim import Optimizer
+
+from deepspeed.runtime.engine import DeepSpeedEngine
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 _DTYPES = {
@@ -46,7 +51,14 @@ def _add_prefix(state_dict: Dict[str, torch.Tensor],
     return OrderedDict((f"{prefix}{k}", v) for k, v in state_dict.items() if not k.startswith(prefix))
 
 
-def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffix="best", dtype=None):
+def load_checkpoint(model_engine: DeepSpeedEngine, 
+                    opt: Optional[Optimizer], 
+                    config: DictConfig, 
+                    logger: logging.Logger, 
+                    checkpointdir: Optional[Union[str, Path]], 
+                    ckpt_suffix: str = "best", 
+                    dtype : Optional[Literal["float32", "fp32", "float16", "fp16", "bfloat16", "bf16"]] = None,
+):
     logger.info(f"Loading pretrained model @ resumed checkpoint -> {checkpointdir}")
 
     if dtype is not None:
@@ -70,7 +82,7 @@ def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffi
     if not model_path.exists():
         raise FileNotFoundError(f"Model file not found: {model_path}")
     
-    model_state = torch.load(Path(checkpointdir) / f"{ckpt_suffix}_model.bin", map_location="cpu")
+    model_state = torch.load(model_path, map_location="cpu")
     
     ckpt_has_module   = any(k.startswith("module.") for k in model_state)
     model_expects_mod = any(k.startswith("module.") for k in model_engine.state_dict())
@@ -97,6 +109,7 @@ def load_checkpoint(model_engine, opt, config, logger, checkpointdir, ckpt_suffi
             warnings.warn(FileNotFoundError(f"Optimizer file not found: {optimizer_path}"))
 
 
+# useful utility function to convert a deepspeed zero stage 3 checkpoint to a standard checkpoint
 def convert_zero_checkpoint(checkpoint_path: str, output_dir: str, tag: str = "best_model", ckpt_prefix: str = "best"):
     state = get_fp32_state_dict_from_zero_checkpoint(checkpoint_path, tag)
     output_path = os.path.join(output_dir, f"{ckpt_prefix}_model.bin")

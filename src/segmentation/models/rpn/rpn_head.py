@@ -32,13 +32,14 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
+
 from typing import List, Tuple
 
 import torch
 from torch import nn
 from torch import Tensor
-
 from torchvision.ops import Conv3dNormActivation
+
 
 class RPNHead(nn.Module):
     """

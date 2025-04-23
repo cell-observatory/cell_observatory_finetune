@@ -2,8 +2,21 @@
 https://github.com/facebookresearch/detectron2/blob/9604f5995cc628619f0e4fd913453b4d7d61db3f/detectron2/modeling/backbone/utils.py
 https://github.com/facebookresearch/hiera/blob/main/hiera/hiera_utils.py
 
-(ADD COPYRIGHT HERE)
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 """
 
 
@@ -17,12 +30,15 @@ import torch.nn.functional as F
 from segmentation.models.backbones.batch_norm import FrozenBatchNorm3d
 
 
+# TODO: merge/deduplicate utility functions from different backbones (kept separated for now)
+
 ########################################################################### ViTDet ###########################################################################
 
-# TODO: Duplicated in swinTransformer.py
-def window_partition(x, window_size):
+
+def window_partition(x: torch.Tensor, window_size: int):
     """
-    Partition into non-overlapping windows with padding if needed.
+    Partition input tensor into non-overlapping windows, with padding if needed.
+
     Args:
         x (tensor): input tokens with [B, D, H, W, C].
         window_size (int): window size.
@@ -31,6 +47,7 @@ def window_partition(x, window_size):
         windows: windows after partition with [B * num_windows, window_size, window_size, window_size, C].
         (Dp, Hp, Wp): padded depth, height, and width before partition
     """
+    # TODO: support nD
     B, D, H, W, C = x.shape
 
     pad_d = (window_size - D % window_size) % window_size
@@ -45,11 +62,12 @@ def window_partition(x, window_size):
     return windows, (Dp, Hp, Wp)
 
 
-def window_unpartition(windows, window_size, pad_dhw, dhw):
+def window_unpartition(windows: torch.Tensor, window_size: int, pad_dhw: Tuple[int, int, int], dhw: Tuple[int, int, int]):
     """
     Window unpartition into original sequences and removing padding.
+
     Args:
-        x (tensor): input tokens with [B * num_windows, window_size, window_size, window_size, C].
+        windows (tensor): input tokens with [B * num_windows, window_size, window_size, window_size, C].
         window_size (int): window size.
         pad_dhw (Tuple): padded depth, height and width (Dp, Hp, Wp).
         dhw (Tuple): original depth, height and width (D, H, W) before padding.
@@ -57,6 +75,7 @@ def window_unpartition(windows, window_size, pad_dhw, dhw):
     Returns:
         x: unpartitioned sequences with [B, D, H, W, C].
     """
+    # TODO: support nD
     Dp, Hp, Wp = pad_dhw
     D, H, W = dhw
     
@@ -69,10 +88,11 @@ def window_unpartition(windows, window_size, pad_dhw, dhw):
     return x
 
 
-def get_rel_pos(q_size, k_size, rel_pos):
+def get_rel_pos(q_size: int, k_size: int, rel_pos: torch.Tensor):
     """
     Get relative positional embeddings according to the relative positions of
         query and key sizes.
+
     Args:
         q_size (int): size of query q.
         k_size (int): size of key k.
@@ -82,10 +102,9 @@ def get_rel_pos(q_size, k_size, rel_pos):
         Extracted positional embeddings according to relative positions.
     """
     max_rel_dist = int(2 * max(q_size, k_size) - 1)
-    # Interpolate rel pos if needed.
+    # interpolate rel pos if needed
     # (L, C) -> (1, C, L) -> interpolate -> (max_rel_dist, C)
     if rel_pos.shape[0] != max_rel_dist:
-        # Interpolate rel pos.
         rel_pos_resized = F.interpolate(
             rel_pos.reshape(1, rel_pos.shape[0], -1).permute(0, 2, 1),
             size=max_rel_dist,
@@ -95,20 +114,27 @@ def get_rel_pos(q_size, k_size, rel_pos):
     else:
         rel_pos_resized = rel_pos
 
-    # Scale the coords with short length if shapes for q and k are different.
+    # scale the coords with short length if shapes for q and k are different
     q_coords = torch.arange(q_size)[:, None] * max(k_size / q_size, 1.0)
     k_coords = torch.arange(k_size)[None, :] * max(q_size / k_size, 1.0)
     # broadcast gives (q_size, k_size) grid of relative positions, then shift
-    #  to ensure positive indexing 
+    # to ensure positive indexing 
     relative_coords = (q_coords - k_coords) + (k_size - 1) * max(q_size / k_size, 1.0)
-
     return rel_pos_resized[relative_coords.long()]
 
 
-def add_decomposed_rel_pos(attn, q, rel_pos_d, rel_pos_h, rel_pos_w, q_size, k_size):
+def add_decomposed_rel_pos(attn: torch.Tensor, 
+                           q: torch.Tensor, 
+                           rel_pos_d: torch.Tensor, 
+                           rel_pos_h: torch.Tensor, 
+                           rel_pos_w: torch.Tensor, 
+                           q_size: Tuple[int, int, int], 
+                           k_size: Tuple[int, int, int]
+):
     """
     Calculate decomposed Relative Positional Embeddings from :paper:`mvitv2`.
     https://github.com/facebookresearch/mvit/blob/19786631e330df9f3622e5402b4a419a263a2c80/mvit/models/attention.py   # noqa B950
+    
     Args:
         attn (Tensor): attention map.
         q (Tensor): query q in the attention layer with shape (B, q_d * q_h * q_w, C).
@@ -121,6 +147,7 @@ def add_decomposed_rel_pos(attn, q, rel_pos_d, rel_pos_h, rel_pos_w, q_size, k_s
     Returns:
         attn (Tensor): attention map with added relative positional embeddings.
     """
+    # TODO: add tests
     q_d, q_h, q_w = q_size
     k_d, k_h, k_w = k_size
     Rd = get_rel_pos(q_d, k_d, rel_pos_d)
@@ -143,10 +170,11 @@ def add_decomposed_rel_pos(attn, q, rel_pos_d, rel_pos_h, rel_pos_w, q_size, k_s
     return attn
 
 
-def get_abs_pos(abs_pos, has_cls_token, dhw):
+def get_abs_pos(abs_pos: torch.Tensor, has_cls_token: bool, dhw: Tuple[int, int, int]):
     """
     Calculate absolute positional embeddings. If needed, resize embeddings and remove cls_token
         dimension for the original embeddings.
+
     Args:
         abs_pos (Tensor): absolute positional embeddings with (1, num_position, C).
         has_cls_token (bool): If true, has 1 embedding in abs_pos for cls token.
@@ -163,6 +191,8 @@ def get_abs_pos(abs_pos, has_cls_token, dhw):
     size = round(math.pow(num_positions, 1 / 3))
     assert size * size * size == num_positions, f"size is {size}, but xyz_num is {num_positions}."
 
+    # interpolate abs pos if image size is different
+    # from pretraining image size
     if size != h or size != w or size != d:
         new_abs_pos = F.interpolate(
             abs_pos.reshape(1, size, size, size, -1).permute(0, 4, 1, 2, 3), # (bs, c, z, y, x)
@@ -182,7 +212,11 @@ class PatchEmbed(nn.Module):
     """
 
     def __init__(
-        self, kernel_size=(16, 16, 16), stride=(16, 16, 16), padding=(0, 0, 0), in_chans=3, embed_dim=768
+        self, 
+        kernel_size: Tuple[int, int, int] = (16, 16, 16), 
+        stride: Tuple[int, int, int] = (16, 16, 16), 
+        padding: Tuple[int, int, int] = (0, 0, 0), 
+        in_chans: int = 3, embed_dim: int = 768
     ):
         """
         Args:
@@ -204,6 +238,7 @@ class PatchEmbed(nn.Module):
         x = x.permute(0, 2, 3, 4, 1)
         return x
     
+
 class CNNBlockBase(nn.Module):
     """
     A CNN block is assumed to have input channels, output channels and a stride.
@@ -217,7 +252,7 @@ class CNNBlockBase(nn.Module):
         stride (int):
     """
 
-    def __init__(self, in_channels, out_channels, stride):
+    def __init__(self, in_channels: int, out_channels: int, stride: int):
         """
         The `__init__` method of any subclass should also contain these arguments.
 
@@ -242,6 +277,7 @@ class CNNBlockBase(nn.Module):
         """
         for p in self.parameters():
             p.requires_grad = False
+        # see norm.py for details
         FrozenBatchNorm3d.convert_frozen_batchnorm(self)
         return self
 
@@ -255,68 +291,70 @@ def _assert_strides_are_log2_contiguous(strides):
             stride, strides[i - 1]
         )
 
+
 ############################################################### HIERA ######################################################################################
 
 
-def pretrained_model(checkpoints: Dict[str, str], default: str = None) -> Callable:
-    """ Loads a Hiera model from a pretrained source (if pretrained=True). Use "checkpoint" to specify the checkpoint. """
+# TODO: add support for loading pretrained weights accross all backbones
+# def pretrained_model(checkpoints: Dict[str, str], default: str = None) -> Callable:
+#     """ Loads a Hiera model from a pretrained source (if pretrained=True). Use "checkpoint" to specify the checkpoint. """
 
-    def inner(model_func: Callable) -> Callable:
-        def model_def(pretrained: bool = False, checkpoint: str = default, strict: bool = True, **kwdargs) -> nn.Module:
-            if pretrained:
-                if checkpoints is None:
-                    raise RuntimeError("This model currently doesn't have pretrained weights available.")
-                elif checkpoint is None:
-                    raise RuntimeError("No checkpoint specified.")
-                elif checkpoint not in checkpoints:
-                    raise RuntimeError(f"Invalid checkpoint specified ({checkpoint}). Options are: {list(checkpoints.keys())}.")
+#     def inner(model_func: Callable) -> Callable:
+#         def model_def(pretrained: bool = False, checkpoint: str = default, strict: bool = True, **kwdargs) -> nn.Module:
+#             if pretrained:
+#                 if checkpoints is None:
+#                     raise RuntimeError("This model currently doesn't have pretrained weights available.")
+#                 elif checkpoint is None:
+#                     raise RuntimeError("No checkpoint specified.")
+#                 elif checkpoint not in checkpoints:
+#                     raise RuntimeError(f"Invalid checkpoint specified ({checkpoint}). Options are: {list(checkpoints.keys())}.")
 
-                state_dict = torch.hub.load_state_dict_from_url(checkpoints[checkpoint], map_location="cpu")
+#                 state_dict = torch.hub.load_state_dict_from_url(checkpoints[checkpoint], map_location="cpu")
             
-                if "head.projection.weight" in state_dict["model_state"]:
-                    # Set the number of classes equal to the state_dict only if the user doesn't want to overwrite it
-                    if "num_classes" not in kwdargs:
-                        kwdargs["num_classes"] = state_dict["model_state"]["head.projection.weight"].shape[0]
-                    # If the user specified a different number of classes, remove the projection weights or else we'll error out
-                    elif kwdargs["num_classes"] != state_dict["model_state"]["head.projection.weight"].shape[0]:
-                        del state_dict["model_state"]["head.projection.weight"]
-                        del state_dict["model_state"]["head.projection.bias"]
+#                 if "head.projection.weight" in state_dict["model_state"]:
+#                     # set the number of classes equal to the state_dict only if the user doesn't want to overwrite it
+#                     if "num_classes" not in kwdargs:
+#                         kwdargs["num_classes"] = state_dict["model_state"]["head.projection.weight"].shape[0]
+#                     # if the user specified a different number of classes, remove the projection weights or else we'll error out
+#                     elif kwdargs["num_classes"] != state_dict["model_state"]["head.projection.weight"].shape[0]:
+#                         del state_dict["model_state"]["head.projection.weight"]
+#                         del state_dict["model_state"]["head.projection.bias"]
 
-            model = model_func(**kwdargs)
-            if pretrained:
-                # Disable being strict when trying to load a encoder-decoder model into an encoder-only model
-                if "decoder_pos_embed" in state_dict["model_state"] and not hasattr(model, "decoder_pos_embed"):
-                    strict = False
+#             model = model_func(**kwdargs)
+#             if pretrained:
+#                 # disable being strict when trying to load a encoder-decoder model into an encoder-only model
+#                 if "decoder_pos_embed" in state_dict["model_state"] and not hasattr(model, "decoder_pos_embed"):
+#                     strict = False
 
-                model.load_state_dict(state_dict["model_state"], strict=strict)
+#                 model.load_state_dict(state_dict["model_state"], strict=strict)
             
-            return model
+#             return model
 
-        # Keep some metadata so we can do things that require looping through all available models
-        model_def.checkpoints = checkpoints
-        model_def.default = default
+#         # keep some metadata so we can do things that require looping through all available models
+#         model_def.checkpoints = checkpoints
+#         model_def.default = default
 
-        return model_def
+#         return model_def
     
-    return inner
+#     return inner
 
 
 def conv_nd(n: int) -> Type[nn.Module]:
     """
     Returns a conv with nd (e.g., Conv2d for n=2). Work up to n=3.
-    If you wanted a 4d Hiera, you could probably just implement this for n=4. (no promises)
+    For a 4d Hiera, we could probably just implement this for n=4.
     """
     return [nn.Identity, nn.Conv1d, nn.Conv2d, nn.Conv3d][n]
 
 
 def do_pool(x: torch.Tensor, stride: int) -> torch.Tensor:
-    # Refer to `Unroll` to see how this performs a maxpool-Nd
+    # refer to `Unroll` to see how this performs a maxpool-Nd
     return x.view(x.shape[0], stride, -1, x.shape[-1]).max(dim=1).values
 
 
 def get_resized_mask(target_size: torch.Size, mask: torch.Tensor) -> torch.Tensor:
-    # target_size: [(T), (H), W]
-    # (spatial) mask: [B, C, (t), (h), w]
+    # target_size: [(D), (H), W]
+    # (spatial) mask: [B, C, (d), (h), w]
     if mask is None:
         return mask
 
@@ -337,7 +375,8 @@ def do_masked_conv(
     if mask is None:
         return conv(x)
 
-    # interpolate mask size s.t. matches x.shape[2:]
+    # interpolates mask size s.t. matches x.shape[2:]
+    # mask out regions before conv
     mask = get_resized_mask(target_size=x.shape[2:], mask=mask)
     return conv(x * mask.bool())
 
@@ -394,6 +433,8 @@ class Unroll(nn.Module):
     Note: This means that intermediate values of the model are not in HxW order, so they
     need to be re-rolled if you want to use the intermediate values as a HxW feature map.
     The last block of the network is fine though, since by then the strides are all consumed.
+    This is important for all encoder-decoder architectures that leverage FPNs/intermediate
+    feature maps.
     """
 
     def __init__(
@@ -417,23 +458,23 @@ class Unroll(nn.Module):
         x = x.view(*([B] + cur_size + [C]))
 
         for strides in self.schedule:
-            # Move patches with the given strides to the batch dimension
+            # move patches with the given strides to the batch dimension
 
-            # Create a view of the tensor with the patch stride as separate dims
-            # For example in 2d: [B, H // Sy, Sy, W // Sx, Sx, C]
+            # create a view of the tensor with the patch stride as separate dims
+            # for example in 2d: [B, H // Sy, Sy, W // Sx, Sx, C]
             cur_size = [i // s for i, s in zip(cur_size, strides)]
             new_shape = [B] + sum([[i, s] for i, s in zip(cur_size, strides)], []) + [C]
             x = x.view(new_shape)
 
-            # Move the patch stride into the batch dimension
-            # For example in 2d: [B, Sy, Sx, H // Sy, W // Sx, C]
+            # move the patch stride into the batch dimension
+            # for example in 2d: [B, Sy, Sx, H // Sy, W // Sx, C]
             L = len(new_shape)
             permute = (
                 [0] + list(range(2, L - 1, 2)) + list(range(1, L - 1, 2)) + [L - 1]
             )
             x = x.permute(permute)
 
-            # Now finally flatten the relevant dims into the batch dimension
+            # now finally flatten the relevant dims into the batch dimension
             x = x.flatten(0, len(strides))
             B *= math.prod(strides)
 
@@ -457,8 +498,8 @@ class Reroll(nn.Module):
         super().__init__()
         self.size = [i // s for i, s in zip(input_size, patch_stride)]
 
-        # The first stage has to reverse everything
-        # The next stage has to reverse all but the first unroll, etc.
+        # the first stage has to reverse everything
+        # the next stage has to reverse all but the first unroll, etc.
         self.schedule = {}
         size = self.size
         for i in range(stage_ends[-1] + 1):
@@ -476,7 +517,7 @@ class Reroll(nn.Module):
         Roll the given tensor back up to spatial order assuming it's from the given block.
 
         If no mask is provided:
-            - Returns [B, H, W, C] for 2d, [B, T, H, W, C] for 3d, etc.
+            - Returns [B, H, W, C] for 2d, [B, D, H, W, C] for 3d, etc.
         If a mask is provided:
             - Returns [B, #MUs, MUy, MUx, C] for 2d, etc.
         """
@@ -487,11 +528,11 @@ class Reroll(nn.Module):
         cur_mu_shape = [1] * D
 
         for strides in schedule:
-            # Extract the current patch from N
+            # extract the current patch from N
             x = x.view(B, *strides, N // math.prod(strides), *cur_mu_shape, C)
 
-            # Move that patch into the current MU
-            # Example in 2d: [B, Sy, Sx, N//(Sy*Sx), MUy, MUx, C] -> [B, N//(Sy*Sx), Sy, MUy, Sx, MUx, C]
+            # move that patch into the current MU
+            # example in 2d: [B, Sy, Sx, N//(Sy*Sx), MUy, MUx, C] -> [B, N//(Sy*Sx), Sy, MUy, Sx, MUx, C]
             L = len(x.shape)
             permute = (
                 [0, 1 + D]
@@ -503,20 +544,20 @@ class Reroll(nn.Module):
             )
             x = x.permute(permute)
 
-            # Reshape to [B, N//(Sy*Sx), *MU, C]
+            # reshape to [B, N//(Sy*Sx), *MU, C]
             for i in range(D):
                 cur_mu_shape[i] *= strides[i]
             x = x.reshape(B, -1, *cur_mu_shape, C)
             N = x.shape[1]
 
-        # Current shape (e.g., 2d: [B, #MUy*#MUx, MUy, MUx, C])
+        # current shape (e.g., 2d: [B, #MUy*#MUx, MUy, MUx, C])
         x = x.view(B, N, *cur_mu_shape, C)
 
-        # If masked, return [B, #MUs, MUy, MUx, C]
+        # if masked, return [B, #MUs, MUy, MUx, C]
         if mask is not None:
             return x
 
-        # If not masked, we can return [B, H, W, C]
+        # if not masked, we can return [B, H, W, C]
         x = undo_windowing(x, size, cur_mu_shape)
 
         return x

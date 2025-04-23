@@ -1,32 +1,33 @@
 defaults:
   - models: maskrcnn_fpn        # Loads configs/models/mask_rcnn.yaml
-  - models/backbones: resnet_fpn     # Loads configs/models/backbones/resnet.yaml
+  - models/backbones: resnet_fpn     # Loads configs/models/backbones/resnet_fpn.yaml
   - datasets: skittlez       # Loads configs/datasets/skittlez.yaml
   - metrics: metrics        # Loads configs/metrics/metrics.yaml
-  - transforms: transforms_skittlez # Loads configs/transforms/transforms.yaml
+  - transforms: transforms_skittlez # Loads configs/transforms/transforms_skittlez.yaml
   - _self_  # self reference last to allow for overrides
 
 # overrides
 # ----------------
+
 models:
   backbones:
     _target_: segmentation.models.backbones.fpn.BackboneWithFPN
-    # NOTE: By default FPN adds an extra LastLevelMaxPool layer to the last feature map
-    # Hence, the output feature maps will have len(return_layers) + 1 maps
+    # NOTE: FPN may add an extra LastLevelMaxPool layer to the last feature map
+    # Hence, the output feature maps may have len(return_layers) + 1 maps
     # return layers specifies which feature maps to run through the FPN
-    return_layers: {"p2": "p2", "p3": "p3"} # , "p1": "p1", "p2": "p2" # 2x downsample per return layer used + LastLevelMaxPool
-    in_channels_list: [256, 512] # , 1024, 2048 # matches embed_dim * stage sequence
+    return_layers: {"p2": "p2", "p3": "p3"} 
+    in_channels_list: [256, 512] # , 1024, 2048
     out_channels: ${backbone_out_channels}
     norm_layer: null
   min_size: 128 # images rescaled such that shorter size is min_size
   max_size: 128
   mask_roi_pool:
     _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
-    featmap_names: ${output_features} # for VitDet: adapt accordingly
-    output_size: 14 # usually 14 # ROI pooling output size
+    featmap_names: ${output_features}
+    output_size: 14 # ROI pooling output size
     sampling_ratio: 2 # grid subsampling 
     canonical_scale: 128
-    canonical_level: 4 # 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of 256x256x256 input
+    canonical_level: 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of input
   rpn_anchor_generator:
     _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
     sizes:
@@ -44,19 +45,20 @@ models:
   rpn_head: 
     _target_: segmentation.models.rpn.rpn_head.RPNHead
     in_channels: ${backbone_out_channels} 
-    num_anchors: 27 # 3x3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+    num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  
   # NOTE: consider chaning the number of positive samples considered if the model is not learning
-  # and only predicts background
+  #       and only predicts background
   # rpn_fg_iou_thresh: 0.5 # too high of a value will cause the model to not learn anything and always predict the background
   # rpn_bg_iou_thresh: 0.3
   # box_positive_fraction: 0.25 # positive fraction of samples in subsampling
 
 datasets:
-  batch_size: 16 # 4 # total batch size (batch_size per gpu * number of gpus) 
+  batch_size: 16 # total batch size (batch_size per gpu * number of gpus) 
   database:
     _target_: segmentation.data.datasets.skittlez.Skittlez_Database
     training: true 
-    distributed: true # true # set to true for distributed training (Ray or DDP)
+    distributed: true # set to true for distributed training (Ray or DDP)
     db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
     train_db_savedir: ${...train_db_savedir} # defer interpolation to main config
     selection_criteria: {"volume" : 8000}  # Minimum volume in pixels to accept instance
@@ -67,7 +69,7 @@ datasets:
     metadata: null
     batch_config:
       _target_: segmentation.data.data_utils.DataConfig
-      z: 128 #128
+      z: 128 
       y: 128
       x: 128
       c: 3
@@ -79,7 +81,7 @@ transforms:
       # mean: ${dataset_mean}
       # std: ${dataset_std}
     - _target_: segmentation.data.transforms.transforms.Resize
-      size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
+      size: [128, 128, 128]
 
 # ----------------
 
@@ -91,15 +93,15 @@ paradigm: segmentation.training.backend_segmentation.supervised
 
 # Backbone 
 backbone_target: segmentation.models.backbones.resnet.resnet50 # options: resnet50, resnet101, resnet152
-backbone_out_channels: 256 # C5 = 2048
-output_features: ["p2", "p3"] # , "p3", "p4", "pool" 
+backbone_out_channels: 256 # C5 = 2048 for ref.
+output_features: ["p2", "p3"] # "p4", "pool" 
 
 # Paths
-outdir: /clusterfs/nvme/segment_4d/test_8
+outdir: /clusterfs/nvme/segment_4d/test_15
 logdir: ${outdir}/logs
 
-load_checkpointdir: null # /clusterfs/nvme/segment_4d/test_4/checkpoints # null # specify if we want to load a checkpoint from a previous run that is not latest local run
-checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: specify where to save the checkpoints
+load_checkpointdir: null # specify if we want to load a checkpoint from a previous run that is not latest local run
+checkpointdir: ${outdir}/checkpoints # specify where to save the checkpoints
 checkpoint_update_interval: 100 # save checkpoint every N epochs
 
 train_db_savedir: ${outdir}/db
@@ -109,7 +111,7 @@ finetune: null
 
 # Optimizer parameters
 opt: adamw # TODO: to use fused lamb, install DeepSpeed with the DS_BUILD_FUSED_LAMB environment variable 
-lr: 5e-5 # 5e-4 # initial learning rate
+lr: 5e-5 # initial learning rate
 wd: 5e-5 # initial weight decay
 ld: null # optional layer decay
 clip_grad: 0.5

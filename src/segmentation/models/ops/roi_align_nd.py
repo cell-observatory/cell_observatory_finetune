@@ -1,7 +1,9 @@
 """
 https://github.com/TimothyZero/MedVision/blob/main/medvision/ops/roi_align_nd.py
 
-Copyright [yyyy] [name of copyright owner]
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -121,9 +123,9 @@ class RoIAlign(nn.Module):
     """
 
     def __init__(self,
-                 output_size,
-                 spatial_scale,
-                 sampling_ratio=-1):
+                 output_size: tuple,
+                 spatial_scale: float,
+                 sampling_ratio: int = -1):
         super(RoIAlign, self).__init__()
         assert iter(output_size)
 

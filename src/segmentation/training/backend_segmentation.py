@@ -2,6 +2,7 @@ import os
 import time
 import ujson
 import logging
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -14,12 +15,14 @@ warnings.filterwarnings("ignore")
 import torch
 import torch.nn as nn
 from torchinfo import summary
+from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LinearLR
 from timm.scheduler import create_scheduler_v2
 
 from deepspeed import initialize
 from deepspeed.ops.adam import FusedAdam
 from deepspeed.ops.lamb import FusedLamb
+from deepspeed.runtime.engine import DeepSpeedEngine
 from deepspeed.runtime.lr_schedules import WarmupCosineLR
 
 import ray.train.torch as raytorch
@@ -255,7 +258,16 @@ def get_optimizer(params, config: DictConfig, optimizer: str, steps_per_epoch: i
         return opt
 
 
-def _load_checkpoint(latest_checkpoint, model_engine, opt, config, logger):
+def _load_checkpoint(latest_checkpoint: Optional[Union[str, Path]],
+                     model_engine: DeepSpeedEngine,
+                     opt: Optional[Optimizer],
+                     config: DictConfig,
+                     logger: logging.Logger
+):
+    # we load checkpoints in the following order:
+    # 1. from Ray's checkpoint manager
+    # 2. from the load_checkpointdir specified in the config
+    # 3. from the latest checkpoint found in the outdir (current run dir)
     checkpoint = get_checkpoint() 
     if checkpoint is not None:
         checkpointdir = checkpoint.as_directory()
@@ -289,22 +301,6 @@ def supervised(config: DictConfig):
     #       But this works for now.
     model = build_dependency_graph_and_instantiate(config.models)
 
-    # # DEBUG
-    # model_state = torch.load("/clusterfs/nvme/segment_4d/test_5/checkpoints/best_model.bin", map_location="cpu")
-    # from segmentation.checkpoint.checkpoint import _strip_prefix
-    # model_state = _strip_prefix(model_state, prefix="module.")
-    # model.load_state_dict(model_state)
-    
-    # Skipping the model summary for now
-    # input_shape = tuple(OmegaConf.to_container(config.datasets.inputs, resolve=True))
-    # summarize_model(
-    #     model=model,
-    #     # inputs=config.inputs,
-    #     inputs=([torch.ones(input_shape),None]),
-    #     batch_size=config.datasets.batch_size,
-    #     logdir=Path(config.logdir),
-    # )
-
     opt = get_optimizer(
         params=model.parameters(),
         config=config,
@@ -330,7 +326,6 @@ def supervised(config: DictConfig):
             config=config,
             logger=logger,
             latest_checkpoint=latest_checkpoint,
-            # distributed=config.distributed_sampler,
         )
 
     evaluator = instantiate(config.metrics)
@@ -356,19 +351,13 @@ def supervised(config: DictConfig):
                 step_times, step_utilization, step_vram = [], [], []
 
                 for step, (inputs, targets) in enumerate(train_dataloader):
-                    # from segmentation.utils.plot import plot_boxes
-                    # import skimage
-                    # gt_box = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
-                    # print("DEBUG GT BOX", gt_box[0])
-                    # plot_boxes(gt_box, sample_indices=[0],image_shape=inputs[0,0].shape, sample_num=1, save_path="/clusterfs/nvme/segment_4d/test_5/gt_test_box.tif") 
-                    # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_mask.tif",targets[0]["masks"][0].cpu().numpy())
                     step_time = time.time()
                     lr_value = opt.param_groups[0]["lr"]
                     
-                    # TODO: More modular loss computation design
+                    # TODO: refactor decoder loss computation
                     loss_dict, outputs = model(inputs, targets)
 
-                    # TODO: Make this logic more general
+                    # TODO: modularize
                     step_loss = sum(loss_dict.values())
 
                     if torch.isnan(step_loss):
@@ -399,7 +388,6 @@ def supervised(config: DictConfig):
                         "step_utilization": cuda_util,
                     }
 
-                    # record individual component losses
                     for name, val in loss_dict.items():
                         step_log_entry[name] = val.detach().float().item()
 
@@ -446,24 +434,16 @@ def supervised(config: DictConfig):
                 }
 
                 if val_dataloader is not None and (epoch + 1) % config.val_interval == 0:
-                    
                     val_step_times = []
                     with inference_context(model):
                         with torch.no_grad():
+
                             for val_step, (inputs, targets) in enumerate(val_dataloader):
                                 val_step_time = time.time()
 
-                                # from segmentation.utils.plot import plot_boxes
-                                # import skimage
-                                # if is_main_process():
-                                #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_after_ld.tif", inputs[0,0].cpu().numpy())
-                                #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_ld.tif", targets[0]["masks"][0].cpu().numpy())
-                                #     box_test = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
-                                #     plot_boxes(box_test, sample_indices=[0], image_shape= inputs.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/bx_after_ld.tif")
-                                #     print(f"MAXIMUM: {inputs.max()} {inputs.min()} {inputs.mean()} {inputs.std()}")
-
-                                loss_dict, outputs  = model(inputs, targets)
+                                loss_dict, outputs = model(inputs, targets)
                                 evaluator.process(targets, outputs)
+
                                 val_step_times.append(time.time() - val_step_time)
                                 if val_step % config.val_log_step == 0:
                                     metric_results, _ = evaluator.evaluate()
@@ -490,22 +470,15 @@ def supervised(config: DictConfig):
                             if ckpt_loss < best_loss:
                                 best_loss = ckpt_loss
 
+                                # weights on each rank are placeholders in deepspeed stage 3
+                                # and hence cannot be saved directly with torch.save
+                                # instead convert with convert_zero_checkpoint (see checkpoint.py)
                                 if config.deepspeed_config.zero_optimization.stage == 3:
                                     model.save_checkpoint(config.checkpointdir, tag="best_model")
                                 else:
                                     if is_main_process():
                                         torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
                                         torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
-
-                # DEBUG ONLY!
-                # if loss < best_loss:
-                #     best_loss = loss
-
-                #     if config.deepspeed_config.zero_optimization.stage == 3:
-                #         model.save_checkpoint(config.checkpointdir, tag="best_model")
-                #     else:
-                #         torch.save(model.state_dict(), Path(config.checkpointdir) / "best_model.bin")
-                #         torch.save(opt.state_dict(), Path(config.checkpointdir) / "best_optimizer.bin")
 
                 if is_main_process():
                     pd.DataFrame.from_dict(epoch_logbook, orient='index').to_csv(Path(config.logdir) / 'logbook.csv')
@@ -525,21 +498,19 @@ def supervised(config: DictConfig):
                             torch.save(model.state_dict(), Path(config.checkpointdir) / "latest_model.bin")
                             torch.save(opt.state_dict(), Path(config.checkpointdir) / "latest_optimizer.bin")
 
-            if is_main_process():
-                checkpoint = Checkpoint.from_directory(config.checkpointdir)
+                # update latest model every checkpoint_update_interval epochs and best model 
+                # if validation loss is lower than best loss to Ray's reporting folder from master rank
+                checkpoint = Checkpoint.from_directory(config.checkpointdir) if is_main_process() else None
+                # report must be called on all ranks, else hangs
                 report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)
 
         # save model weights for last model  
         if config.deepspeed_config.zero_optimization.stage == 3:
             model.save_checkpoint(config.checkpointdir, tag="last_model")
         else:
-            # weights on each rank are placeholders in deepspeed stage 3
-            # and hence cannot be saved directly with torch.save
-            # instead convert with convert_zero_checkpoint (see checkpoint.py)
             if is_main_process():
                 torch.save(model.state_dict(), Path(config.checkpointdir) / "last_model.bin")
                 torch.save(opt.state_dict(), Path(config.checkpointdir) / "last_optimizer.bin")
 
-        if is_main_process():
-            checkpoint = Checkpoint.from_directory(config.checkpointdir)
-            report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)
+        checkpoint = Checkpoint.from_directory(config.checkpointdir) if is_main_process() else None
+        report(metrics=epoch_logbook[epoch], checkpoint=checkpoint)

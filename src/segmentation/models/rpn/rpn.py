@@ -51,6 +51,7 @@ def permute_and_flatten(layer: Tensor, N: int, A: int, C: int, D: int, H: int, W
     layer = layer.reshape(N, -1, C) # (N, D*H*W*A, C) 
     return layer
 
+
 def concat_box_prediction_layers(box_cls: List[Tensor], box_regression: List[Tensor]) -> Tuple[Tensor, Tensor]:
     box_cls_flattened = []
     box_regression_flattened = []
@@ -77,6 +78,7 @@ def concat_box_prediction_layers(box_cls: List[Tensor], box_regression: List[Ten
     box_cls = torch.cat(box_cls_flattened, dim=1).flatten(0, -2) # (FxNxAxDxHxW, C)
     box_regression = torch.cat(box_regression_flattened, dim=1).reshape(-1, 6) # (FxNxAxDxHxW, 6)
     return box_cls, box_regression
+
 
 class RegionProposalNetwork(torch.nn.Module):
     """
@@ -290,9 +292,6 @@ class RegionProposalNetwork(torch.nn.Module):
         sampled_pos_inds = torch.where(torch.cat(sampled_pos_inds, dim=0))[0] # (Num Positives,)
         sampled_neg_inds = torch.where(torch.cat(sampled_neg_inds, dim=0))[0] # (Num Negatives,)
 
-        # print(f"Number of sampled positive indices: {sampled_pos_inds.shape}")
-        # print(f"Number of sampled negative indices: {sampled_neg_inds.shape}")
-
         sampled_inds = torch.cat([sampled_pos_inds, sampled_neg_inds], dim=0) # (Num Positives + Num Negatives,)
 
         objectness = objectness.flatten() # (Num Positives + Num Negatives,) 
@@ -339,59 +338,21 @@ class RegionProposalNetwork(torch.nn.Module):
         # NOTE: Number of objectness preds. only matches nr. of anchors
         #       if rpn_head is initialized correctly (very important and may lead to silent errors)
         #       objectness: (BS, num_anchors, D, H, W) and pred_bbox_deltas: (BS, num_anchors*6, D, H, W)
+        #       this should be protected against now by initialization scheme
         objectness, pred_bbox_deltas = self.head(features) # classification scores & box diff (RPNHead preds)
         anchors = self.anchor_generator(images, features) # generate centers and create boxes of diff aspect ratios and scales
 
-        # # TODO: Change init of RPN Head so we can skip this check
-        # for lvl, obj in enumerate(objectness):
-        #     A_pred = obj.shape[1]
-        #     A_real = self.anchor_generator.cell_anchors[lvl].shape[0]
-        #     assert (
-        #         A_pred == A_real
-        #     ), (
-        #         f"Level {lvl}: RPNHead predicts {A_pred} anchors/loc "
-        #         f"but AnchorGenerator.cell_anchors[{lvl}] has {A_real}"
-        #     )
-
-        # DEBUG1:
-        # from segmentation.utils.plot import plot_boxes
-        # anchors_0 = anchors[0]
-        # print(anchors[0].shape)
-        # print(anchors_0[:5])
-        # plot_boxes(list(anchors_0.cpu().numpy()), sample_indices=[0,1,2,3,4], image_shape=images.tensors.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/test_anchors.tif")
-        # print(f"anchors_0 shape: {anchors_0.shape}")
-        # raise ValueError("DEBUG: anchors_0 shape")
-        # print("NMS THRESHOLD: ", self.nms_thresh)
-
-        # print(f"objectness shape: {objectness[0].shape}")
-        # print(f"pred_bbox_deltas shape: {pred_bbox_deltas[0].shape}")
-        # print(f"anchors shape: {anchors[0].shape}")
-
-        # DEBUG2:
-        # import skimage
-        # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_objectness.tif", objectness[0][0][0].cpu().numpy())
-        # print(f"Length of objectness: {len(objectness)}")
-        # print("objectness shape: ", objectness[0].shape)
-        # raise ValueError("DEBUG: objectness shape")
-
         num_images = len(anchors)
 
-        # anchors given by channel dim, iterate across feature levels and take first sample -> get anchors per level
+        # anchors given by channel dim, iterate across feature levels 
+        # and take first sample -> get anchors per level
         num_anchors_per_level_shape_tensors = [o[0].shape for o in objectness] 
         num_anchors_per_level = [s[0] * s[1] * s[2] * s[3] for s in num_anchors_per_level_shape_tensors] # total anchors = anchors per level * D*H*W
         objectness, pred_bbox_deltas = concat_box_prediction_layers(objectness, pred_bbox_deltas)
-
-        # DEBUG 3:
-        # expected shape: (FxNxAxDxHxW, C) for F feature levels, N images,
-        # A anchors per level, D*H*W spatial dimensions
-        # print(f"objectness shape: {objectness.shape}")
-        # print(f"pred_bbox_deltas shape: {pred_bbox_deltas.shape}")
-        # print(f"anchors shape: {anchors[0].shape}")
-        # raise ValueError("DEBUG: objectness shape")
         
-        # apply pred_bbox_deltas (predicted diff in x,y,z to shift anchors towards gt boxes) to anchors
-        # to obtain the decoded proposals. Note that we detach the deltas because Faster R-CNN
-        # do not backprop through the proposals
+        # apply pred_bbox_deltas (predicted diff in x,y,z to shift anchors towards gt boxes)
+        # to anchors to obtain the decoded proposals. Note that we detach the deltas 
+        # because Faster R-CNN do not backprop through the proposals
         proposals = self.box_coder.decode(pred_bbox_deltas.detach(), anchors)
         proposals = proposals.view(num_images, -1, 6) # TODO: Redundant?
         
@@ -402,8 +363,10 @@ class RegionProposalNetwork(torch.nn.Module):
         if self.training:
             if targets is None:
                 raise ValueError("targets should not be None")
-            labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors, targets) # box similarity (IOU matrix) -> matcher w. some selection 
-            regression_targets = self.box_coder.encode(matched_gt_boxes, anchors) # encode: (rel diffs. in centers and log-scale diffs in sizes)
+            # box similarity (IOU matrix) -> matcher w. some selection 
+            labels, matched_gt_boxes = self.assign_targets_to_anchors(anchors, targets)
+            # encode: (rel diffs. in centers and log-scale diffs in sizes) 
+            regression_targets = self.box_coder.encode(matched_gt_boxes, anchors) 
             loss_objectness, loss_rpn_box_reg = self.compute_loss(
                 objectness, pred_bbox_deltas, labels, regression_targets
             )

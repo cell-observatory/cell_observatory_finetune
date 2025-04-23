@@ -1,22 +1,22 @@
 defaults:
   - _self_
 
-# FPN Backbone 
+# FPN
 
 _target_: segmentation.models.backbones.fpn.BackboneWithFPN
-# NOTE: By default FPN adds an extra LastLevelMaxPool layer to the last feature map
-# Hence, the output feature maps will have len(return_layers) + 1 maps
+# NOTE: FPN may add an extra LastLevelMaxPool layer to the last feature map
+# Hence, the output feature maps may have len(return_layers) + 1 maps
 # return layers specifies which feature maps to run through the FPN
-return_layers: {"p2": "p2", "p3": "p3"} # , "p1": "p1", "p2": "p2" # 2x downsample per return layer used + LastLevelMaxPool
-in_channels_list: [256, 512] # , 1024, 2048 # matches embed_dim * stage sequence
+return_layers: {"p2": "p2", "p3": "p3"} 
+in_channels_list: [256, 512] # , 1024, 2048
 out_channels: ${backbone_out_channels}
 norm_layer: null
 
-# extra_blocks # NOTE: FPN adds an extra LastLevelMaxPool layer to the last feature map if none given
+# backbone
 
 backbone:
-  # Resnet
   _target_: ${backbone_target}
   channel_in: ${datasets.channel_in}
   weights: null
   progress: true
+  return_intermediates: true # whether to return intermediate features from the backbone

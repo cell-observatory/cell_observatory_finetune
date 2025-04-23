@@ -5,3 +5,4 @@ _target_: ${backbone_target}
 channel_in: ${datasets.channel_in}
 weights: null
 progress: true
+return_intermediates: false

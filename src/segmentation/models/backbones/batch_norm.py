@@ -1,19 +1,32 @@
 """
 https://github.com/facebookresearch/detectron2/blob/main/detectron2/layers/batch_norm.py#L333
 
-(ADD COPYRIGHT HERE)
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 """
 
+
+from typing import Optional, Union, Callable
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# TODO: Rename file
 
-################################################################ ViTDet ############################################################
-
+# TODO: merge with other layers into layers.py 
 
 class FrozenBatchNorm3d(nn.Module):
     """
@@ -25,8 +38,10 @@ class FrozenBatchNorm3d(nn.Module):
 
     The pre-trained backbone models from Caffe2 only contain "weight" and "bias",
     which are computed from the original four parameters of BN.
+
     The affine transform `x * weight + bias` will perform the equivalent
     computation of `(x - running_mean) / sqrt(running_var) * weight + bias`.
+    
     When loading a backbone model from Caffe2, "running_mean" and "running_var"
     will be left unchanged as identity transformation.
 
@@ -37,7 +52,7 @@ class FrozenBatchNorm3d(nn.Module):
 
     _version = 3
 
-    def __init__(self, num_features, eps=1e-5):
+    def __init__(self, num_features: int, eps: float = 1e-5):
         super().__init__()
         
         self.num_features = num_features
@@ -50,9 +65,9 @@ class FrozenBatchNorm3d(nn.Module):
         self.register_buffer("num_batches_tracked", None)
 
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         if x.requires_grad:
-            # When gradients are needed, F.batch_norm will use extra memory
+            # when gradients are needed, F.batch_norm will use extra memory
             # because its backward op computes gradients for weight/bias as well.
             scale = self.weight * (self.running_var + self.eps).rsqrt()
             bias = self.bias - self.running_mean * scale
@@ -61,7 +76,7 @@ class FrozenBatchNorm3d(nn.Module):
             out_dtype = x.dtype  # may be half
             return x * scale.to(out_dtype) + bias.to(out_dtype)
         else:
-            # When gradients are not needed, F.batch_norm is a single fused op
+            # when gradients are not needed, F.batch_norm is a single fused op
             # and provide more optimization opportunities.
             return F.batch_norm(
                 x,
@@ -87,8 +102,8 @@ class FrozenBatchNorm3d(nn.Module):
         version = local_metadata.get("version", None)
 
         if version is None or version < 2:
-            # No running_mean/var in early versions
-            # This will silent the warnings
+            # no running_mean/var in early versions
+            # this will silent the warnings
             if prefix + "running_mean" not in state_dict:
                 state_dict[prefix + "running_mean"] = torch.zeros_like(self.running_mean)
             if prefix + "running_var" not in state_dict:
@@ -110,7 +125,7 @@ class FrozenBatchNorm3d(nn.Module):
 
 
     @classmethod
-    def convert_frozen_batchnorm(cls, module):
+    def convert_frozen_batchnorm(cls, module: nn.Module):
         """
         Convert all BatchNorm/SyncBatchNorm in module into FrozenBatchNorm.
 
@@ -178,7 +193,11 @@ class FrozenBatchNorm3d(nn.Module):
         return res
     
 
-def get_norm(norm, channel_dim=-1, out_channels = None, partial_init=False):
+def get_norm(norm: Optional[Union[str, Callable]], 
+             out_channels: int = None, 
+             channel_dim:int = -1, 
+             partial_init: bool = False
+):
     """
     Args:
         norm (str or callable or None):
@@ -192,6 +211,7 @@ def get_norm(norm, channel_dim=-1, out_channels = None, partial_init=False):
     Returns:
         nn.Module or callable or None
     """
+    # handle case when model specifications does not include norm
     if not norm:
         return None
 
@@ -218,7 +238,7 @@ def get_norm(norm, channel_dim=-1, out_channels = None, partial_init=False):
         raise ValueError(f"Unsupported norm argument: {norm}")
 
     if partial_init or out_channels is None:
-        # return the constructor => can call it later with different ch num
+        # return the constructor, call it later with different ch num
         return norm_constructor
     else:
         return norm_constructor(out_channels)
@@ -232,19 +252,16 @@ class LayerNorm(nn.Module):
     https://github.com/facebookresearch/ConvNeXt/blob/d1fa8f6fef0a165b27399986cc2bdacc92777e40/models/convnext.py#L119  # noqa B950
     """
 
-    def __init__(self, normalized_shape, eps=1e-6):
+    def __init__(self, normalized_shape: int, eps: float = 1e-6):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(normalized_shape))
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.eps = eps
         self.normalized_shape = (normalized_shape,)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         u = x.mean(1, keepdim=True)
         s = (x - u).pow(2).mean(1, keepdim=True)
         x = (x - u) / torch.sqrt(s + self.eps)
         x = self.weight[:, None, None, None] * x + self.bias[:, None, None, None]
         return x
-
-
-################################################################################################################################################

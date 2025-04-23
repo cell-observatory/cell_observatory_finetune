@@ -85,10 +85,10 @@ class LevelMapper:
         Args:
             boxlists (list[BoxList])
         """
-        # Compute level ids
+        # compute level ids
         s = torch.pow(torch.cat([box_volume(boxlist) for boxlist in boxlists]), 1/3)
 
-        # Eqn.(1) in FPN paper
+        # eqn.(1) in FPN paper
         target_lvls = torch.floor(self.lvl0 + torch.log2(s / self.s0) + torch.tensor(self.eps, dtype=s.dtype))
         target_lvls = torch.clamp(target_lvls, min=self.k_min, max=self.k_max)
         return (target_lvls.to(torch.int64) - self.k_min).to(torch.int64)
@@ -128,7 +128,7 @@ def _setup_scales(
     max_y = 0
     max_z = 0
     
-    # TODO: Double check indexing
+    # TODO: double check indexing
     for shape in image_shapes:
         max_z = max(shape[0], max_z)
         max_y = max(shape[1], max_y)
@@ -138,16 +138,9 @@ def _setup_scales(
     scales = [_infer_scale(feat, original_input_shape) for feat in features]
 
     # get the levels in the feature map by leveraging the fact that the network always
-    # downsamples by a factor of 2 at each level.
+    # downsamples by a factor of 2 at each level
     lvl_min = -torch.log2(torch.tensor(scales[0], dtype=torch.float32)).item()
     lvl_max = -torch.log2(torch.tensor(scales[-1], dtype=torch.float32)).item()
-
-    # print(f"Scales: {scales}")
-    # print(f"original_input_shape: {original_input_shape}")
-    # print(f"features: {[f.shape for f in features]}")
-    # print(f"max_x: {max_x}, max_y: {max_y}, max_z: {max_z}")
-    # print(f"lvl_min: {lvl_min}, lvl_max: {lvl_max}")
-    # raise ValueError("DEBUG")
 
     map_levels = initLevelMapper(
         int(lvl_min),
@@ -155,11 +148,6 @@ def _setup_scales(
         canonical_scale=canonical_scale,
         canonical_level=canonical_level,
     )
-
-    # print(f"Scales: {scales}")
-    # test_box = [torch.tensor([[0, 0, 0, max_x, max_y, max_z]], dtype=torch.float32)]
-    # print(f"Map levels: {map_levels(test_box)}")
-    # raise ValueError("DEBUG")
 
     return scales, map_levels
 
@@ -244,20 +232,9 @@ def _multiscale_roi_align(
 
         rois_per_level = rois[idx_in_level]
 
-        # Move tensors to GPU
+        # move tensors to GPU
         per_level_feature_gpu = per_level_feature.to('cuda')
         rois_per_level_gpu = rois_per_level.to('cuda')
-
-        # print(f"Level {level}: {per_level_feature.shape}, {rois_per_level.shape}")
-        # print(f"ROIs: {rois_per_level}")
-        # print('test level:')
-        # box = rois_per_level[0]
-        # val = torch.pow((box[3] - box[0]) * (box[4] - box[1]) * (box[5] - box[2]), 1/3)
-        # print(f"Volume: {val}")
-        # print(f"Idx in level: {idx_in_level}")
-        # print(f"levels: {levels.shape}, {levels}")
-        # print(f"BOXES: {boxes[0:20]}")
-        # raise ValueError("DEBUG")
 
         result_idx_in_level = roi_align_3d(
             per_level_feature_gpu,
@@ -280,8 +257,6 @@ def _multiscale_roi_align(
             # We need to cast manually (can't rely on autocast to cast for us) because
             # the op acts on result in-place, and autocast only affects out-of-place ops.
             result[idx_in_level] = result_idx_in_level.to(result.dtype)
-
-    # raise ValueError("DEBUG")
 
     return result
 
@@ -319,7 +294,6 @@ class MultiScaleRoIAlign(nn.Module):
         canonical_level: int = 4,
     ):
         super().__init__()
-        # _log_api_usage_once(self)
         if isinstance(output_size, int):
             output_size = (output_size, output_size, output_size)
         self.featmap_names = featmap_names
@@ -349,22 +323,11 @@ class MultiScaleRoIAlign(nn.Module):
         Returns:
             result (Tensor)
         """
-        # print(f"featmap_names: {self.featmap_names}")
-        # print(f"image shapes: {image_shapes}")
-        # print("X dict shapes: ")
-        # for k, v in x.items():
-        #     print(f"{k}: {v.shape}")
-        # print("Boxes shapes: ")
-        # for i, b in enumerate(boxes):
-        #     print(f"Box {i}: {b.shape}")
         x_filtered = _filter_input(x, self.featmap_names)
         if self.scales is None or self.map_levels is None:
             self.scales, self.map_levels = _setup_scales(
                 x_filtered, image_shapes, self.canonical_scale, self.canonical_level
             )
-
-        # print(f"Scales: {self.scales}")
-        # print(f"Map levels: {self.map_levels}")
 
         return _multiscale_roi_align(
             x_filtered,

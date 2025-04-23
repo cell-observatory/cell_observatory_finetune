@@ -26,7 +26,7 @@ def gather_dataset(
     transforms = Compose([instantiate(t) for t in config.transforms.transforms_list]) if config.transforms.transforms_list else None
     dataset = instantiate(config.datasets.database,
                           transforms = transforms,
-                          batch_config=config.datasets.database.batch_config, # Hydra doesn’t merge sub-dicts recursively
+                          batch_config=config.datasets.database.batch_config, 
                           dtype=Dtypes[config.amp].value,
                           )
     
@@ -77,6 +77,7 @@ def gather_dataset(
                 num_workers=config.gpu_workers,
                 prefetch_factor=2,
                 persistent_workers=False,
+                # handle cases where we want to run on a single GPU without distributed environment
                 sampler=DistributedSampler(dataset, drop_last=True) if config.distributed_sampler else None,
                 worker_init_fn=db_worker_init_fn,
                 drop_last=True,

@@ -5,28 +5,28 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "segmentation"
 version = "0.1.0"
-description = "4D & 5D segmentation pipelines with custom CUDA ops"
+description = "4D & 5D Segmentation Models"
 authors = [{ name = "Hugo Hamilton", email = "hph@berkeley.edu" }]
 dependencies = [
-    "torch==2.4.1+cu124",
-    "torchvision==0.19.1+cu124",
+    "torch==2.4.1",
+    "torchvision==0.19.1",
     "hydra-core",
     "deepspeed==0.16.5",
     "ray[train]==2.44.1",
     "pandas",
     "zarr",
-    "fvcore==0.1.5.post20221221",
+    "fvcore",
     "matplotlib",
-    "numba==0.60.0",
-    "numpy==1.26.0",
+    "numba",
+    "numpy",
     "omegaconf",
-    "pytorchvideo==0.1.5",
+    "pytorchvideo",
     "scipy",
     "setuptools==72.1.0",
     "scikit-image",
     "tensorstore",
     "tifffile",
-    "timm==1.0.15",
+    "timm",
     "torchinfo",
     "tqdm",
     "ujson"

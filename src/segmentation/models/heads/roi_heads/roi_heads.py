@@ -1,8 +1,21 @@
 """
 https://github.com/pytorch/vision/blob/309bd7a1512ad9ff0e9729fbdad043cb3472e4cb/torchvision/models/detection/roi_heads.py#L491
 
-(ADD COPYRIGHT HEADER HERE)
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 """
 
 
@@ -14,7 +27,6 @@ import torch.nn.functional as F
 
 from segmentation.models.rpn import box_ops
 from segmentation.models.rpn import det_utils
-
 from segmentation.models.ops.roi_align_nd import RoIAlign3DFunction
 
 
@@ -39,20 +51,16 @@ def fastrcnn_loss(class_logits, box_regression, labels, regression_targets):
     classification_loss = F.cross_entropy(class_logits, labels) 
 
     # get indices that correspond to the regression targets for
-    # the corresponding ground truth labels, to be used with
-    # advanced indexing
+    # the corresponding ground truth labels
     sampled_pos_inds_subset = torch.where(labels > 0)[0] 
     labels_pos = labels[sampled_pos_inds_subset]
     N, num_classes = class_logits.shape
     box_regression = box_regression.reshape(N, box_regression.size(-1) // 6, 6) # (N, Kx6) -> (N, K, 6) for K classes
 
-    # print(f"Number of sampled positive indices: {sampled_pos_inds_subset.shape}")
-    # print(f"Number of sampled negative indices: {labels.shape[0] - sampled_pos_inds_subset.shape[0]}")
-    # raise ValueError("Number of sampled positive indices: {sampled_pos_inds_subset.shape}")
-
     # class-aware loss (i.e. predictions supervised for the correct class)
     box_loss = F.smooth_l1_loss(
-        box_regression[sampled_pos_inds_subset, labels_pos], # get regression preds for correct class  
+        # get regression preds for correct class
+        box_regression[sampled_pos_inds_subset, labels_pos],   
         regression_targets[sampled_pos_inds_subset],
         beta=1 / 9, 
         reduction="sum",
@@ -149,13 +157,12 @@ def maskrcnn_loss(mask_logits, proposals, gt_masks, gt_labels, mask_matched_idxs
     )
     return mask_loss
 
+
 # the next two functions should be merged inside Masker
 # but are kept here for the moment while we need them
 # temporarily for paste_mask_in_image
 def expand_boxes(boxes, scale):
     # type: (Tensor, float) -> Tensor
-    # if torchvision._is_tracing():
-    #     return _onnx_expand_boxes(boxes, scale)
 
     w_half = (boxes[:, 3] - boxes[:, 0]) * 0.5
     h_half = (boxes[:, 4] - boxes[:, 1]) * 0.5
@@ -181,18 +188,9 @@ def expand_boxes(boxes, scale):
     return boxes_exp
 
 
-# @torch.jit.unused
-# def expand_masks_tracing_scale(M, padding):
-#     # type: (int, int) -> float
-#     return torch.tensor(M + 2 * padding).to(torch.float32) / torch.tensor(M).to(torch.float32)
-
-
 def expand_masks(mask, padding):
     # type: (Tensor, int) -> Tuple[Tensor, float]
     M = mask.shape[-1]
-    # if torch._C._get_tracing_state():  # could not import is_tracing(), not sure why
-    #     scale = expand_masks_tracing_scale(M, padding)
-    # else:
     scale = float(M + 2 * padding) / M
     padded_mask = F.pad(mask, (padding,) * 6)
     return padded_mask, scale
@@ -368,11 +366,6 @@ class RoIHeads(nn.Module):
     def subsample(self, labels):
         # type: (List[Tensor]) -> List[Tensor]
         sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
-
-        # print(f"Number of sampled positive indices: {sampled_pos_inds.shape}")
-        # print(f"Number of sampled negative indices: {sampled_neg_inds.shape}")
-        # raise ValueError("Number of sampled positive indices: {sampled_pos_inds}")
-
         sampled_inds = []
         for img_idx, (pos_inds_img, neg_inds_img) in enumerate(zip(sampled_pos_inds, sampled_neg_inds)):
             img_sampled_inds = torch.where(pos_inds_img | neg_inds_img)[0]
@@ -474,7 +467,8 @@ class RoIHeads(nn.Module):
             scores = scores[:, 1:]
             labels = labels[:, 1:]
 
-            # batch everything, by making every class prediction be a separate instance
+            # batch everything, by making every class prediction be
+            # a separate instance
             boxes = boxes.reshape(-1, 6)
             scores = scores.reshape(-1)
             labels = labels.reshape(-1)
@@ -489,8 +483,8 @@ class RoIHeads(nn.Module):
 
             # non-maximum suppression, independently done per class
             # NOTE: boxes, scores, labels are all flattened 1D tensors
-            # hence a given ROI can in theory have multiple boxes, scores and labels
-            # that are retained after NMS 
+            #       hence a given ROI can in theory have multiple boxes, scores and labels
+            #       that are retained after NMS 
             keep = box_ops.batched_nms(boxes, scores, labels, self.nms_thresh)
             # keep only topk scoring predictions
             keep = keep[: self.detections_per_img]
@@ -578,7 +572,6 @@ class RoIHeads(nn.Module):
             else:
                 pos_matched_idxs = None
 
-            # mask_proposals = [self.filter_boxes(p) for p in mask_proposals] #TODO: Is this needed?
             if self.mask_roi_pool is not None:
                 mask_features = self.mask_roi_pool(features, mask_proposals, image_shapes)
                 mask_features = self.mask_head(mask_features)
@@ -604,344 +597,3 @@ class RoIHeads(nn.Module):
             losses.update(loss_mask)
 
         return result, losses
-
-############################################################ LEGACY ############################################################
-
-        # # keep none checks in if conditional so torchscript will conditionally
-        # # compile each branch
-        # if (
-        #     self.keypoint_roi_pool is not None
-        #     and self.keypoint_head is not None
-        #     and self.keypoint_predictor is not None
-        # ):
-        #     keypoint_proposals = [p["boxes"] for p in result]
-        #     if self.training:
-        #         # during training, only focus on positive boxes
-        #         num_images = len(proposals)
-        #         keypoint_proposals = []
-        #         pos_matched_idxs = []
-        #         if matched_idxs is None:
-        #             raise ValueError("if in trainning, matched_idxs should not be None")
-
-        #         for img_id in range(num_images):
-        #             pos = torch.where(labels[img_id] > 0)[0]
-        #             keypoint_proposals.append(proposals[img_id][pos])
-        #             pos_matched_idxs.append(matched_idxs[img_id][pos])
-        #     else:
-        #         pos_matched_idxs = None
-
-        #     keypoint_features = self.keypoint_roi_pool(features, keypoint_proposals, image_shapes)
-        #     keypoint_features = self.keypoint_head(keypoint_features)
-        #     keypoint_logits = self.keypoint_predictor(keypoint_features)
-
-        #     loss_keypoint = {}
-        #     if self.training:
-        #         if targets is None or pos_matched_idxs is None:
-        #             raise ValueError("both targets and pos_matched_idxs should not be None when in training mode")
-
-        #         gt_keypoints = [t["keypoints"] for t in targets]
-        #         rcnn_loss_keypoint = keypointrcnn_loss(
-        #             keypoint_logits, keypoint_proposals, gt_keypoints, pos_matched_idxs
-        #         )
-        #         loss_keypoint = {"loss_keypoint": rcnn_loss_keypoint}
-        #     else:
-        #         if keypoint_logits is None or keypoint_proposals is None:
-        #             raise ValueError(
-        #                 "both keypoint_logits and keypoint_proposals should not be None when not in training mode"
-        #             )
-
-        #         keypoints_probs, kp_scores = keypointrcnn_inference(keypoint_logits, keypoint_proposals)
-        #         for keypoint_prob, kps, r in zip(keypoints_probs, kp_scores, result):
-        #             r["keypoints"] = keypoint_prob
-        #             r["keypoints_scores"] = kps
-        #     losses.update(loss_keypoint)
-
-        # return result, losses
-    
-    # def filter_boxes(self, boxes, eps=1e-4):
-    #     if len(boxes) == 0:
-    #         return boxes
-    #     widths = boxes[:, 3] - boxes[:, 0]
-    #     heights = boxes[:, 4] - boxes[:, 1]
-    #     depths = boxes[:, 5] - boxes[:, 2]
-    #     keep = (widths > eps) & (heights > eps) & (depths > eps)
-    #     return boxes[keep]
-
-    
-# def _onnx_paste_mask_in_image(mask, box, im_h, im_w):
-#     one = torch.ones(1, dtype=torch.int64)
-#     zero = torch.zeros(1, dtype=torch.int64)
-
-#     w = box[2] - box[0] + one
-#     h = box[3] - box[1] + one
-#     w = torch.max(torch.cat((w, one)))
-#     h = torch.max(torch.cat((h, one)))
-
-#     # Set shape to [batchxCxHxW]
-#     mask = mask.expand((1, 1, mask.size(0), mask.size(1)))
-
-#     # Resize mask
-#     mask = F.interpolate(mask, size=(int(h), int(w)), mode="bilinear", align_corners=False)
-#     mask = mask[0][0]
-
-#     x_0 = torch.max(torch.cat((box[0].unsqueeze(0), zero)))
-#     x_1 = torch.min(torch.cat((box[2].unsqueeze(0) + one, im_w.unsqueeze(0))))
-#     y_0 = torch.max(torch.cat((box[1].unsqueeze(0), zero)))
-#     y_1 = torch.min(torch.cat((box[3].unsqueeze(0) + one, im_h.unsqueeze(0))))
-
-#     unpaded_im_mask = mask[(y_0 - box[1]) : (y_1 - box[1]), (x_0 - box[0]) : (x_1 - box[0])]
-
-#     # TODO : replace below with a dynamic padding when support is added in ONNX
-
-#     # pad y
-#     zeros_y0 = torch.zeros(y_0, unpaded_im_mask.size(1))
-#     zeros_y1 = torch.zeros(im_h - y_1, unpaded_im_mask.size(1))
-#     concat_0 = torch.cat((zeros_y0, unpaded_im_mask.to(dtype=torch.float32), zeros_y1), 0)[0:im_h, :]
-#     # pad x
-#     zeros_x0 = torch.zeros(concat_0.size(0), x_0)
-#     zeros_x1 = torch.zeros(concat_0.size(0), im_w - x_1)
-#     im_mask = torch.cat((zeros_x0, concat_0, zeros_x1), 1)[:, :im_w]
-#     return im_mask
-
-
-# @torch.jit._script_if_tracing
-# def _onnx_paste_masks_in_image_loop(masks, boxes, im_h, im_w):
-#     res_append = torch.zeros(0, im_h, im_w)
-#     for i in range(masks.size(0)):
-#         mask_res = _onnx_paste_mask_in_image(masks[i][0], boxes[i], im_h, im_w)
-#         mask_res = mask_res.unsqueeze(0)
-#         res_append = torch.cat((res_append, mask_res))
-#     return res_append
-
-# def keypoints_to_heatmap(keypoints, rois, heatmap_size):
-#     # type: (Tensor, Tensor, int) -> Tuple[Tensor, Tensor]
-#     offset_x = rois[:, 0]
-#     offset_y = rois[:, 1]
-#     scale_x = heatmap_size / (rois[:, 2] - rois[:, 0])
-#     scale_y = heatmap_size / (rois[:, 3] - rois[:, 1])
-
-#     offset_x = offset_x[:, None]
-#     offset_y = offset_y[:, None]
-#     scale_x = scale_x[:, None]
-#     scale_y = scale_y[:, None]
-
-#     x = keypoints[..., 0]
-#     y = keypoints[..., 1]
-
-#     x_boundary_inds = x == rois[:, 2][:, None]
-#     y_boundary_inds = y == rois[:, 3][:, None]
-
-#     x = (x - offset_x) * scale_x
-#     x = x.floor().long()
-#     y = (y - offset_y) * scale_y
-#     y = y.floor().long()
-
-#     x[x_boundary_inds] = heatmap_size - 1
-#     y[y_boundary_inds] = heatmap_size - 1
-
-#     valid_loc = (x >= 0) & (y >= 0) & (x < heatmap_size) & (y < heatmap_size)
-#     vis = keypoints[..., 2] > 0
-#     valid = (valid_loc & vis).long()
-
-#     lin_ind = y * heatmap_size + x
-#     heatmaps = lin_ind * valid
-
-#     return heatmaps, valid
-
-
-# def _onnx_heatmaps_to_keypoints(
-#     maps, maps_i, roi_map_width, roi_map_height, widths_i, heights_i, offset_x_i, offset_y_i
-# ):
-#     num_keypoints = torch.scalar_tensor(maps.size(1), dtype=torch.int64)
-
-#     width_correction = widths_i / roi_map_width
-#     height_correction = heights_i / roi_map_height
-
-#     roi_map = F.interpolate(
-#         maps_i[:, None], size=(int(roi_map_height), int(roi_map_width)), mode="bicubic", align_corners=False
-#     )[:, 0]
-
-#     w = torch.scalar_tensor(roi_map.size(2), dtype=torch.int64)
-#     pos = roi_map.reshape(num_keypoints, -1).argmax(dim=1)
-
-#     x_int = pos % w
-#     y_int = (pos - x_int) // w
-
-#     x = (torch.tensor(0.5, dtype=torch.float32) + x_int.to(dtype=torch.float32)) * width_correction.to(
-#         dtype=torch.float32
-#     )
-#     y = (torch.tensor(0.5, dtype=torch.float32) + y_int.to(dtype=torch.float32)) * height_correction.to(
-#         dtype=torch.float32
-#     )
-
-#     xy_preds_i_0 = x + offset_x_i.to(dtype=torch.float32)
-#     xy_preds_i_1 = y + offset_y_i.to(dtype=torch.float32)
-#     xy_preds_i_2 = torch.ones(xy_preds_i_1.shape, dtype=torch.float32)
-#     xy_preds_i = torch.stack(
-#         [
-#             xy_preds_i_0.to(dtype=torch.float32),
-#             xy_preds_i_1.to(dtype=torch.float32),
-#             xy_preds_i_2.to(dtype=torch.float32),
-#         ],
-#         0,
-#     )
-
-#     # TODO: simplify when indexing without rank will be supported by ONNX
-#     base = num_keypoints * num_keypoints + num_keypoints + 1
-#     ind = torch.arange(num_keypoints)
-#     ind = ind.to(dtype=torch.int64) * base
-#     end_scores_i = (
-#         roi_map.index_select(1, y_int.to(dtype=torch.int64))
-#         .index_select(2, x_int.to(dtype=torch.int64))
-#         .view(-1)
-#         .index_select(0, ind.to(dtype=torch.int64))
-#     )
-
-#     return xy_preds_i, end_scores_i
-
-
-# @torch.jit._script_if_tracing
-# def _onnx_heatmaps_to_keypoints_loop(
-#     maps, rois, widths_ceil, heights_ceil, widths, heights, offset_x, offset_y, num_keypoints
-# ):
-#     xy_preds = torch.zeros((0, 3, int(num_keypoints)), dtype=torch.float32, device=maps.device)
-#     end_scores = torch.zeros((0, int(num_keypoints)), dtype=torch.float32, device=maps.device)
-
-#     for i in range(int(rois.size(0))):
-#         xy_preds_i, end_scores_i = _onnx_heatmaps_to_keypoints(
-#             maps, maps[i], widths_ceil[i], heights_ceil[i], widths[i], heights[i], offset_x[i], offset_y[i]
-#         )
-#         xy_preds = torch.cat((xy_preds.to(dtype=torch.float32), xy_preds_i.unsqueeze(0).to(dtype=torch.float32)), 0)
-#         end_scores = torch.cat(
-#             (end_scores.to(dtype=torch.float32), end_scores_i.to(dtype=torch.float32).unsqueeze(0)), 0
-#         )
-#     return xy_preds, end_scores
-
-
-# def heatmaps_to_keypoints(maps, rois):
-#     """Extract predicted keypoint locations from heatmaps. Output has shape
-#     (#rois, 4, #keypoints) with the 4 rows corresponding to (x, y, logit, prob)
-#     for each keypoint.
-#     """
-#     # This function converts a discrete image coordinate in a HEATMAP_SIZE x
-#     # HEATMAP_SIZE image to a continuous keypoint coordinate. We maintain
-#     # consistency with keypoints_to_heatmap_labels by using the conversion from
-#     # Heckbert 1990: c = d + 0.5, where d is a discrete coordinate and c is a
-#     # continuous coordinate.
-#     offset_x = rois[:, 0]
-#     offset_y = rois[:, 1]
-
-#     widths = rois[:, 2] - rois[:, 0]
-#     heights = rois[:, 3] - rois[:, 1]
-#     widths = widths.clamp(min=1)
-#     heights = heights.clamp(min=1)
-#     widths_ceil = widths.ceil()
-#     heights_ceil = heights.ceil()
-
-#     num_keypoints = maps.shape[1]
-
-#     # if torchvision._is_tracing():
-#     #     xy_preds, end_scores = _onnx_heatmaps_to_keypoints_loop(
-#     #         maps,
-#     #         rois,
-#     #         widths_ceil,
-#     #         heights_ceil,
-#     #         widths,
-#     #         heights,
-#     #         offset_x,
-#     #         offset_y,
-#     #         torch.scalar_tensor(num_keypoints, dtype=torch.int64),
-#     #     )
-#     #     return xy_preds.permute(0, 2, 1), end_scores
-
-#     xy_preds = torch.zeros((len(rois), 3, num_keypoints), dtype=torch.float32, device=maps.device)
-#     end_scores = torch.zeros((len(rois), num_keypoints), dtype=torch.float32, device=maps.device)
-#     for i in range(len(rois)):
-#         roi_map_width = int(widths_ceil[i].item())
-#         roi_map_height = int(heights_ceil[i].item())
-#         width_correction = widths[i] / roi_map_width
-#         height_correction = heights[i] / roi_map_height
-#         roi_map = F.interpolate(
-#             maps[i][:, None], size=(roi_map_height, roi_map_width), mode="bicubic", align_corners=False
-#         )[:, 0]
-#         # roi_map_probs = scores_to_probs(roi_map.copy())
-#         w = roi_map.shape[2]
-#         pos = roi_map.reshape(num_keypoints, -1).argmax(dim=1)
-
-#         x_int = pos % w
-#         y_int = torch.div(pos - x_int, w, rounding_mode="floor")
-#         # assert (roi_map_probs[k, y_int, x_int] ==
-#         #         roi_map_probs[k, :, :].max())
-#         x = (x_int.float() + 0.5) * width_correction
-#         y = (y_int.float() + 0.5) * height_correction
-#         xy_preds[i, 0, :] = x + offset_x[i]
-#         xy_preds[i, 1, :] = y + offset_y[i]
-#         xy_preds[i, 2, :] = 1
-#         end_scores[i, :] = roi_map[torch.arange(num_keypoints, device=roi_map.device), y_int, x_int]
-
-#     return xy_preds.permute(0, 2, 1), end_scores
-
-
-# def keypointrcnn_loss(keypoint_logits, proposals, gt_keypoints, keypoint_matched_idxs):
-#     # type: (Tensor, List[Tensor], List[Tensor], List[Tensor]) -> Tensor
-#     N, K, H, W = keypoint_logits.shape
-#     if H != W:
-#         raise ValueError(
-#             f"keypoint_logits height and width (last two elements of shape) should be equal. Instead got H = {H} and W = {W}"
-#         )
-#     discretization_size = H
-#     heatmaps = []
-#     valid = []
-#     for proposals_per_image, gt_kp_in_image, midx in zip(proposals, gt_keypoints, keypoint_matched_idxs):
-#         kp = gt_kp_in_image[midx]
-#         heatmaps_per_image, valid_per_image = keypoints_to_heatmap(kp, proposals_per_image, discretization_size)
-#         heatmaps.append(heatmaps_per_image.view(-1))
-#         valid.append(valid_per_image.view(-1))
-
-#     keypoint_targets = torch.cat(heatmaps, dim=0)
-#     valid = torch.cat(valid, dim=0).to(dtype=torch.uint8)
-#     valid = torch.where(valid)[0]
-
-#     # torch.mean (in binary_cross_entropy_with_logits) doesn't
-#     # accept empty tensors, so handle it sepaartely
-#     if keypoint_targets.numel() == 0 or len(valid) == 0:
-#         return keypoint_logits.sum() * 0
-
-#     keypoint_logits = keypoint_logits.view(N * K, H * W)
-
-#     keypoint_loss = F.cross_entropy(keypoint_logits[valid], keypoint_targets[valid])
-#     return keypoint_loss
-
-
-# def keypointrcnn_inference(x, boxes):
-#     # type: (Tensor, List[Tensor]) -> Tuple[List[Tensor], List[Tensor]]
-#     kp_probs = []
-#     kp_scores = []
-
-#     boxes_per_image = [box.size(0) for box in boxes]
-#     x2 = x.split(boxes_per_image, dim=0)
-
-#     for xx, bb in zip(x2, boxes):
-#         kp_prob, scores = heatmaps_to_keypoints(xx, bb)
-#         kp_probs.append(kp_prob)
-#         kp_scores.append(scores)
-
-#     return kp_probs, kp_scores
-
-
-# def _onnx_expand_boxes(boxes, scale):
-#     # type: (Tensor, float) -> Tensor
-#     w_half = (boxes[:, 2] - boxes[:, 0]) * 0.5
-#     h_half = (boxes[:, 3] - boxes[:, 1]) * 0.5
-#     x_c = (boxes[:, 2] + boxes[:, 0]) * 0.5
-#     y_c = (boxes[:, 3] + boxes[:, 1]) * 0.5
-
-#     w_half = w_half.to(dtype=torch.float32) * scale
-#     h_half = h_half.to(dtype=torch.float32) * scale
-
-#     boxes_exp0 = x_c - w_half
-#     boxes_exp1 = y_c - h_half
-#     boxes_exp2 = x_c + w_half
-#     boxes_exp3 = y_c + h_half
-#     boxes_exp = torch.stack((boxes_exp0, boxes_exp1, boxes_exp2, boxes_exp3), 1)
-#     return boxes_exp

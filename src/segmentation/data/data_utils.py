@@ -1,4 +1,5 @@
 import sqlite3
+
 from enum import Enum
 from itertools import product
 
@@ -33,7 +34,7 @@ def get_base_dataset(dataset):
 def worker_init_fn_db(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     dataset = get_base_dataset(worker_info.dataset)
-    # Close the existing connection (if any) and open a new one.
+    # close the existing connection (if any) and open a new one
     if hasattr(dataset, "con") and dataset.con is not None:
         dataset.con.close()
     dataset.con = sqlite3.connect(dataset.local_db_name)
@@ -45,6 +46,7 @@ def collate_fn_segmentation(batch):
     return torch.stack(data_items, dim=0), label_items
 
 
+# TODO: channel selection logic for MATCH color mode
 class DataConfig:
     def __init__(self, t = None, z = 128, y = 128, x = 128, c = None, color_mode = ColorMode.AVG):
         self.t = t
@@ -54,7 +56,7 @@ class DataConfig:
         self.c = c
 
         if isinstance(color_mode, str):
-            color_mode = ColorMode[color_mode]  # Convert string to enum member
+            color_mode = ColorMode[color_mode]  # convert string to enum member
 
         self.color_mode = color_mode
         if self.color_mode == ColorMode.MATCH:
@@ -70,7 +72,6 @@ class DataConfig:
 
         if t is None:
             self.t = 1
-
 
     def _determine_data_dimension(self):
         has_time = self.t is not None
@@ -95,7 +96,7 @@ def index_mapper(shape: tuple[int, int, int, int ,int],
                  batch_config : DataConfig) -> list[tuple[int, int, int, int, int]]:
     """
     Given a object shape and data config which contains batch shape information, returns a list of tuples
-    that map an index to
+    that designate the indices of the crop dimensions that will be used to create the batch.
     
     Args:
         shape: Object shape
@@ -104,16 +105,16 @@ def index_mapper(shape: tuple[int, int, int, int ,int],
     Returns:
         indices: list of indices that map a batch index to the tile index and {time,z,y,x,c} slices
     """
-    # Tensorstore object dimensions assumed to be in (N,Z,Y,X,C) format
+    # tensorstore object / tiff file dimensions assumed to be in (N,Z,Y,X,C) format
     n_z, n_c, n_y, n_x = shape
 
-    # Calculate the number of batches in each store
+    # calculate the number of batches in each store
     if batch_config.color_mode == ColorMode.MATCH and n_c != batch_config.c:
         return None
 
     if batch_config.color_mode == ColorMode.AVG or  batch_config.color_mode == ColorMode.MATCH:
         # AVG: output will be averaged so will have a single color channel
-        # MATCH: output channel size must match input channel size, therefore color channel won't be s
+        # MATCH: output channel size must match input channel size
         n_c = 1
     else:
         n_c = batch_config.c
@@ -122,6 +123,7 @@ def index_mapper(shape: tuple[int, int, int, int ,int],
     n_y = n_y // batch_config.y
     n_x = n_x // batch_config.x
 
+    # TODO: consider alternative approach to handle image shapes that are not divisible by batch size
     if n_z == 0 or n_y == 0 or n_x == 0:
         raise ValueError(f"Cropping with batch size {batch_config.z, batch_config.y, batch_config.x} is too large for object of shape {shape}")
 
@@ -143,7 +145,7 @@ def middle_out_crop_start_index(shape: tuple[int, int, int, int ,int], batch_con
     Returns:
         (y0, x0): Pixel offset to achieve middle out crop
     """
-    # Object dimensions assumed to be in (N,Z,C,Y,X) format
+    # object dimensions assumed to be in (N,Z,C,Y,X) format
     n_z, n_c, n_y, n_x = shape
 
     y0 = (n_y % batch_config.y) // 2

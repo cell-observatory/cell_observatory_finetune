@@ -4,7 +4,7 @@ import sqlite3
 import warnings
 
 from sqlite3 import Connection, Cursor
-from typing import Optional, Callable, Dict
+from typing import Optional, Callable, Dict, Union, List, Tuple
 
 from tqdm import tqdm
 from pathlib import Path
@@ -28,17 +28,17 @@ class Skittlez_Database:
     Access the preprocessed dataset and metadata.
     """
     def __init__(self,
-                 db_path = None,
-                 train_db_savedir = None,
+                 db_path: Optional[Union[str, Path]] = None,
+                 train_db_savedir: Optional[Union[str, Path]] = None,
                  batch_config: DataConfig = None,
                  transforms: Optional[Callable] = None,
                  selection_criteria: Dict = None,
-                 force_create_db = False,   
-                 clean_up_db = False,
+                 force_create_db: bool = False,   
+                 clean_up_db: bool = False,
                  metadata = None,
                  dtype = np.uint16,
-                 with_zarr = False,
-                 with_tiff = True,
+                 with_zarr: bool = False,
+                 with_tiff: bool = True,
                  training: bool = True,
                  distributed: bool = True,
                  ):
@@ -55,8 +55,12 @@ class Skittlez_Database:
             with_tiff: Flag that determines whether database uses tiff files. Default is True.
             db_path: Path to the database. Default is None.
             transforms: Optional transforms to be applied to the data. Default is None.
+            train_db_savedir: Path to the directory where the local sqlite3 database will be saved. Default is None.
+            selection_criteria: Dictionary that contains the selection criteria for the dataset. Default is None.
+            training: Flag that determines whether the dataset is for training (True) or testing (False). Default is True.
+            distributed: Flag that determines whether the dataset is for distributed training (True) or not (False). Default is True.
         """
-        # Construct default DataConfig if batch_config is not provided (defaults to color_mode = "AVG")
+        # construct default DataConfig if batch_config is not provided (defaults to color_mode = "AVG")
         if batch_config is None:
             warnings.warn("Batch config is not provided. Defaulting to color_mode = 'AVG'")
             batch_config = DataConfig()
@@ -81,13 +85,15 @@ class Skittlez_Database:
         self.con: Connection = None
         self.cur: Cursor = None
         self.local_db_name: str = None
+
         self.stores:list[TensorStore] = []    # each store is roughly an experiment
         self.file_paths: list[Path] = []  # each file path is a tiff file
         self.label_files: list[Path] = []  # each file path is a tiff file
+        
         self.length: int = 0
         self.dtype: np.dtype = dtype
 
-        # Query metadata if not provided (Pandas provides a uniform metadata interface)
+        # query metadata if not provided 
         if metadata is None:
             metadata = self._query_db(self.db_path)
         else:
@@ -98,34 +104,7 @@ class Skittlez_Database:
         if len(self.metadata) == 0:
             return
 
-        # TODO: unify current skittles database logic with pre-training
-        # database logic & move to zarr
-        #############################################################################
-        # # Query metadata if not provided
-        # # Pandas provides a uniform metadata interface
-        # if metadata is None:
-        #     metadata = self._query_remote_db()
-        # else:
-        #     metadata = pd.DataFrame(metadata)
-        # self.metadata = metadata
-
-        # # return if no metadata
-        # if len(self.metadata) == 0:
-        #     return
-
-        # # check required metadata fields exist
-        # required_fields = ["created_at", "output_folder", "exists"]
-        # for field in required_fields:
-        #     if field not in self.metadata:
-        #         raise ValueError(f"Metadata required fields are missing: {required_fields}")
-
-        # # Sorted using record creation time. When indexing into each store or slice within a store, time
-        # # should always be increasing. Doing this consistently will minimize temporal data leakage.
-        # self.metadata = pd.DataFrame(self.metadata)
-        # self.metadata = self.metadata.sort_values(by='created_at')
-        #############################################################################
-
-        # Open all the zarr/tiff files provided in the metadata. If a file does not exist, it is skipped.
+        # open all the zarr/tiff files provided in the metadata, if a file does not exist, it is skipped
         if self.with_zarr:
             self._open_zarr_files()
         elif self.with_tiff:
@@ -133,7 +112,9 @@ class Skittlez_Database:
         else:
             raise ValueError("Invalid file format. Only zarr and tiff are supported.")
 
-        # A local sqlite3 database is created with tables to hold index mapping and slicing information.
+        # a local sqlite3 database is created with tables to hold index mapping and slicing information
+        # if distributed is True, the database is created on rank 0 and all other ranks wait for it to be created
+        # before connecting to it to prevent race conditions
         if distributed:
             self._init_local_db_distributed()
         else:
@@ -144,9 +125,9 @@ class Skittlez_Database:
             self.con = None
             self.cur = None
 
-
+    
     def _query_db(self, db_path: Path) -> pd.DataFrame:
-        # Connect to SQLite database
+        # connect to SQLite database
         conn = sqlite3.connect(str(db_path))
 
         query = """
@@ -159,7 +140,7 @@ class Skittlez_Database:
         conn.close()
         return metadata
 
-    # TODO: This is hacky, need to unify DB logic with pre-training database logic (but using this for now)
+    # TODO: baind-aid solution, need to unify DB logic with pre-training database logic
     def _open_tiff_files(self):        
         image_files = []
         label_files = []
@@ -186,7 +167,7 @@ class Skittlez_Database:
 
     
     def _create_local_db_tables(self):
-        # Create store_index_map table
+        # create store_index_map table
         cmd = """
             CREATE TABLE store_index_map (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,7 +181,7 @@ class Skittlez_Database:
         """
         self.cur.execute(cmd)
 
-        # Create bbox table
+        # create bbox table
         cmd =  """
             CREATE TABLE bboxes (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,7 +197,7 @@ class Skittlez_Database:
         """
         self.cur.execute(cmd)
 
-        # Create masks table
+        # create masks table
         cmd = """
             CREATE TABLE masks (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,7 +208,7 @@ class Skittlez_Database:
         """
         self.cur.execute(cmd)
 
-        # Create middle_out_table with one-to-many support
+        # create middle_out_table
         cmd = """
             CREATE TABLE middle_out_table (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,7 +221,7 @@ class Skittlez_Database:
         self.cur.execute(cmd)
 
 
-    # TODO: join distributed and non-distributed code to prevent
+    # TODO: band-aid solution, join distributed and non-distributed code to prevent
     #       code duplication
     def _init_local_db(self):
         local_db_name = os.path.join(self.train_db_savedir, self.training + "_" + repr(self.batch_config) + ".db")
@@ -253,17 +234,17 @@ class Skittlez_Database:
         # check db exists before .connect since it would create the db if it didn't
         create_db = not os.path.isfile(local_db_name)
 
-        logging.info(f"[SkittlesDatabase] Local db file {local_db_name} exists: {not create_db}")
+        logging.info(f"[Skittlez Database] Local db file {local_db_name} exists: {not create_db}")
 
         self.con = sqlite3.connect(local_db_name)
         self.cur = self.con.cursor()
 
         if create_db or self.force_create_db:
-            logging.info(f"[SkittlesDatabase] Creating local db file {local_db_name}...")
+            logging.info(f"[Skittlez Database] Creating local db file {local_db_name}...")
 
             self._create_local_db_tables()
 
-            for file_path, label_path in tqdm(zip(self.file_paths, self.label_files), desc="Updating DB with target info...", total=len(self.file_paths)):
+            for file_path, label_path in tqdm(zip(self.file_paths, self.label_files), desc="Updating local DB...", total=len(self.file_paths)):
                 label_item = tifffile.memmap(label_path)
                 data_item_shape = tifffile.memmap(file_path).shape
                 indices = index_mapper(data_item_shape, self.batch_config)
@@ -375,7 +356,7 @@ class Skittlez_Database:
             res = self.cur.execute("SELECT COUNT(*) FROM store_index_map")
             self.length = res.fetchone()[0]
 
-            logging.info(f"PROCESS {rank}: [SkittlesDatabase] Found {self.length} crops in the database.")
+            logging.info(f"PROCESS {rank}: [Skittlez Database] Found {self.length} crops in the database.")
 
         # all processes wait here until db is fully written
         # only process 0 will create the db to prevent race conditions
@@ -387,11 +368,17 @@ class Skittlez_Database:
             self.cur = self.con.cursor()
             res = self.cur.execute("SELECT COUNT(*) FROM store_index_map")
             self.length = res.fetchone()[0]
-            logging.info(f"PROCESS {rank}: [SkittlesDatabase] Found {self.length} crops in the database.")
+            logging.info(f"PROCESS {rank}: [Skittle Database] Found {self.length} crops in the database.")
 
-    # TODO: A band-aid solution. Redo once dataset is updated. Trainig is bottlenecked by dataloading 
-    #       for larger batch size currently.
-    def indices_to_instances(self, indices, y0, x0, label_item):
+    # TODO: a band-aid solution, redo once dataset generation is updated  
+            # move to utils.py
+    def indices_to_instances(
+            self,
+            indices: List[Tuple[int, int, int, int]],
+            y0: int,
+            x0: int,
+            label_item: np.ndarray
+    ) -> tuple:
         valid_indices = []
         bboxes = []
         mask_ids = []
@@ -408,7 +395,7 @@ class Skittlez_Database:
             if not np.any(label_crop):
                 continue
 
-            # Regionprops to get bounding boxes (min_z, min_y, min_x, max_z, max_y, max_x)
+            # regionprops to get bounding boxes (min_z, min_y, min_x, max_z, max_y, max_x)
             props = regionprops(label_crop)
             for p in props:
                 min_z, min_y, min_x, max_z, max_y, max_x = p.bbox
@@ -456,7 +443,7 @@ class Skittlez_Database:
 
         # slice data based on color mode (TODO: move to zarr)
         if self.batch_config.color_mode == ColorMode.MATCH:
-            # TODO: add support for other operations, pass c1, c2 in batch_config
+            # TODO: add support for other operations, i.e. pass c1, c2 in batch_config or similar
             c1, c2 = 0, self.batch_config.c
             data_item = tifffile.imread(file_path)
             data_item = data_item[slice(z1, z2), slice(c1, c2), slice(y1 + y0, y2 + y0), slice(x1 + x0, x2 + x0)]
@@ -464,7 +451,7 @@ class Skittlez_Database:
             label_item = label_item[slice(z1, z2), slice(y1 + y0, y2 + y0), slice(x1 + x0, x2 + x0)]
             # item = store[tile, t1:t2, z1:z2, y1+y0:y2+y0, x1+x0:x2+x0, c1:c2].read().result()
         elif self.batch_config.color_mode == ColorMode.AVG:
-            #NOTE: This is not actually supported in yet
+            # NOTE: this is not actually supported in yet
             data_item = tifffile.imread(file_path)
             data_item = data_item[slice(z1, z2), :, slice(y1 + y0, y2 + y0), slice(x1 + x0, x2 + x0)]
             label_item = tifffile.imread(label_path)
@@ -487,33 +474,22 @@ class Skittlez_Database:
         res_mask_ids = self.cur.execute(mask_id_cmd, (rowid,))
         mask_ids = [row[0] for row in res_mask_ids.fetchall()]  # flatten to list of ints
 
+        # TODO: reconsider if this should be done on the fly
+        #       may be limiting dataloader performance
         masks, labels = self.mask_ids_to_masks(mask_ids, label_item)
 
-        data_item = torch.tensor(data_item, dtype=self.dtype).permute(1, 0, 2, 3) # data_item: (Z, C, Y, X) -> (C, Z, Y, X)
-        label_item = {"boxes": torch.tensor(bboxes, dtype=torch.uint16), 
-                      "labels": torch.tensor(labels, dtype=torch.int64),
-                      "masks": torch.tensor(masks, dtype=torch.uint8)}
-        
-        # import skimage
-        # from segmentation.utils.plot import plot_boxes
-        # from ray.train import get_context
-        # if get_context().get_world_rank() == 0:
-        #     print(f"SIZE OF IMAGE: {data_item.shape}")
-        #     box_dl = [label_item["boxes"][i].cpu().numpy() for i in range(len(label_item["boxes"]))]
-        #     plot_boxes(box_dl, sample_indices=[0], image_shape=data_item.shape[1:], save_path="/clusterfs/nvme/segment_4d/test_5/box_b_transform.tif")        
-        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_b_transform.tif", label_item["masks"][0].cpu().numpy())
-        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_b_transform.tif", data_item[0].cpu().numpy())
+        data_item = torch.tensor(data_item, dtype=self.dtype).permute(1, 0, 2, 3) # (Z, C, Y, X) -> (C, Z, Y, X)
+        label_item = {
+            "boxes": torch.tensor(bboxes, dtype=torch.uint16), 
+            "labels": torch.tensor(labels, dtype=torch.int64),
+            "masks": torch.tensor(masks, dtype=torch.uint8)
+        }
         
         if self.transforms:
             item = self.transforms(data_item, label_item)
-
-        # if get_context().get_world_rank() == 0:
-        #     box_dl = [label_item["boxes"][i].cpu().numpy() for i in range(len(label_item["boxes"]))]
-        #     plot_boxes(box_dl, sample_indices=[0], image_shape=data_item.shape[1:], save_path="/clusterfs/nvme/segment_4d/test_5/box_after_transform.tif")        
-        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_transform.tif", label_item["masks"][0].cpu().numpy())
-        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/im_after_transform.tif", data_item[0].cpu().numpy())
-
-        return item 
+            return item
+        
+        return data_item, label_item  
 
     def mask_ids_to_masks(self, mask_ids, label_item):
         binary_masks = [(label_item == mid).astype(np.uint8) for mid in mask_ids]

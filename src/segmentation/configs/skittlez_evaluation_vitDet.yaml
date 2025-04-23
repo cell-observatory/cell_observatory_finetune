@@ -1,0 +1,106 @@
+defaults:
+  - /models: maskrcnn_fpn        # Loads configs/models/maskrcnn_fpn.yaml
+  - /models/backbones: vitDet     # Loads configs/models/backbones/vitDet.yaml
+  - /datasets: skittlez_eval       # Loads configs/datasets/skittlez_eval.yaml
+  - /metrics: metrics_skittlez_eval        # Loads configs/metrics/metrics_skittlez_eval.yaml
+  - /transforms: transforms_skittlez_eval # Loads configs/transforms/transforms_skittlez_eval.yaml
+  - _self_
+
+# overrides
+# ----------------
+
+models:
+  min_size: 256 # images rescaled such that shorter size is min_size
+  max_size: 256
+  mask_roi_pool:
+    _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
+    featmap_names: ${output_features} 
+    output_size: 14 # ROI pooling output size
+    sampling_ratio: 2 # grid subsampling 
+    canonical_scale: 256
+    canonical_level: 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of input
+  rpn_anchor_generator:
+    _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
+    sizes:
+      - [16, 24, 32]
+      - [32, 48, 64]
+      - [64, 96, 128]
+    aspect_ratios:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+    aspect_ratios_z:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+  rpn_head: 
+    _target_: segmentation.models.rpn.rpn_head.RPNHead
+    in_channels: ${backbone_out_channels} 
+    num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  
+  # NOTE: consider chaning the number of positive samples considered if the model is not learning
+  #       and only predicts background
+  # rpn_fg_iou_thresh: 0.5 # too high of a value will cause the model to not learn anything and always predict the background
+  # rpn_bg_iou_thresh: 0.3
+  # box_positive_fraction: 0.25 # positive fraction of samples in subsampling
+
+datasets:
+  batch_size: 4 # total batch size (batch_size per gpu * number of gpus) 
+  database:
+    _target_: segmentation.data.datasets.skittlez.Skittlez_Database
+    training: true 
+    distributed: false # set to true for distributed training (Ray or DDP)
+    db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
+    train_db_savedir: ${...train_db_savedir} # defer interpolation to main config
+    selection_criteria: {"volume" : 8000}  # Minimum volume in pixels to accept instance
+    force_create_db: false
+    clean_up_db: false
+    with_zarr: false
+    with_tiff: true
+    metadata: null
+    batch_config:
+      _target_: segmentation.data.data_utils.DataConfig
+      z: 128
+      y: 256
+      x: 256
+      c: 3
+      color_mode: MATCH  
+
+transforms_list:
+  - _target_: segmentation.data.transforms.transforms.Normalize
+    # mean: ${dataset_mean}
+    # std: ${dataset_std}
+  - _target_: segmentation.data.transforms.transforms.Resize
+    size: [256, 256, 256] 
+
+# ----------------
+
+# Skittlez eval parameters
+backbone_target: segmentation.models.backbones.vitDet.SimpleFeaturePyramid 
+backbone_out_channels: 256 
+output_features: ["p2", "p3", "p4"]
+
+eval_type: skittlez_eval
+data_dir: /clusterfs/nvme/segment_4d/test_14
+results_dir: /clusterfs/nvme/segment_4d/test_14/evaluation
+
+train_db_savedir: ${data_dir}/db
+checkpointdir: /clusterfs/nvme/segment_4d/test_14/checkpoints
+ckpt_suffix: "best" # generally, "last" or "best" or "latest"
+
+# evaluator parameters
+warmup_iters: 1
+
+# Compute resources
+workers: 1 # number of worker nodes
+gpu_workers: 1 # number of gpus per worker
+cpu_workers: 4 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
+distributed_sampler: false
+
+# Quantization
+amp: fp16  # ["no", "fp16", "bf16", "fp8"]
+
+# DeepSpeed config for checkpoint loading
+deepspeed_config:
+  zero_optimization:
+    stage: null # run eval on 1 gpu, no need for zero optimization 

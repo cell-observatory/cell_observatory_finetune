@@ -39,8 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from torch import nn, Tensor
 
-from torchvision.models.detection.image_list import ImageList
-
+from segmentation.utils.image_list import ImageList
 from segmentation.models.heads.roi_heads.roi_heads import paste_masks_in_image
 
 
@@ -93,7 +92,7 @@ class GeneralizedRCNNTransform(nn.Module):
     model.
 
     The transformations it performs are:
-        - input normalization (mean subtraction and std division)
+        - (Optional) input normalization (mean subtraction and std division)
         - input / target resizing to match min_size / max_size
 
     It returns a ImageList for the inputs, and a List[Dict[Tensor]] for the targets
@@ -121,6 +120,9 @@ class GeneralizedRCNNTransform(nn.Module):
         
         self.size_divisible = size_divisible
         self.fixed_size = fixed_size
+
+        # flags to skip resizing and normalization
+        # if handled elsewhere
         self._skip_resize = kwargs.pop("skip_resize", False)
         self._skip_normalize = kwargs.pop("skip_normalize", False)
 
@@ -148,9 +150,11 @@ class GeneralizedRCNNTransform(nn.Module):
 
             if image.dim() != 4:
                 raise ValueError(f"images is expected to be a list of 4d tensors of shape [C, D, H, W], got {image.shape}")
+            
             if not self._skip_normalize:
                 image = self.normalize(image)
             image, target_index = self.resize(image, target_index)
+            
             images[i] = image
             if targets is not None and target_index is not None:
                 targets[i] = target_index
@@ -199,7 +203,7 @@ class GeneralizedRCNNTransform(nn.Module):
         target: Optional[Dict[str, Tensor]] = None,
     ) -> Tuple[Tensor, Optional[Dict[str, Tensor]]]:
         d, h, w = image.shape[-3:]
-        # we always resize in eval. mode to the largest size
+        # in eval mode we always resize to the largest size
         # in training mode, we randomly select a size or don't resize
         # depending on the _skip_resize flag
         if self.training:

@@ -1,4 +1,5 @@
-from typing import List, Dict, Any, Callable
+from pathlib import Path
+from typing import Dict, Optional, Union
 
 import numpy as np
 
@@ -13,16 +14,16 @@ from segmentation.metrics.utils import (
 
 class SkittlezInstanceEvaluator(DatasetEvaluator):
     """
-    Evaluate Instance Quality metrics on Skittlez.
-    It saves instance segmentation predictions in `output_dir`.
+    Evaluate Instance Segmentation metrics on Skittlez Dataset.
+    It saves instance segmentation results in output_dir.
     """
     def __init__(self, 
                  metrics: Dict[str, Metric],
                  lower_is_better: bool=True,
                  ckpt_loss_key: str=None,
-                 dataset_name=None,
-                 output_dir=None,
-                 detection_mode=True
+                 dataset_name: Optional[Union[str, Path]]=None,
+                 output_dir: Optional[Union[str, Path]]=None,
+                 detection_mode: bool=True
                  ):
         """
         Args: 
@@ -53,7 +54,8 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
             metric.reset()
 
     def process(self, targets, outputs):
-        # TODO: Move metrics computation to GPU & move this logic into separate function
+        # TODO: move metrics computations to GPU & move part of this logic into a separate function
+        #       in general, better abstractions are needed for metrics 
         pred_masks = []
         gt_masks = []
         for output, target in zip(outputs, targets):
@@ -69,23 +71,10 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
                 pred_masks.append(np.zeros_like(target_mask))
             gt_masks.append(target_mask)
 
-            # import skimage
-            # from segmentation.utils.plot import plot_boxes
-            # gt_box = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
-            # t_box = [outputs[0]["boxes"][i].cpu().numpy() for i in range(len(outputs[0]["boxes"]))]
-            # print("DEBUG GT BOXES:", gt_box[:1])
-            # print("DEBUG PRED BOXES:", t_box[:1])
-            # plot_boxes(gt_box, image_shape= pred_masks[0].shape, save_path="/clusterfs/nvme/segment_4d/test_5/all_gt_test_box.tif")
-            # plot_boxes(gt_box, sample_indices=[0], image_shape= pred_masks[0].shape, sample_num=5, save_path="/clusterfs/nvme/segment_4d/test_5/gt_test_box.tif")
-            # plot_boxes(t_box, sample_indices=[0], image_shape=pred_masks[0].shape, sample_num=5, save_path="/clusterfs/nvme/segment_4d/test_5/pred_test_box.tif")
-            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/pred_test.tif", pred_masks[0].astype(np.uint16))
-            # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/gt_test.tif", gt_masks[0])
-            # raise ValueError("Debugging maskrcnn_inference") 
-
         for metric_name, metric in self.metrics.items():
             result = metric(pred_masks, gt_masks)
-            # TODO: more generic way to handle different metric results
-            #       consider requiring all metrics to return a value
+            # TODO: rewrite to better handle different metric result
+            #       types, consider requiring all metrics to return a value
             self._predictions[metric_name].extend(result) if isinstance(result, list) else self._predictions[metric_name].append(result)
 
     def aggregate(self):
@@ -93,8 +82,7 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
             self._predictions[name] = [float(metric.aggregate())]
 
     def evaluate(self):
-        # TODO: Consider incorporating more advanced
-        #       evaluation logic
+        # TODO: incorporate more advanced evaluation/plotting logic
         self.aggregate()
         self._predictions = {k: v[0] for k, v in self._predictions.items()}
         if self.ckpt_loss_key is not None:

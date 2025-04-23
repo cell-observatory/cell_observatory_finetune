@@ -32,6 +32,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 
+
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -58,7 +59,6 @@ class GeneralizedRCNN(nn.Module):
         self.backbone = backbone
         self.rpn = rpn
         self.roi_heads = roi_heads
-        # used only on torchscript mode
         self._has_warned = False
 
 
@@ -102,21 +102,6 @@ class GeneralizedRCNN(nn.Module):
         # normalize (optional), resize (optional), pad and batch images
         images, targets = self.transform(images, targets)
 
-        # Check for degenerate boxes (NOTE: MOVED TO PREPROCESSING TO PREVENT CUDA ERROR)
-        # if targets is not None:
-        #     for target_idx, target in enumerate(targets):
-        #         boxes = target["boxes"]
-        #         degenerate_boxes = boxes[:, 3:] <= boxes[:, :3]
-        #         if degenerate_boxes.any():
-        #             # print the first degenerate box
-        #             bb_idx = torch.where(degenerate_boxes.any(dim=1))[0][0]
-        #             degen_bb: List[float] = boxes[bb_idx].tolist()
-        #             torch._assert(
-        #                 False,
-        #                 "All bounding boxes should have positive z, y, and x."
-        #                 f" Found invalid box {degen_bb} for target at index {target_idx}.",
-        #             )
-
         # get feature maps from backbone
         features = self.backbone(images.tensors)
         if isinstance(features, torch.Tensor):
@@ -127,17 +112,6 @@ class GeneralizedRCNN(nn.Module):
         # feature maps for classification & regression
         proposals, proposal_losses = self.rpn(images, features, targets)
         detections, detector_losses = self.roi_heads(features, proposals, images.image_sizes, targets)
-        
-        # import skimage
-        # import numpy as np
-        # from segmentation.utils.plot import plot_boxes
-        # from ray.train import get_context
-        # if get_context().get_world_rank() == 0:
-        #     skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/masks_after_train.tif", targets[0]["masks"][0].cpu().numpy())
-        #     box_test = [targets[0]["boxes"][i].cpu().numpy() for i in range(len(targets[0]["boxes"]))]
-        #     plot_boxes(box_test, sample_indices=[0], image_shape=images.tensors.shape[-3:], save_path="/clusterfs/nvme/segment_4d/test_5/bx_after_full_pred.tif")
-        # # raise ValueError("DEBUG")
-        # # skimage.io.imsave("/clusterfs/nvme/segment_4d/test_5/test_input.tif", images.tensors[0,0].cpu().numpy())
 
         # if testing, resize boxes and masks to original image size
         detections = self.transform.postprocess(detections, images.image_sizes, original_image_sizes)  # type: ignore[operator]

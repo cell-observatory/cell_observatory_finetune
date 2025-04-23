@@ -4,7 +4,7 @@ defaults:
   - models/backbones: resnet     # Loads configs/models/backbones/resnet.yaml
   - datasets: skittlez       # Loads configs/datasets/skittlez.yaml
   - metrics: metrics        # Loads configs/metrics/metrics.yaml
-  - transforms: transforms_skittlez # Loads configs/transforms/transforms.yaml
+  - transforms: transforms_skittlez # Loads configs/transforms/transforms_skittlez.yaml
 
 # Model type
 network: maskrcnn
@@ -16,11 +16,16 @@ paradigm: segmentation.training.backend_segmentation.supervised
 backbone_target: segmentation.models.backbones.resnet.resnet50 # options: resnet50, resnet101, resnet152
 backbone_out_channels: 512 # C5 = 2048
 
+return_intermediates: false # whether to return intermediate features from the backbone
+
 # Paths
-outdir: /clusterfs/nvme/segment_4d/test_6
+outdir: /clusterfs/nvme/segment_4d/test_15
 logdir: ${outdir}/logs
-load_checkpointdir: null # /clusterfs/nvme/segment_4d/test_4/checkpoints # null # specify if we want to load a checkpoint from a previous run that is not latest local run
-checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: specify where to save the checkpoints
+
+load_checkpointdir: null # specify if we want to load a checkpoint from a previous run that is not latest local run
+checkpointdir: ${outdir}/checkpoints # specify where to save the checkpoints
+checkpoint_update_interval: 100 # save checkpoint every N epochs
+
 train_db_savedir: ${outdir}/db
 db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
 
@@ -28,7 +33,7 @@ finetune: null
 
 # Optimizer parameters
 opt: adamw # TODO: to use fused lamb, install DeepSpeed with the DS_BUILD_FUSED_LAMB environment variable 
-lr: 5e-5 # 5e-4 # initial learning rate
+lr: 5e-5 # initial learning rate
 wd: 5e-5 # initial weight decay
 ld: null # optional layer decay
 clip_grad: 0.5
@@ -53,8 +58,8 @@ profile: false
 
 # Compute resources
 workers: 1 # number of worker nodes
-gpu_workers: 4 #4 # number of gpus per worker
-cpu_workers: 16 #16 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
+gpu_workers: 4 # number of gpus per worker
+cpu_workers: 16 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
 distributed_sampler: true # use distributed sampler for training (standard for Ray/DDP)
 max_worker_heartbeat_timeout: 2 # in minutes (to prevent indefinite hang if one process fails)
 

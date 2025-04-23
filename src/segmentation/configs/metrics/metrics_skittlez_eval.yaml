@@ -4,6 +4,7 @@ defaults:
 _target_: segmentation.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
 
 metrics:
+  # TODO: would be more efficient to use a single AveragePrecision metric with multiple thresholds
   ap@50:
     _target_: segmentation.metrics.metrics.AveragePrecision
     iou_threshold: 0.5

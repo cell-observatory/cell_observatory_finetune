@@ -38,7 +38,6 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import torch
 from torch import nn
 import torch.nn.functional as F
-
 from torchvision.ops import misc as misc_nn_ops
 
 from segmentation.models.rpn.rpn_head import RPNHead
@@ -49,7 +48,7 @@ from segmentation.models.heads.poolers import MultiScaleRoIAlign
 from segmentation.models.heads.roi_heads.roi_heads import RoIHeads
 from segmentation.models.generalized_rcnn import GeneralizedRCNN
 
-from segmentation.transforms.transforms import GeneralizedRCNNTransform
+from segmentation.models.utils.transforms import GeneralizedRCNNTransform
 
 
 def _default_anchorgen():
@@ -255,9 +254,11 @@ class FasterRCNN(GeneralizedRCNN):
 
         if image_mean is None:
             raise ValueError("image_mean not specified!")
+            # ImageNet mean values
             # image_mean = [0.485, 0.456, 0.406]
         if image_std is None:
             raise ValueError("image_std not specified!")
+            # ImageNet std values
             # image_std = [0.229, 0.224, 0.225]
         transform = GeneralizedRCNNTransform(min_size, 
                                              max_size, 
@@ -289,7 +290,7 @@ class TwoMLPHead(nn.Module):
         self.fc7 = nn.Linear(representation_size, representation_size)
 
     def forward(self, x):
-        # x is expected to be a tensor of shape [batch, channels, depth, height, width]
+        # x: [b,ch,d,h,w]
         x = x.flatten(start_dim=1)
 
         x = F.relu(self.fc6(x))
@@ -351,7 +352,7 @@ class FastRCNNPredictor(nn.Module):
         self.bbox_pred = nn.Linear(in_channels, num_classes * 6)
 
     def forward(self, x):
-        # Expecting x to be a 5D tensor: [batch, channels, depth, height, width]
+        # x: [b, ch, d, h, w]
         if x.dim() == 5:
             torch._assert(
                 list(x.shape[3:]) == [1, 1, 1],

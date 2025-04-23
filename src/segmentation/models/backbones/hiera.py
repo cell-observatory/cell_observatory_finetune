@@ -1,14 +1,27 @@
 """
 https://github.com/facebookresearch/hiera/blob/main/hiera/hiera.py
 
-(ADD COPYRIGHT HERE)
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 """
 
 
 import math
 from functools import partial
-from typing import List, Tuple, Callable, Optional, Union
+from typing import Tuple, Callable, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -16,9 +29,9 @@ import torch.nn.functional as F
 
 from timm.models.layers import DropPath, Mlp
 
-from segmentation.models.backbones.backbone_utils import pretrained_model, conv_nd, do_pool, do_masked_conv, Unroll, Reroll
-from segmentation.models.hf_hub import PyTorchModelHubMixin
+from segmentation.models.utils.hf_hub import PyTorchModelHubMixin
 from segmentation.models.backbones.batch_norm import get_norm
+from segmentation.models.backbones.backbone_utils import conv_nd, do_pool, do_masked_conv, Unroll, Reroll
 
 
 class MaskUnitAttention(nn.Module):
@@ -40,18 +53,20 @@ class MaskUnitAttention(nn.Module):
     ):
         """
         Args:
-        - dim, dim_out: The input and output feature dimensions.
-        - heads: The number of attention heads.
-        - q_stride: If greater than 1, pool q with this stride. The stride should be flattened (e.g., 2x2 = 4).
-        - window_size: The current (flattened) size of a mask unit *after* pooling (if any).
-        - use_mask_unit_attn: Use Mask Unit or Global Attention.
+            dim, dim_out: The input and output feature dimensions.
+            heads: The number of attention heads.
+            q_stride: If greater than 1, pool q with this stride. The stride should be flattened (e.g., 2x2 = 4).
+            window_size: The current (flattened) size of a mask unit *after* pooling (if any).
+            use_mask_unit_attn: Use Mask Unit or Global Attention.
         """
         super().__init__()
 
         self.dim = dim
         self.dim_out = dim_out
         self.heads = heads
-        # core idea: group image into windwos. Within each window, downsample the query sequence
+
+        # core idea: group image into windows
+        # within each window, downsample the query sequence
         # to build a hierarchy of feature levels  
         self.q_stride = q_stride
 
@@ -67,8 +82,7 @@ class MaskUnitAttention(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """ Input should be of shape [batch, tokens, channels]. """
         B, N, _ = x.shape
-        # window_size defines how many tokens per window.
-        # q_stride defines how far apart windows are (in token units)
+        # window_size defines how many tokens per window
         num_windows = (
             (N // (self.q_stride * self.window_size)) if self.use_mask_unit_attn else 1
         )
@@ -81,7 +95,7 @@ class MaskUnitAttention(nn.Module):
         q, k, v = qkv[0], qkv[1], qkv[2]
 
         if self.q_stride > 1:
-            # Refer to Unroll to see how this performs a maxpool-Nd
+            # refer to Unroll to see how this performs a maxpool-Nd
             # tokens_per_window -> q_stride * G , i.e. reshaped into shape (q_stride, G)
             # thus max-pooling over the q_stride dimension to get resulting G queries
             # for the window
@@ -141,7 +155,7 @@ class HieraBlock(nn.Module):
         if self.dim != self.dim_out:
             # recall: do_pool op => x.view(x.shape[0], stride, -1, x.shape[-1]).max(dim=1).values
             # sequence becomes (B, N//stride, dim_out) since we group into G groups of stride
-            # tokens, and take the max of each group
+            # tokens and take the max of each group
             x = do_pool(self.proj(x_norm), stride=self.attn.q_stride)
         x = x + self.drop_path(self.attn(x_norm))
 
@@ -185,7 +199,7 @@ class PatchEmbed(nn.Module):
     ):
         super().__init__()
 
-        # Support any number of spatial dimensions
+        # support any number of spatial dimensions
         self.spatial_dims = len(kernel)
         self.proj = conv_nd(self.spatial_dims)(
             dim_in,
@@ -209,41 +223,45 @@ class PatchEmbed(nn.Module):
 class Hiera(nn.Module, PyTorchModelHubMixin):
     def __init__(
         self,
-        input_size: Tuple[int, ...] = (224, 224),
+        input_size: Tuple[int, ...] = (224, 224, 224),
         in_chans: int = 3,
         embed_dim: int = 96,  # initial embed dim
         num_heads: int = 1,  # initial number of heads
         num_classes: int = 1000,
         stages: Tuple[int, ...] = (2, 3, 16, 3),
         q_pool: int = 3,  # number of q_pool stages
-        q_stride: Tuple[int, ...] = (2, 2),
-        mask_unit_size: Tuple[int, ...] = (8, 8),  # must divide q_stride ** (#stages-1)
+        q_stride: Tuple[int, ...] = (2, 2, 2),
+        mask_unit_size: Tuple[int, ...] = (8, 8, 8),  # must divide q_stride ** (#stages-1)
         # mask_unit_attn: which stages use mask unit attention?
         mask_unit_attn: Tuple[bool, ...] = (True, True, False, False),
         dim_mul: float = 2.0,
         head_mul: float = 2.0,
-        patch_kernel: Tuple[int, ...] = (7, 7), # for conv patch_embed
-        patch_stride: Tuple[int, ...] = (4, 4), 
-        patch_padding: Tuple[int, ...] = (3, 3),
+        patch_kernel: Tuple[int, ...] = (7, 7, 7), # for conv patch_embed
+        patch_stride: Tuple[int, ...] = (4, 4, 4), 
+        patch_padding: Tuple[int, ...] = (3, 3, 3),
         mlp_ratio: float = 4.0,
         drop_path_rate: float = 0.0,
         norm_layer: Union[str, nn.Module] = "LN",
         head_dropout: float = 0.0,
         head_init_scale: float = 0.001,
         sep_pos_embed: bool = False,
+        return_intermediates: bool = False,
     ):
         super().__init__()
 
-        # Do it this way to ensure that the init args are all PoD (for config usage)
+        self.return_intermediates = return_intermediates
+
+        # do it this way to ensure that the init args are all PoD (for config usage)
         if isinstance(norm_layer, str):
-            # norm_layer = partial(getattr(nn, norm_layer), eps=1e-6)
             norm_layer = get_norm(norm_layer, channel_dim=-1, partial_init=True)
 
         # total number of blocks across all stages 
         depth = sum(stages)
         self.patch_stride = patch_stride
+        
         # (D,H,W) after 3D patch‑embedding conv
         self.tokens_spatial_shape = [i // s for i, s in zip(input_size, patch_stride)]
+        
         # total number of tokens after 3D patch embedding, total token num. for one 
         # mask, and q_stride
         num_tokens = math.prod(self.tokens_spatial_shape)
@@ -285,7 +303,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
             # table for positional embeddings
             self.pos_embed = nn.Parameter(torch.zeros(1, num_tokens, embed_dim))
 
-        # Setup roll and reroll modules
+        # setup roll and reroll modules
         self.unroll = Unroll(
             input_size, patch_stride, [q_stride] * len(self.stage_ends[:-1])
         )
@@ -302,14 +320,14 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         # stochastic depth decay rule
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
-        # Transformer blocks
+        # transformer blocks
         cur_stage = 0
         self.blocks = nn.ModuleList()
 
         for i in range(depth):
             dim_out = embed_dim
-            # Mask unit or global attention.
-            # Lag by 1 block, so that global attention,
+            # mask unit or global attention
+            # lag by 1 block, so that global attention,
             # applied post pooling on lower resolution
             use_mask_unit_attn = mask_unit_attn[cur_stage]
 
@@ -343,7 +361,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         self.norm = norm_layer(embed_dim)
         self.head = Head(embed_dim, num_classes, dropout_rate=head_dropout)
 
-        # Initialize everything
+        # initialize everything
         if self.sep_pos_embed:
             raise NotImplementedError("Separate positional embeddings not supported yet.")
             nn.init.trunc_normal_(self.pos_embed_spatial, std=0.02)
@@ -377,22 +395,22 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         1 is *keep*, 0 is *remove*. Useful for MAE, FLIP, etc.
         """
         B = x.shape[0]
-        # Tokens selected for masking at mask unit level
+        # tokens selected for masking at mask unit level
         num_windows = math.prod(self.mask_spatial_shape)  # num_mask_units
         len_keep = int(num_windows * (1 - mask_ratio))
         noise = torch.rand(B, num_windows, device=x.device)
 
-        # Sort noise for each sample
+        # sort noise for each sample
         ids_shuffle = torch.argsort(
             noise, dim=1
         )  # ascend: small is keep, large is remove
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
-        # Generate the binary mask: 1 is *keep*, 0 is *remove*
-        # Note this is opposite to original MAE
+        # generate the binary mask: 1 is *keep*, 0 is *remove*
+        # note this is opposite to original MAE
         mask = torch.zeros([B, num_windows], device=x.device)
         mask[:, :len_keep] = 1
-        # Unshuffle to get the binary mask
+        # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore)
 
         return mask.bool()
@@ -414,7 +432,6 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
         self,
         x: torch.Tensor,
         mask: torch.Tensor = None,
-        return_intermediates: bool = False,
     ) -> torch.Tensor:
         """
         mask should be a boolean tensor of shape [B, #MUt*#MUy*#MUx] where #MU are the number of mask units in that dim.
@@ -449,127 +466,127 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
             # we return intermediates at stage_ends but q-pool
             # happens at the end of the stage => intermediate spatial dims
             # lag by 1 in stride
-            if return_intermediates and i in self.stage_ends:
+            if self.return_intermediates and i in self.stage_ends:
+                # NOTE: x may not always be in spatial order here.
+                #       e.g. if q_pool = 2, mask_unit_size = (8, 8), and
+                #       q_stride = (2, 2), not all unrolls were consumed,
+                #       intermediates[-1] is x in spatial order
+                #       hence reroll to get the original spatial order
                 intermediates.append(self.reroll(x, i, mask=mask))
 
-        if return_intermediates:
+        if self.return_intermediates:
             # reshape to (B,C,D,H,W)
             intermediates = [intermediate.permute(0,4,1,2,3) for intermediate in intermediates]
 
-        return x, {f"p{s}": feature for s, feature in enumerate(intermediates)} if return_intermediates else x 
-
-        # NOTE: removing linear probing layer
+        # NOTE: linear probing layer removed
         # if mask is None:
         #     x = x.mean(dim=1)
         #     x = self.norm(x)
-        #     x = self.head(x) # classification head (TODO: remove?)
+        #     x = self.head(x) # classification head
 
-        # x may not always be in spatial order here.
-        # e.g. if q_pool = 2, mask_unit_size = (8, 8), and
-        # q_stride = (2, 2), not all unrolls were consumed,
-        # intermediates[-1] is x in spatial order
-        # if return_intermediates:
-            # return x, intermediates
-        # return x
+        return x, {f"p{s}": feature for s, feature in enumerate(intermediates)} if self.return_intermediates else x 
 
+
+# TODO: add support for loading weights from pretrained models 
+#       for all backbones 
 
 # Image models
 
 
-@pretrained_model({
-    "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_tiny_224.pth",
-    "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_tiny_224.pth",
-}, default="mae_in1k_ft_in1k")
-def hiera_tiny_224(**kwdargs):
-    return Hiera(embed_dim=96, num_heads=1, stages=(1, 2, 7, 2), **kwdargs)
+# @pretrained_model({
+#     "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_tiny_224.pth",
+#     "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_tiny_224.pth",
+# }, default="mae_in1k_ft_in1k")
+# def hiera_tiny_224(**kwdargs):
+#     return Hiera(embed_dim=96, num_heads=1, stages=(1, 2, 7, 2), **kwdargs)
 
 
-@pretrained_model({
-    "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_small_224.pth",
-    "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_small_224.pth",
-}, default="mae_in1k_ft_in1k")
-def hiera_small_224(**kwdargs):
-    return Hiera(embed_dim=96, num_heads=1, stages=(1, 2, 11, 2), **kwdargs)
+# @pretrained_model({
+#     "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_small_224.pth",
+#     "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_small_224.pth",
+# }, default="mae_in1k_ft_in1k")
+# def hiera_small_224(**kwdargs):
+#     return Hiera(embed_dim=96, num_heads=1, stages=(1, 2, 11, 2), **kwdargs)
 
 
-@pretrained_model({
-    "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_base_224.pth",
-    "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_224.pth",
-}, default="mae_in1k_ft_in1k")
-def hiera_base_224(**kwdargs):
-    return Hiera(embed_dim=96, num_heads=1, stages=(2, 3, 16, 3), **kwdargs)
+# @pretrained_model({
+#     "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_base_224.pth",
+#     "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_224.pth",
+# }, default="mae_in1k_ft_in1k")
+# def hiera_base_224(**kwdargs):
+#     return Hiera(embed_dim=96, num_heads=1, stages=(2, 3, 16, 3), **kwdargs)
 
 
-@pretrained_model({
-    "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_base_plus_224.pth",
-    "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_plus_224.pth",
-}, default="mae_in1k_ft_in1k")
-def hiera_base_plus_224(**kwdargs):
-    return Hiera(embed_dim=112, num_heads=2, stages=(2, 3, 16, 3), **kwdargs)
+# @pretrained_model({
+#     "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_base_plus_224.pth",
+#     "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_plus_224.pth",
+# }, default="mae_in1k_ft_in1k")
+# def hiera_base_plus_224(**kwdargs):
+#     return Hiera(embed_dim=112, num_heads=2, stages=(2, 3, 16, 3), **kwdargs)
 
 
-@pretrained_model({
-    "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_large_224.pth",
-    "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_large_224.pth",
-}, default="mae_in1k_ft_in1k")
-def hiera_large_224(**kwdargs):
-    return Hiera(embed_dim=144, num_heads=2, stages=(2, 6, 36, 4), **kwdargs)
+# @pretrained_model({
+#     "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_large_224.pth",
+#     "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_large_224.pth",
+# }, default="mae_in1k_ft_in1k")
+# def hiera_large_224(**kwdargs):
+#     return Hiera(embed_dim=144, num_heads=2, stages=(2, 6, 36, 4), **kwdargs)
 
 
-@pretrained_model({
-    "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_huge_224.pth",
-    "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_huge_224.pth",
-}, default="mae_in1k_ft_in1k")
-def hiera_huge_224(**kwdargs):
-    return Hiera(embed_dim=256, num_heads=4, stages=(2, 6, 36, 4), **kwdargs)
+# @pretrained_model({
+#     "mae_in1k_ft_in1k": "https://dl.fbaipublicfiles.com/hiera/hiera_huge_224.pth",
+#     "mae_in1k": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_huge_224.pth",
+# }, default="mae_in1k_ft_in1k")
+# def hiera_huge_224(**kwdargs):
+#     return Hiera(embed_dim=256, num_heads=4, stages=(2, 6, 36, 4), **kwdargs)
 
 
-# Video models
+# # Video models
 
 
-@pretrained_model({
-    "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_base_16x224.pth",
-    "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_16x224.pth",
-}, default="mae_k400_ft_k400")
-def hiera_base_16x224(num_classes: int = 400, **kwdargs):
-    return Hiera(
-        num_classes=num_classes,  # K400 has 400 classes
-        input_size=(16, 224, 224),
-        q_stride=(1, 2, 2),
-        mask_unit_size=(1, 8, 8),
-        patch_kernel=(3, 7, 7),
-        patch_stride=(2, 4, 4),
-        patch_padding=(1, 3, 3),
-        sep_pos_embed=True,
-        **kwdargs
-    )
+# @pretrained_model({
+#     "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_base_16x224.pth",
+#     "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_16x224.pth",
+# }, default="mae_k400_ft_k400")
+# def hiera_base_16x224(num_classes: int = 400, **kwdargs):
+#     return Hiera(
+#         num_classes=num_classes,  # K400 has 400 classes
+#         input_size=(16, 224, 224),
+#         q_stride=(1, 2, 2),
+#         mask_unit_size=(1, 8, 8),
+#         patch_kernel=(3, 7, 7),
+#         patch_stride=(2, 4, 4),
+#         patch_padding=(1, 3, 3),
+#         sep_pos_embed=True,
+#         **kwdargs
+#     )
 
 
-@pretrained_model({
-    "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_base_plus_16x224.pth",
-    "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_plus_16x224.pth",
-}, default="mae_k400_ft_k400")
-def hiera_base_plus_16x224(**kwdargs):
-    return hiera_base_16x224(
-        embed_dim=112, num_heads=2, stages=(2, 3, 16, 3), **kwdargs
-    )
+# @pretrained_model({
+#     "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_base_plus_16x224.pth",
+#     "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_base_plus_16x224.pth",
+# }, default="mae_k400_ft_k400")
+# def hiera_base_plus_16x224(**kwdargs):
+#     return hiera_base_16x224(
+#         embed_dim=112, num_heads=2, stages=(2, 3, 16, 3), **kwdargs
+#     )
 
 
-@pretrained_model({
-    "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_large_16x224.pth",
-    "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_large_16x224.pth",
-}, default="mae_k400_ft_k400")
-def hiera_large_16x224(**kwdargs):
-    return hiera_base_16x224(
-        embed_dim=144, num_heads=2, stages=(2, 6, 36, 4), **kwdargs
-    )
+# @pretrained_model({
+#     "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_large_16x224.pth",
+#     "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_large_16x224.pth",
+# }, default="mae_k400_ft_k400")
+# def hiera_large_16x224(**kwdargs):
+#     return hiera_base_16x224(
+#         embed_dim=144, num_heads=2, stages=(2, 6, 36, 4), **kwdargs
+#     )
 
 
-@pretrained_model({
-    "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_huge_16x224.pth",
-    "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_huge_16x224.pth",
-}, default="mae_k400_ft_k400")
-def hiera_huge_16x224(**kwdargs):
-    return hiera_base_16x224(
-        embed_dim=256, num_heads=4, stages=(2, 6, 36, 4), **kwdargs
-    )
+# @pretrained_model({
+#     "mae_k400_ft_k400": "https://dl.fbaipublicfiles.com/hiera/hiera_huge_16x224.pth",
+#     "mae_k400": "https://dl.fbaipublicfiles.com/hiera/mae_hiera_huge_16x224.pth",
+# }, default="mae_k400_ft_k400")
+# def hiera_huge_16x224(**kwdargs):
+#     return hiera_base_16x224(
+#         embed_dim=256, num_heads=4, stages=(2, 6, 36, 4), **kwdargs
+#     )

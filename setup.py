@@ -14,6 +14,7 @@ if 'CONDA_PREFIX' in os.environ:
     os.environ['CC'] = 'x86_64-conda-linux-gnu-gcc'
     os.environ['CXX'] = 'x86_64-conda-linux-gnu-g++'
 
+
 def print_compile_env():
     import subprocess
     print('torch :', torch.__version__)
@@ -32,7 +33,7 @@ def get_extensions():
     this_dir = os.path.dirname(os.path.abspath(__file__))
     extensions_dir = os.path.join(this_dir, 'csrc')
 
-    # Find all .cpp and .cu files in csrc directory:
+    # find all .cpp and .cu files in csrc directory:
     main_files = glob.glob(os.path.join(extensions_dir, '*.cpp'))
     source_cuda = glob.glob(os.path.join(extensions_dir, 'cuda', '*.cu'))
 
@@ -79,10 +80,9 @@ def get_extensions():
 
 
 if __name__ == "__main__":
-
     os.makedirs("src/ops3d", exist_ok=True)
     
-    # Create an empty __init__.py file if it doesn't exist.
+    # create an empty __init__.py file if it doesn't exist.
     init_path = os.path.join("src/ops3d", "__init__.py")
     if not os.path.exists(init_path):
         with open(init_path, "w") as f:

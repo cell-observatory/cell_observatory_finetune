@@ -1,5 +1,4 @@
-import numpy as np
-from typing import Dict, Callable, Optional
+from typing import Callable
 
 from segmentation.metrics.utils import (
     average_precision,
@@ -25,7 +24,7 @@ class AveragePrecision(Metric):
         self.ap_values = []
 
     def __call__(self, outputs, targets):
-        # TODO: Relabel masks to be contiguous for safety
+        # TODO: consider relabelling masks to be contiguous for safety
         ap, *_ = average_precision(targets, outputs, self.iou_threshold)
         self.ap_values.extend(ap)
         return ap

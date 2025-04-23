@@ -142,8 +142,8 @@ def encode_boxes(reference_boxes: Tensor, proposals: Tensor, weights: Tensor) ->
     reference_boxes_y2 = reference_boxes[:, 4].unsqueeze(1)
     reference_boxes_z2 = reference_boxes[:, 5].unsqueeze(1)
 
-    # implementation starts here
-    # encoding scheme: log-scale diff in box widhts & rel diff (arithmetic) in box centers (w. weights)
+    # encoding scheme: log-scale diff in box widhts & rel diff (arithmetic)
+    # in box centers (w. weights)
     ex_widths = proposals_x2 - proposals_x1
     ex_heights = proposals_y2 - proposals_y1
     ex_depths = proposals_z2 - proposals_z1
@@ -209,7 +209,6 @@ class BoxCoder:
         device = reference_boxes.device
         weights = torch.as_tensor(self.weights, dtype=dtype, device=device)
         targets = encode_boxes(reference_boxes, proposals, weights)
-
         return targets
 
     def decode(self, rel_codes: Tensor, boxes: List[Tensor]) -> Tensor:
@@ -427,31 +426,3 @@ def _topk_min(input: Tensor, orig_kval: int, axis: int) -> int:
     axis_dim_val = torch._shape_as_tensor(input)[axis].unsqueeze(0)
     min_kval = torch.min(torch.cat((torch.tensor([orig_kval], dtype=axis_dim_val.dtype), axis_dim_val), 0))
     return _fake_cast_onnx(min_kval)
-
-
-# def _box_loss(
-#     type: str,
-#     box_coder: BoxCoder,
-#     anchors_per_image: Tensor,
-#     matched_gt_boxes_per_image: Tensor,
-#     bbox_regression_per_image: Tensor,
-#     cnf: Optional[Dict[str, float]] = None,
-# ) -> Tensor:
-#     torch._assert(type in ["l1", "smooth_l1", "ciou", "diou", "giou"], f"Unsupported loss: {type}")
-
-#     if type == "l1":
-#         target_regression = box_coder.encode_single(matched_gt_boxes_per_image, anchors_per_image)
-#         return F.l1_loss(bbox_regression_per_image, target_regression, reduction="sum")
-#     elif type == "smooth_l1":
-#         target_regression = box_coder.encode_single(matched_gt_boxes_per_image, anchors_per_image)
-#         beta = cnf["beta"] if cnf is not None and "beta" in cnf else 1.0
-#         return F.smooth_l1_loss(bbox_regression_per_image, target_regression, reduction="sum", beta=beta)
-#     else:
-#         bbox_per_image = box_coder.decode_single(bbox_regression_per_image, anchors_per_image)
-#         eps = cnf["eps"] if cnf is not None and "eps" in cnf else 1e-7
-#         if type == "ciou":
-#             return complete_box_iou_loss(bbox_per_image, matched_gt_boxes_per_image, reduction="sum", eps=eps)
-#         if type == "diou":
-#             return distance_box_iou_loss(bbox_per_image, matched_gt_boxes_per_image, reduction="sum", eps=eps)
-#         # otherwise giou
-#         return generalized_box_iou_loss(bbox_per_image, matched_gt_boxes_per_image, reduction="sum", eps=eps)

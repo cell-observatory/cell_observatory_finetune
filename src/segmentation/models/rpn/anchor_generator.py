@@ -74,19 +74,6 @@ class AnchorGenerator(nn.Module):
         aspect_ratios_z=((0.5, 1.0, 2.0),),  # Default: same scaling in depth.
     ):
         super().__init__()
-
-        # if not isinstance(sizes[0], (list, tuple)):
-        #     # TODO change this
-        #     sizes = tuple((s,) for s in sizes)
-        # if not isinstance(aspect_ratios[0], (list, tuple)):
-        #     aspect_ratios = (aspect_ratios,) * len(sizes)
-        # if not isinstance(aspect_ratios_z[0], (list, tuple)):
-        #     aspect_ratios_z = (aspect_ratios_z,) * len(sizes)
-
-        # self.sizes = sizes
-        # self.aspect_ratios = aspect_ratios
-        # self.aspect_ratios_z = aspect_ratios_z
-
         # Normalize everything to tuple-of-tuples
         self.sizes = tuple(tuple(s) for s in sizes)
         self.aspect_ratios = tuple(tuple(a) for a in aspect_ratios)
@@ -121,8 +108,9 @@ class AnchorGenerator(nn.Module):
         ws = (w_grid * scale_grid).reshape(-1) # flatten
         hs = (h_grid * scale_grid).reshape(-1) 
         zs = (z_aspect_grid * scale_grid).reshape(-1)
-    
-        base_anchors = torch.stack([-ws, -hs, -zs, ws, hs, zs], dim=1) / 2 # (x_min, y_min, z_min, x_max, y_max, z_max) for all combinations of scales and aspect ratios
+
+        # (x_min, y_min, z_min, x_max, y_max, z_max) for all combinations of scales and aspect ratios
+        base_anchors = torch.stack([-ws, -hs, -zs, ws, hs, zs], dim=1) / 2 
         return base_anchors.round()
 
     def set_cell_anchors(self, dtype: torch.dtype, device: torch.device):
@@ -149,14 +137,13 @@ class AnchorGenerator(nn.Module):
         )
 
         for size, stride, base_anchors in zip(grid_sizes, strides, cell_anchors):
-            # print(f"size: {size}, stride: {stride}, base_anchors: {base_anchors}")
-            # raise ValueError("DEBUG anchors")
             grid_depth, grid_height, grid_width = size
             stride_depth, stride_height, stride_width = stride
             device = base_anchors.device
 
             # For output anchor, compute [x_center, y_center, z_center, x_center, y_center, z_center]
-            shifts_x = torch.arange(0, grid_width, dtype=torch.int32, device=device) * stride_width # recall: given by image_size / feature_map_size
+            # recall: stride given by image_size / feature_map_size
+            shifts_x = torch.arange(0, grid_width, dtype=torch.int32, device=device) * stride_width 
             shifts_y = torch.arange(0, grid_height, dtype=torch.int32, device=device) * stride_height
             shifts_z = torch.arange(0, grid_depth, dtype=torch.int32, device=device) * stride_depth
             
@@ -168,10 +155,10 @@ class AnchorGenerator(nn.Module):
             
             shifts = torch.stack((shift_x, shift_y, shift_z, shift_x, shift_y, shift_z), dim=1) 
 
-            # For every (base anchor, output anchor) pair,
-            # offset each zero-centered base anchor by the center of the output anchor.
-            # I.e. for each base position given by shifts (x,y,z), we add base_anchors 
-            # according to aspect_ratios and scales. Anchors is list of all such anchors. 
+            # for every (base anchor, output anchor) pair,
+            # offset each zero-centered base anchor by the center of the output anchor
+            # i.e. for each base position given by shifts (x,y,z), we add base_anchors 
+            # according to aspect_ratios and scales. Anchors is list of all such anchors 
             anchors.append((shifts.view(-1, 1, 6) + base_anchors.view(1, -1, 6)).reshape(-1, 6))  
 
         return anchors
@@ -197,10 +184,6 @@ class AnchorGenerator(nn.Module):
         for _ in range(len(image_list.image_sizes)):
             anchors_in_image = [anchors_per_feature_map for anchors_per_feature_map in anchors_over_all_feature_maps]
             anchors.append(anchors_in_image)
-
-        # for anchor in anchors_in_image[0]: 
-        #     print(anchor)
-        # raise ValueError("DEBUG anchors")
 
         anchors = [torch.cat(anchors_per_image) for anchors_per_image in anchors] # over images & feature maps
         return anchors

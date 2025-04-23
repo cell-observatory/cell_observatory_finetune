@@ -1,9 +1,9 @@
 defaults:
-  - models: maskrcnn_fpn        # Loads configs/models/mask_rcnn.yaml
-  - models/backbones: hiera_fpn     # Loads configs/models/backbones/vitDet.yaml
+  - models: maskrcnn_fpn        # Loads configs/models/maskrcnn_fpn.yaml
+  - models/backbones: hiera_fpn     # Loads configs/models/backbones/hiera_fpn.yaml
   - datasets: skittlez       # Loads configs/datasets/skittlez.yaml
   - metrics: metrics        # Loads configs/metrics/metrics.yaml
-  - transforms: transforms_skittlez # Loads configs/transforms/transforms.yaml
+  - transforms: transforms_skittlez # Loads configs/transforms/transforms_skittlez.yaml
   - _self_  # self reference last to allow for overrides
 
 # overrides
@@ -12,21 +12,21 @@ defaults:
 models:
   backbones:
     _target_: segmentation.models.backbones.fpn.BackboneWithFPN
-    # NOTE: By default FPN adds an extra LastLevelMaxPool layer to the last feature map
-    # Hence, the output feature maps will have len(return_layers) + 1 maps
+    # NOTE: FPN may add an extra LastLevelMaxPool layer to the last feature map
+    # Hence, the output feature maps may have len(return_layers) + 1 maps
     # return layers specifies which feature maps to run through the FPN
-    return_layers: {"p0": "p0", "p1": "p1", "p2": "p2"} # , "p2": "p2" # , "p1": "p1", "p2": "p2" # 2x downsample per return layer used + LastLevelMaxPool
-    in_channels_list: [96, 192, 384] # , 192, 384 , 768 # matches embed_dim * stage sequence
+    return_layers: {"p0": "p0", "p1": "p1", "p2": "p2"} # 2x downsample per return layer used + LastLevelMaxPool
+    in_channels_list: [96, 192, 384] # , 768  (matches embed_dim * stage sequence)
     out_channels: ${backbone_out_channels}
     norm_layer: null
-    # extra_blocks # NOTE: FPN adds an extra LastLevelMaxPool layer to the last feature map if none given
+    # extra_blocks # FPN may add an extra LastLevelMaxPool layer to the last feature map
   mask_roi_pool:
     _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
-    featmap_names: ${output_features} # for VitDet: adapt accordingly
-    output_size: 14 # usually 14 # ROI pooling output size
+    featmap_names: ${output_features}
+    output_size: 14 # ROI pooling output size
     sampling_ratio: 2 # grid subsampling 
     canonical_scale: 256
-    canonical_level: 4 # 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of 256x256x256 input
+    canonical_level: 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of input
   rpn_anchor_generator:
     _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
     sizes:
@@ -47,13 +47,13 @@ models:
   rpn_head: 
     _target_: segmentation.models.rpn.rpn_head.RPNHead
     in_channels: ${backbone_out_channels} 
-    num_anchors: 27 # 3 x 4 sizes * 4 aspect ratios * 4 aspect ratios_z (TODO: make this dynamic)
+    num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  
   # NOTE: consider chaning the number of positive samples considered if the model is not learning
-  # and only predicts background
+  #       and only predicts background
   # rpn_fg_iou_thresh: 0.5 # too high of a value will cause the model to not learn anything and always predict the background
   # rpn_bg_iou_thresh: 0.3
   # box_positive_fraction: 0.25 # positive fraction of samples in subsampling
-
 
 datasets:
   batch_size: 2 # 4 # total batch size (batch_size per gpu * number of gpus) 
@@ -63,57 +63,60 @@ datasets:
 # decoder type (not used)
 network: maskrcnn
 
-# Training paradigm
+# training paradigm
 paradigm: segmentation.training.backend_segmentation.supervised
 
-# Backbone 
+# backbone 
+# downsampling resolution example for 256x256x256 input: 256 -> 64 (3d conv) -> 64 (q0) -> 32 (q1) -> 16 (q2) -> 8 (q3) (why we skip q3 currently) 
 backbone_target: segmentation.models.backbones.hiera.Hiera
 backbone_out_channels: 256 # 256 is standard from FPN paper 
-# downsampling resolution example for 256x256x256 input: 256 -> 64 (3d conv) -> 32 (q1) -> 16 (q2) -> 8 (q3) -> 4 
 # featmaps used for RPN and ROI pooling heads
-output_features: ["p0", "p1", "p2"] # , "p2", "p3", "pool" (pi downsamples starting shape by 2^i+1 on top of 4x conv downsample)
+output_features: ["p0", "p1", "p2"] # "p3", "pool" (p^i downsamples starting shape by 2^i+1)
 
-# Paths
-outdir: /clusterfs/nvme/segment_4d/test_12
+# paths
+outdir: /clusterfs/nvme/segment_4d/test_15
 logdir: ${outdir}/logs
-load_checkpointdir: null
-checkpointdir: ${outdir}/checkpoints #/clusterfs/nvme/segment_4d/test/checkpoints # NOTE: we look for checkpoints in the outdir but load via this directory
+
+load_checkpointdir: null # alternative checkpointdir to load ckpt from if checkpointdir in outdir is empty 
+checkpointdir: ${outdir}/checkpoints
+checkpoint_update_interval: 100 # save latest checkpoint every N epochs
+
 train_db_savedir: ${outdir}/db
 db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
 
-# Optimizer parameters
+# optimizer parameters
 opt: adamw # TODO: to use fused lamb, install DeepSpeed with the DS_BUILD_FUSED_LAMB environment variable 
-lr: 5e-5 # 5e-4 # initial learning rate
+lr: 5e-5 # initial learning rate
 wd: 5e-5 # initial weight decay
 ld: null # optional layer decay
 clip_grad: 0.5
 ema: [0.998, 1.0]
 
-# Training loop parameters
+# training loop parameters
 epochs: 500
 val_interval: 1
-log_step: 100
-val_log_step: 20
+log_step: 100 # step interval to show training loss in train loop
+val_log_step: 20 # step interval to show loss in val loop
 warmup: 25
 cooldown: 50
 fixedlr: false
 dropout: 0.1
 fixed_dropout_depth: false
-oom_limit: 3 # number of consecutive OOMs before stopping training
 
-# Quantization
+# quantization
 amp: fp16  # ["no", "fp16", "bf16", "fp8"]
 
-# Profiling
+# profiling
 profile: false
 
-# Compute resources
+# compute resources
 workers: 1 # number of worker nodes
-gpu_workers: 1 #4 # number of gpus per worker
-cpu_workers: 4 #16 # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
+gpu_workers: 1 #4 for 1 node # number of gpus per worker
+cpu_workers: 4 #16 for 1 node # number of cpu cores per worker (num gpus per worker * number of cpu cores per gpu)
 distributed_sampler: true
+max_worker_heartbeat_timeout: 2 # in minutes (to prevent indefinite hang if one process fails)
 
-# DeepSpeed config (Hydra will pass it to training loop)
+# deepSpeed config (Hydra will pass it to training loop)
 deepspeed_config:
   fp16:
     enabled: true
@@ -162,7 +165,7 @@ deepspeed_config:
     detailed: true
     output_file: ${logdir}/flops_profiler.log
 
-# Ray ScalingConfig (some variables are set to null to be set in the training loop)
+# ray ScalingConfig (some variables are set to null to be set in the training loop)
 scaling_config:
   num_workers: null # int(cfg.workers) * int(cfg.gpu_workers)
   use_gpu: true
@@ -172,7 +175,7 @@ scaling_config:
   trainer_resources:
     CPU: 1
 
-# Ray RunConfig
+# ray RunConfig
 run_config:
   log_to_file: true
   storage_path: ${outdir}
@@ -183,6 +186,6 @@ run_config:
   failure_config:
     max_failures: 0
   
-# Torch Config
+# torch Config
 torch_config:
   timeout_s: 3600

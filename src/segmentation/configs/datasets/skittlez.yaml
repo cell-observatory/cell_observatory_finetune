@@ -3,7 +3,7 @@ defaults:
 
 name: skittlez
 
-batch_size: 4 # 4 # total batch size (batch_size per gpu * number of gpus) 
+batch_size: 4 # total batch size (batch_size per gpu * number of gpus) 
 
 dataset_mean: [1000.0] # not currently used, placeholder for dataset mean
 dataset_std: [1000.0] # not currently used, placeholder for dataset std
@@ -22,7 +22,7 @@ inputs:
 database:
   _target_: segmentation.data.datasets.skittlez.Skittlez_Database
   training: true 
-  distributed: true # true # set to true for distributed training (Ray or DDP)
+  distributed: true # set to true for distributed training (Ray or DDP)
   db_path: /clusterfs/nvme/segment_4d/final_pipeline_v3/db/segmentation_curation_test.db
   train_db_savedir: ${...train_db_savedir} # defer interpolation to main config
   selection_criteria: {"volume" : 8000}  # Minimum volume in pixels to accept instance
@@ -39,15 +39,7 @@ database:
     c: 3
     color_mode: MATCH  
 
-# MIGRATED TO TRANSFORMS CONFIG
-# transforms:
-#   - _target_: segmentation.data.transforms.transforms.Normalize
-#     # mean: ${dataset_mean}
-#     # std: ${dataset_std}
-#   - _target_: segmentation.data.transforms.transforms.Resize
-#     size: [128, 128, 128] # ensure that z-axis is length L in case z-axis image len is smaller than L
-
-split:  0.1 # null # 0.1 
+split:  0.1 # null  
 return_dataloader: true 
 workers: 1     
 collate_fn: segmentation.data.data_utils.collate_fn_segmentation
