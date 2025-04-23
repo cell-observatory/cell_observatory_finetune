@@ -7,7 +7,6 @@ dist/
 # Ignore compiled Python files and cache
 __pycache__/
 *.py[cod]
-*.so
 
 # Ignore compiled ops3d extension
 src/ops3d/_C.*.so

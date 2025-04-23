@@ -1,4 +1,0 @@
-# ninja log v5
-1	17974	1744083064719413713	/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/build/temp.linux-x86_64-cpython-310/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/csrc/cuda/nms_3d_cuda.o	ac9056ce7fe790b2
-1	18492	1744083065237421126	/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/build/temp.linux-x86_64-cpython-310/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/csrc/cuda/roi_align_3d_cuda.o	f93c51f1339ec944
-2	18648	1744083065344422657	/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/build/temp.linux-x86_64-cpython-310/clusterfs/nvme/segment_4d/final_pipeline_v3/codebase/train/segmentation/csrc/vision.o	88fad681776b23c8
