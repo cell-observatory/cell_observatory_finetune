@@ -110,11 +110,11 @@ def test_roi_heads(model):
 
     # box roi pooling
     box_features = roi_heads.box_roi_pool(features, proposals, [image_shapes])
-    assert box_features.dim() == 5  # expect (N, C, D, H, W)
+    assert box_features.dim() == 5 
 
     # box head and predictor
     box_features = roi_heads.box_head(box_features)
-    assert box_features.dim() == 2  # expect (N, representation_size)
+    assert box_features.dim() == 2  
 
     class_logits, box_regression = roi_heads.box_predictor(box_features)
     assert class_logits.dim() == 2 and box_regression.dim() == 2
@@ -138,7 +138,7 @@ def test_roi_heads(model):
         mask_proposals = [r["boxes"] for r in result]
         assert roi_heads.mask_roi_pool is not None
         mask_features = roi_heads.mask_roi_pool(features, mask_proposals, [image_shapes])
-        assert mask_features.dim() == 5  # (N, C, D, H, W)
+        assert mask_features.dim() == 5  
 
         mask_features = roi_heads.mask_head(mask_features)
         assert mask_features.dim() == 5

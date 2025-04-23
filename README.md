@@ -21,15 +21,16 @@ Built with [PyTorch](https://pytorch.org/), accelerated and scaled with [Ray](ht
 
 ## Installation
 
-This package has been tested on **CUDA 12.4** with **PyTorch 2.4.1+cu124**. We recommend using a dedicated `conda` environment.
+This package has been tested on **CUDA 12.4** with **PyTorch 2.4.1** and **Python 3.10**. We recommend using a dedicated `conda` environment.
 
 ```bash
 # 1. Create & activate conda environment
-conda create -n segmentation python=3.10 -y
+conda create -n segmentation python=3.10
 conda activate segmentation
 
-# 2. Install matching CUDA‐enabled PyTorch & torchvision
-conda install -c pytorch pytorch=2.4.1 torchvision=0.19.1 cudatoolkit=12.4 -c nvidia
+# 2. Clone the repository
+https://github.com/HugoHamilton/segmentation.git
+cd segmentation
 
 # 3. Install package in editable mode
 pip install -e . 
@@ -93,7 +94,7 @@ Adapted from Torchvision’s ResNet [1], our 3D‑ResNet replaces all 2D operati
     ```python
     # Pseudocode
     out  =  ReLU(BN3D(conv3x3(x)))
-    out  =  BN3D(conv3x3(x))
+    out  =  BN3D(conv3x3(out))
     out +=  x
     out  =  ReLU(out)
     ```  
@@ -113,12 +114,12 @@ Adapted from Torchvision’s ResNet [1], our 3D‑ResNet replaces all 2D operati
 Adapted from Detectron2’s VitDet implementation [3], our 3D-ViTDet replaces any 2D operations with their 3D counterparts:
 
 - **Patch Embedding**  
-  - **Conv3d:** `out_channels = embed_dim`, `kernel = (patch_size)³`, `stride = (patch_size)³`  
+  - **Conv3d:** `out_channels = embed_dim`, `kernel_size = (patch_size)³`, `stride = (patch_size)³`  
 
 - **Absolute Positional Embeddings**  
-  - Optional **absolute** pos‑embeddings interpolated to match the input size if `image_size != pretrain_image_size` 
+  - Optional **absolute** positional embeddings
 
-- **Transformer Blocks** 
+- **VitDet Transformer Block** 
     ```python
     # Pseudocode
     shortcut = x
@@ -135,19 +136,19 @@ Adapted from Detectron2’s VitDet implementation [3], our 3D-ViTDet replaces an
     ```
   
 - **Simple Feature Pyramid**  
-  Builds `{p2, p3, …}` from `"last_feat"` through upsamling/downsampling with `scale factors` (e.g. 4×, 2×, 1×):
+  Builds `{p2, p3, …}` from `"last_feat"` returned  by the ViT backbone through upsamling/downsampling with `scale factors` (e.g. 4×, 2×, 1×):
   1. **Upsample/Downsample**  
      - `ConvTranspose3d` for `scale>1`  
      - `MaxPool3d` for `scale<1`  
-  2. **Channel unify**  
-     - `Conv3d` (1×1×1 → 3×3×3 ) to set each map to `out_channels`  
+  2. **Channel Unify**  
+     - `Conv3d` layers (1×1×1 → 3×3×3 ) to set each map to `out_channels`  
 
 ### Hiera Overview
 
 Taken from “Hiera: A Hierarchical Vision Transformer without the Bells‑and‑Whistles” [3]:
 
 - **Patch Embedding**  
-  - **Conv3d:** `out_channels = embed_dim`, `kernel = (patch_kernel)³`, `stride = (patch_stride)³`
+  - **Conv3d:** `out_channels = embed_dim`, `kernel_size = (patch_kernel)³`, `stride = (patch_stride)³`
     - Zeros-out masked regions before `Conv3d` to prevent leakage of masked regions when using overlapping kernels
 
 - **Positional Embedding**  
@@ -177,11 +178,11 @@ Taken from “Hiera: A Hierarchical Vision Transformer without the Bells‑and�
 We optionally combine each 3D backbone with a Feature Pyramid Network [5], adapted from Torchvision's 2D FPN by replacing all 2D operations with their 3D counterparts:
 
 - **Return Layers**  
-  Select intermediate outputs (e.g. `"p2"`, `"p3"`) from the ResNet to build the pyramid with `return_layers`.
+  Select intermediate outputs (e.g. `"p2"`, `"p3"`) to be used to build the pyramid with `return_layers`.
 - **FPN**
   - **Lateral Conv3d:** `kernel_size = 1³`, `stride = 1³`, `padding = 0`
   - **Top‑Down Pathway:** `F.interpolate(coarse_map, mode="nearest") + lateral map`  
-  - **Merged Conv3d:** `kernel_size = 3³`, `stride = 1³`, `padding = 1`
+  - **Merge Conv3d:** `kernel_size = 3³`, `stride = 1³`, `padding = 1`
 
 All 3D‑FPN outputs are returned as an `OrderedDict[str, Tensor]` of multi‑scale feature maps, for downstream detection or segmentation heads.  
 
@@ -190,7 +191,7 @@ All 3D‑FPN outputs are returned as an `OrderedDict[str, Tensor]` of multi‑sc
 Adapted from TorchVision’s Mask R‑CNN, our 3D mask R-CNN replaces all 2D operations with their 3D counterparts. All custom CUDA kernels are very lightly adapted from https://github.com/TimothyZero/MedVision. 
 
 - **GeneralizedRCNNTransform**:  
-  1. **Resize** the shorter side to range `[min_size, max_size]`  
+  1. **Resize** image to range `[min_size, max_size]`  
   2. **Normalize** per-channel with `image_mean` and `image_std`  
   3. **Pad & batch** into `ImageList` data structure
 
@@ -206,28 +207,29 @@ Adapted from TorchVision’s Mask R‑CNN, our 3D mask R-CNN replaces all 2D op
   3. **Decode & Filter** with `BoxCoder.decode`, clip to volume bounds, discard small/low‑score boxes, and apply NMS
 
 - **ROI Heads**  
-  1. **MultiScaleRoIAlign:** Leverages feature maps `featmap_names`, with `output_size=7` & `sampling_ratio=2` to align each ROI proposal from the RPN to correct feature map in hierarchy and resize to `(output_size, output_size, output_size)`.  
-  2. **TwoMLPHead**:  
-     ```python    
-        # Pseudocode
-        x = flatten(x, start_dim=1)       # [b, ch·d·h·w]
-        x = relu(fc6(x))                  # first fully‐connected + activation
-        x = relu(fc7(x))                  # second fully‐connected + activation
-      ```
-  3. **FastRCNNPredictor**:  
-      ```python
-          # Pseudocode
-          scores      = cls_score(x)                 # → [b, num_classes]
-          bbox_deltas = bbox_pred(x)                 # → [b, num_classes * 6]
-      ```
-- **Mask Branch**  
-  Extends Faster R‑CNN with a parallel mask roi head:
-  1. **MultiScaleRoIAlign**: Leverages feature maps `featmap_names`, with `output_size=14` & `sampling_ratio=2` to align each ROI proposal from the RPN to correct feature map in hierarchy and resize to `(output_size, output_size, output_size)`.   
-  2. **MaskRCNNHeads**: `N` layers `Conv3dNormActivation(channels_out=256, kernel=3, padding=1)`  
-  3. **MaskRCNNPredictor**:  
-     - `ConvTranspose3d(channel_in=256, channels_out=256, kernel=2, stride=2)` 
-     - `Relu`
-     - `Conv3d(channel_in=256, channels_out=num_classes, kernel=1, stride=1)`  
+    **Detection Branch**
+    1. **MultiScaleRoIAlign:** Leverages feature maps `featmap_names`, with `output_size=7` and `sampling_ratio=2` to align and resize each ROI proposal from the RPN to the optimal feature map in the feature map hierarchy.  
+    2. **TwoMLPHead**:  
+        ```python    
+            # Pseudocode
+            x = flatten(x, start_dim=1)       # [b, ch·d·h·w]
+            x = relu(fc6(x))                  # first fully‐connected + activation
+            x = relu(fc7(x))                  # second fully‐connected + activation
+          ```
+    3. **FastRCNNPredictor**:  
+        ```python
+            # Pseudocode
+            scores      = cls_score(x)                 # returns: [b, num_classes]
+            bbox_deltas = bbox_pred(x)                 # returns: [b, num_classes * 6]
+        ```
+    **Mask Branch**  
+    Extends Faster R‑CNN with a parallel mask prediction head:
+    1. **MultiScaleRoIAlign**: Leverages feature maps `featmap_names`, with `output_size=14` and `sampling_ratio=2` to align and resize each ROI proposal from the RPN to the optimal feature map in the feature map hierarchy.   
+    2. **MaskRCNNHeads**: `N` layers of `Conv3dNormActivation(channels_out=256, kernel_size=3, padding=1)` layers
+    3. **MaskRCNNPredictor**:  
+        - `ConvTranspose3d(channel_in=256, channels_out=256, kernel_size=2, stride=2)` 
+        - `Relu`
+        - `Conv3d(channel_in=256, channels_out=num_classes, kernel_size=1, stride=1)`  
 
 ### References
 
@@ -243,8 +245,7 @@ Adapted from TorchVision’s Mask R‑CNN, our 3D mask R-CNN replaces all 2D op
 
 [6]: “Faster R‑CNN: Towards Real-Time Object Detection with Region Proposal Networks,” (https://arxiv.org/abs/1506.01497)  
 
-[7]: “Mask R‑CNN,” (https://arxiv.org/abs/1703.06870)
-
+[7]: “Mask R‑CNN,” (https://arxiv.org/abs/1703.06870).
 
 ## Data Pipeline
 
@@ -256,27 +257,28 @@ The data pipeline is centered around a single entry point, `gather_dataset`, whi
 
 2. **Instantiates Dataset**  
    - Calls `instantiate(config.datasets.database, ...)`  to instantiate the dataset class
-   - Currently, only `Skittlez_Database` is supported, but any can `torch.utils.data.Dataset` class may be used  
+   - Currently, only `Skittlez_Database` is implemented, but any `torch.utils.data.Dataset` class may be used  
 
 3. **Creates DataLoader(s)**  
    - If the `config.datasets.return_dataloaders` flag is set, we:  
      - Optionally split into train/val via `random_split`  
      - Wrap each split or the full dataset in a `DataLoader` with:  
        - `batch_size=config.worker_batch_size`  
-       - `DistributedSampler` (for multi‑GPU/distributed) or plain sampling for evaluation  
+       - `DistributedSampler` for distributed settings or standard sampling for evaluation <br >
+          based on the `config.distributed_sampler` flag  
 
-4. **Otherwise** returns the raw `Dataset` for manual handling.
+4. **Otherwise** returns the raw `Dataset` object for custom use
 
 ### Dataset Examples
 
 `Skittlez_Database` 
 
 - **Initialization**  
-  - Reads metadata from a remote DB or a local SQLite DB (`_query_db`)  
+  - Reads metadata from a remote DB or a local SQLite DB with `_query_db`  
   - Scans TIFF/Zarr files, builds a **local** SQLite index of all valid `(z,y,x,c)` crops with their corresponding bounding boxes and mask IDs  
 
 - **`__len__` / `__getitem__`**  
-  - `__len__`: number of crops (i.e. rows in `store_index_map`)  
+  - `__len__`: number of crops (i.e. rows in the `store_index_map` table)  
   - `__getitem__(i)`  
     1. Look up the i‑th crop’s file path, slice coordinates, and instance segmentation target information (bboxes, masks, etc.)   
     2. Load the raw subvolume (`tifffile`/`TensorStore`), crop out the `(Z, Y, X)` window and any selected color channels  
@@ -294,7 +296,7 @@ The data pipeline is centered around a single entry point, `gather_dataset`, whi
 
 ## Model Configurations with Hydra
 
-We use [Hydra](https://hydra.cc/) for managing experiment configurations. Hydra allows you to construct experiments by composing modular YAML snippets.
+We use [Hydra](https://hydra.cc/) for managing experiment configurations. Hydra allows you to construct experiments by composing modular YAML files.
 
 ### 1. Select Base Configurations
 
@@ -338,19 +340,19 @@ models:
 Here's what each configuration subdirectory handles:
 
 - **`models/`**
-  - Defines complete model specifications (e.g., Mask R‑CNN variants).
+  - Defines complete model specifications (e.g., Mask R‑CNN variants)
 - **`models/backbones/`**
-  - Defines backbone networks and corresponding FPN wrappers.
+  - Defines backbone networks and corresponding FPN wrappers
 - **`datasets/`**
-  - Defines dataset classes and parameters.
+  - Defines dataset classes and parameters
 - **`transforms/`**
-  - Defines data augmentation and preprocessing pipelines and parameters.
+  - Defines data augmentation and preprocessing pipelines and parameters
 - **`metrics/`**
-  - Defines evaluation metrics computed during validation by our custom `Evaluator` class.
+  - Defines evaluation metrics computed during validation by our custom `Evaluator` class
 
-### 3. Extend or Add New Modules
+### 4. Extend or Add New Modules
 
-Add a new YAML under the proper group, e.g. `configs/models/backbones/my_new_backbone.yaml`. To support a brand‑new model or dataset, just drop in your new small YAML and reference it in your defaults: block.
+Add a new YAML under the proper group, e.g. `configs/models/backbones/my_new_backbone.yaml`. To support a brand‑new model or dataset, just drop in your new small YAML and reference it in your `defaults:` block.
 
 ```yaml
 defaults:

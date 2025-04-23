@@ -57,7 +57,7 @@ def test_rpn(model):
     assert isinstance(objectness, list) and isinstance(pred_bbox_deltas, list)
     assert len(objectness) == len(pred_bbox_deltas) > 0
     for obj in objectness:
-        assert obj.dim() == 5  # (N, A, D, H, W)
+        assert obj.dim() == 5 
         assert obj.shape[0] == num_images
 
     # concatenate all feature levels
