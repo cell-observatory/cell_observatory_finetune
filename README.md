@@ -29,7 +29,7 @@ conda create -n segmentation python=3.10
 conda activate segmentation
 
 # 2. Clone the repository
-https://github.com/HugoHamilton/segmentation.git
+https://github.com/cell-observatory/segmentation.git
 cd segmentation
 
 # 3. Install package in editable mode
