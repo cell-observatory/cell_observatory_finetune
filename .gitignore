@@ -16,6 +16,51 @@ src/ops3d/_C.*.so
 .ipynb_checkpoints/
 .DS_Store
 
+.idea/
+.DS_Store
+.DS_Store?
+.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+
 # Ignore modules that are not finalized
 src/segmentation/models/backbones/swinTransformer.py
 src/segmentation/models/decoders/dino_decoder.py
@@ -23,3 +68,5 @@ src/segmentation/models/decoders/maskdino_decoder.py
 src/segmentation/models/decoders
 src/segmentation/models/encoders/maskdino_pixel_decoder.py
 src/segmentation/models/encoders/positional_encoding.py
+
+
