@@ -7,31 +7,9 @@ name = "segmentation"
 version = "0.1.0"
 description = "4D & 5D Segmentation Models"
 authors = [{ name = "Hugo Hamilton and Thayer Alshaabi", email = "hph@berkeley.edu" }]
-dependencies = [
-    "torch==2.4.1",
-    "torchvision==0.19.1",
-    "hydra-core",
-    "deepspeed==0.16.5",
-    "ray[train]==2.44.1",
-    "pandas",
-    "zarr",
-    "fvcore",
-    "matplotlib==3.8.1",
-    "numba",
-    "numpy",
-    "omegaconf",
-    "pytorchvideo",
-    "scipy",
-    "setuptools==72.1.0",
-    "scikit-image",
-    "tensorstore",
-    "tifffile",
-    "timm",
-    "torchinfo",
-    "tqdm",
-    "ujson",
-    "nvitop"
-]
+dynamic = ["dependencies"]
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools]
 package-dir = { "" = "src" }
