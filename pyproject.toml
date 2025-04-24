@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "segmentation"
 version = "0.1.0"
 description = "4D & 5D Segmentation Models"
-authors = [{ name = "Hugo Hamilton", email = "hph@berkeley.edu" }]
+authors = [{ name = "Hugo Hamilton and Thayer Alshaabi", email = "hph@berkeley.edu" }]
 dependencies = [
     "torch==2.4.1",
     "torchvision==0.19.1",
@@ -16,7 +16,7 @@ dependencies = [
     "pandas",
     "zarr",
     "fvcore",
-    "matplotlib",
+    "matplotlib==3.8.1",
     "numba",
     "numpy",
     "omegaconf",
@@ -29,7 +29,8 @@ dependencies = [
     "timm",
     "torchinfo",
     "tqdm",
-    "ujson"
+    "ujson",
+    "nvitop"
 ]
 
 [tool.setuptools]
