@@ -4,7 +4,7 @@ import torch
 
 from hydra import initialize, compose
 
-from segmentation.training.registry import build_dependency_graph_and_instantiate
+from segmentation.train.registry import build_dependency_graph_and_instantiate
 
 
 @pytest.fixture(scope="module")

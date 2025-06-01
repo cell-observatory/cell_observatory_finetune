@@ -24,24 +24,21 @@ import time
 import json 
 import logging
 import datetime
+from pathlib import Path
+from collections import abc
 from typing import List, Union, Dict, Any, Callable, Optional, Sequence, Tuple
 
-from collections import abc
-from contextlib import ExitStack
-
 import torch
-from torch import nn
-from torch.amp import autocast
 
+from segmentation.data.utils import move_to_device
 from segmentation.utils.comm import inference_context
-from segmentation.data.gather_dataset import gather_dataset
+from segmentation.data.dataloaders import get_dataloader
 from segmentation.checkpoint.checkpoint import load_checkpoint
-from segmentation.training.registry import build_dependency_graph_and_instantiate
-from segmentation.evaluation.skittlez_evaluation import SkittlezInstanceEvaluator
+from segmentation.structures.sample_objects.data_sample import DataSample
+from segmentation.train.registry import build_dependency_graph_and_instantiate
 from segmentation.evaluation.evaluator import DatasetEvaluator, DatasetEvaluators
 
 import hydra
-from hydra.utils import get_method, instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 logger = logging.getLogger("evaluation")
@@ -77,7 +74,8 @@ def inference_on_dataset(
     logger.info("Start inference on {} batches".format(len(data_loader)))
     
     inference_logbook = {}
-    total = len(data_loader)  # inference dataloader must have a fixed length
+    # inference dataloader must have a fixed length
+    total = len(data_loader)  
     num_devices = torch.cuda.device_count()
     
     if evaluator is None:
@@ -99,7 +97,7 @@ def inference_on_dataset(
             start_data_time = time.perf_counter()
             dict.get(callbacks or {}, "on_start", lambda: None)()
             
-            for idx, (inputs, targets) in enumerate(data_loader):
+            for idx, data_sample in enumerate(data_loader):
                 step_utilization, step_vram = [], []
                 total_data_time += time.perf_counter() - start_data_time
 
@@ -115,8 +113,8 @@ def inference_on_dataset(
                 # invoke before_inference callback if exists
                 dict.get(callbacks or {}, "before_inference", lambda: None)()
                 
-                inputs = inputs.cuda()   
-                losses_dict, outputs = model(inputs, None)
+                data_sample = move_to_device(data_sample, auto_transfer=True)  
+                losses_dict, outputs = model(data_sample)
 
                 # invoke after_inference callback if exists
                 dict.get(callbacks or {}, "after_inference", lambda: None)()
@@ -132,7 +130,7 @@ def inference_on_dataset(
                 step_vram.append(cuda_vram)
 
                 start_eval_time = time.perf_counter()
-                evaluator.process(targets, outputs)
+                evaluator.process(DataSample.from_dict(data_sample).gt_instances, outputs)
                 total_eval_time += time.perf_counter() - start_eval_time
 
                 iters_after_start = idx + 1 - num_warmup * int(idx >= num_warmup)
@@ -150,7 +148,7 @@ def inference_on_dataset(
                         f"Eval: {eval_seconds_per_iter:.4f} s/iter. "
                         f"Total: {total_seconds_per_iter:.4f} s/iter. "
                         f"Cuda Memory Allocated: {cuda_vram:.4g} GB. "
-                        f"Cuda Utilization: {cuda_util:.4g} GB. "
+                        f"Cuda Utilization: {cuda_util:.4g} %. "
                         f"ETA={eta}"
                     )
                 
@@ -202,15 +200,15 @@ def main(cfg: DictConfig):
     # print full configuration (for debugging)
     logger.info("\n" + OmegaConf.to_yaml(cfg))
 
+    Path(cfg.outdir).mkdir(exist_ok=True, parents=True)
+
     with open_dict(cfg):
-        if cfg.gpu_workers == -1:
-            cfg.gpu_workers = torch.cuda.device_count()
-        cfg.worker_batch_size = cfg.datasets.batch_size // (
-            cfg.workers * cfg.gpu_workers
-        )
+        if cfg.clusters.total_gpus is None or cfg.clusters.batch_size is None:
+            raise ValueError("total_gpus and batch_size must be specified in the Hydra configuration.")
+        cfg.clusters.worker_batch_size = cfg.clusters.batch_size // cfg.clusters.total_gpus
     
     # get dataloader
-    test_dataloader = gather_dataset(cfg) 
+    test_dataloader = get_dataloader(cfg) 
     
     # instantiate model
     model = build_dependency_graph_and_instantiate(cfg.models)

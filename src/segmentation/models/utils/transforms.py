@@ -39,8 +39,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from torch import nn, Tensor
 
-from segmentation.utils.image_list import ImageList
-from segmentation.models.heads.roi_heads.roi_heads import paste_masks_in_image
+from segmentation.structures.sample_objects.instances import Instances
+from segmentation.structures.sample_objects.data_sample import DataSample
+
+from segmentation.structures.data_objects.image_list import ImageList
+from segmentation.structures.data_objects.masks import paste_masks_in_image
 
 
 def _resize_image_and_masks(
@@ -80,7 +83,11 @@ def _resize_image_and_masks(
     if "masks" in target:
         mask = target["masks"]
         mask = torch.nn.functional.interpolate(
-            mask[:, None].float(), size=size, scale_factor=scale_factor, recompute_scale_factor=recompute_scale_factor, # mode="nearest",
+            mask[:, None].float(), 
+            size=size, 
+            scale_factor=scale_factor, 
+            recompute_scale_factor=recompute_scale_factor,
+            # mode="nearest",
         )[:, 0].byte()
         target["masks"] = mask
     return image, target
@@ -126,38 +133,27 @@ class GeneralizedRCNNTransform(nn.Module):
         self._skip_resize = kwargs.pop("skip_resize", False)
         self._skip_normalize = kwargs.pop("skip_normalize", False)
 
-
-    def forward(
-        self, images: List[Tensor], targets: Optional[List[Dict[str, Tensor]]] = None
-    ) -> Tuple[ImageList, Optional[List[Dict[str, Tensor]]]]:
-        images = [img for img in images]
-        if targets is not None:
-            # make a copy of targets to avoid modifying it in-place
-            # once torchscript supports dict comprehension
-            # this can be simplified as follows
-            # targets = [{k: v for k,v in t.items()} for t in targets]
-            targets_copy: List[Dict[str, Tensor]] = []
-            for t in targets:
-                data: Dict[str, Tensor] = {}
-                for k, v in t.items():
-                    data[k] = v
-                targets_copy.append(data)
-            targets = targets_copy
-        
+    def forward(self, data_samples: DataSample):
+        images, targets = data_samples.data_tensor.tensor, [] if self.training else None
+        if self.training:
+            for instances in data_samples.gt_instances:
+                targets.append(instances.instances_to_dict())
         for i in range(len(images)):
             image = images[i]
-            target_index = targets[i] if targets is not None else None
+            target = targets[i] if targets is not None else None
 
             if image.dim() != 4:
                 raise ValueError(f"images is expected to be a list of 4d tensors of shape [C, D, H, W], got {image.shape}")
-            
+
+            # normalize and resize            
             if not self._skip_normalize:
                 image = self.normalize(image)
-            image, target_index = self.resize(image, target_index)
-            
+
+            image, target = self.resize(image, target)
+
             images[i] = image
-            if targets is not None and target_index is not None:
-                targets[i] = target_index
+            if targets is not None and target is not None:
+                targets[i] = target
 
         image_sizes = [img.shape[-3:] for img in images]
         # ensure that all images have the same size
@@ -171,9 +167,20 @@ class GeneralizedRCNNTransform(nn.Module):
             )
             image_sizes_list.append((image_size[0], image_size[1], image_size[2]))
 
-        image_list = ImageList(images, image_sizes_list)
-        return image_list, targets
+        image_list = ImageList(images, 
+                               image_sizes_list, 
+                               orig_image_sizes=data_samples.data_tensor.orig_image_sizes)
+        instances = []
+        if targets is not None:
+            for target, gt_instance in zip(targets, data_samples.gt_instances):
+                instances_transform = Instances(metainfo=gt_instance.metainfo)
+                instances_transform.dict_to_instances(target)
+                instances.append(instances_transform)
 
+        data_samples.data_tensor = image_list
+        data_samples.gt_instances = instances
+        
+        return data_samples
 
     def normalize(self, image: Tensor) -> Tensor:
         if not image.is_floating_point():
@@ -213,14 +220,12 @@ class GeneralizedRCNNTransform(nn.Module):
         else:
             size = self.min_size[-1]
         image, target = _resize_image_and_masks(image, size, self.max_size, target, self.fixed_size)
-
         if target is None:
             return image, target
 
         bbox = target["boxes"]
         bbox = resize_boxes(bbox, (d, h, w), image.shape[-3:])
         target["boxes"] = bbox
-
         return image, target
 
 
@@ -253,19 +258,17 @@ class GeneralizedRCNNTransform(nn.Module):
 
     def postprocess(
         self,
-        result: List[Dict[str, Tensor]],
+        result: List[Instances],
         image_shapes: List[Tuple[int, int, int]],
         original_image_sizes: List[Tuple[int, int, int]],
     ) -> List[Dict[str, Tensor]]:
         if self.training:
             return result
         for i, (pred, im_s, o_im_s) in enumerate(zip(result, image_shapes, original_image_sizes)):
-            boxes = pred["boxes"]
-            boxes = resize_boxes(boxes, im_s, o_im_s)
+            boxes = resize_boxes(pred["boxes"], im_s, o_im_s)
             result[i]["boxes"] = boxes
             if "masks" in pred:
-                masks = pred["masks"]
-                masks = paste_masks_in_image(masks, boxes, o_im_s)
+                masks = paste_masks_in_image(pred["masks"], boxes, o_im_s)
                 result[i]["masks"] = masks
         return result
 

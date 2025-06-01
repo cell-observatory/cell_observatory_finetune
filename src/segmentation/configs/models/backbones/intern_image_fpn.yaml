@@ -1,0 +1,46 @@
+defaults:
+  - _self_
+
+# FPN 
+
+_target_: segmentation.models.backbones.fpn.BackboneWithFPN
+# NOTE: FPN may add an extra LastLevelMaxPool layer to the last feature map
+# Hence, the output feature maps may have len(return_layers) + 1 maps
+# return layers specifies which feature maps to run through the FPN
+return_layers: {"p0": "p0", "p1": "p1"} # "p2": "p2"
+in_channels_list: [96, 192] # 384, 768 
+out_channels: ${backbone_out_channels}
+norm_layer: null
+
+backbone:
+  _target_: segmentation.models.backbones.intern_image.InternImage
+
+  return_intermediates: True
+  in_channels: ${datasets.channel_in}
+  channels: 64
+  depths: [3, 4, 18] # 5
+  groups: [3, 6, 12] #  24
+  mlp_ratio: 4.0
+  drop_rate: 0.0
+  drop_path_rate: 0.2
+  drop_path_type: linear
+  act_layer: GELU
+  norm_layer: LN
+  layer_scale: null
+  offset_scale: 1.0
+  post_norm: False
+  with_cp: False
+  dw_kernel_size: null  # for InternImage-H/G
+  level2_post_norm: False  # for InternImage-H/G
+  level2_post_norm_block_ids: null  # for InternImage-H/G
+  res_post_norm: False  # for InternImage-H/G
+  center_feature_scale: False  # for InternImage-H/G
+  use_dcn_v4_op: True
+  remove_center: False
+  output_bias: True
+  without_pointwise: False
+  out_indices: 
+    - 0  # p0
+    - 1  # p1
+    - 2  # p2
+  frozen_stages: -1

@@ -6,4 +6,7 @@ transforms_list:
     # mean: ${dataset_mean}
     # std: ${dataset_std}
   - _target_: segmentation.data.transforms.transforms.Resize
-    size: [128, 128, 128]
+    size: 
+      - 256
+      - 256
+      - 256

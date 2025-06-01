@@ -29,9 +29,8 @@ import torch.nn.functional as F
 
 from timm.models.layers import DropPath, Mlp
 
-from segmentation.models.utils.hf_hub import PyTorchModelHubMixin
-from segmentation.models.backbones.batch_norm import get_norm
-from segmentation.models.backbones.backbone_utils import conv_nd, do_pool, do_masked_conv, Unroll, Reroll
+from segmentation.layers.norms import get_norm
+from segmentation.layers.layers import conv_nd, do_masked_conv, do_pool, Unroll, Reroll
 
 
 class MaskUnitAttention(nn.Module):
@@ -220,7 +219,7 @@ class PatchEmbed(nn.Module):
         return x
 
 
-class Hiera(nn.Module, PyTorchModelHubMixin):
+class Hiera(nn.Module):
     def __init__(
         self,
         input_size: Tuple[int, ...] = (224, 224, 224),
@@ -285,7 +284,7 @@ class Hiera(nn.Module, PyTorchModelHubMixin):
             in_chans, embed_dim, patch_kernel, patch_stride, patch_padding
         )
 
-        # separate pos. embeddings by axis flag (NOTE: not currently suppoorted!)
+        # separate pos. embeddings by axis flag (NOTE: not currently suppoorted)
         self.sep_pos_embed = sep_pos_embed
         if sep_pos_embed:
             raise NotImplementedError("Separate positional embeddings not supported yet.")

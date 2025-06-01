@@ -3,8 +3,8 @@ import logging
 import warnings
 from pathlib import Path 
 
-from typing import Dict, Optional, Union, Literal
 from collections import OrderedDict
+from typing import Dict, Optional, Union, Literal
 
 from omegaconf import DictConfig
 
@@ -67,7 +67,7 @@ def load_checkpoint(model_engine: DeepSpeedEngine,
         except KeyError:
             raise ValueError(f"Unsupported dtype '{dtype}'. Valid: {list(_DTYPES)}")
 
-    if getattr(config.deepspeed_config.zero_optimization, "stage", None) == 3:
+    if getattr(config.deepspeed.zero_optimization, "stage", None) == 3:
         # load_checkpoint returns a tuple (load_dir, client_states) with load_dir
         # not being None if the checkpoint was loaded successfully
         load_path, _ = model_engine.load_checkpoint(checkpointdir, tag=f"{ckpt_suffix}_model")

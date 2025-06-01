@@ -5,6 +5,7 @@ import numpy as np
 
 from segmentation.metrics.metrics import Metric
 from segmentation.evaluation.evaluator import DatasetEvaluator 
+from segmentation.structures.sample_objects.instances import Instances
 
 from segmentation.metrics.utils import (
     merge_instance_masks_binary,
@@ -53,14 +54,25 @@ class SkittlezInstanceEvaluator(DatasetEvaluator):
         for metric in self.metrics.values():
             metric.reset()
 
-    def process(self, targets, outputs):
-        # TODO: move metrics computations to GPU & move part of this logic into a separate function
-        #       in general, better abstractions are needed for metrics 
-        pred_masks = []
-        gt_masks = []
-        for output, target in zip(outputs, targets):
-            pred_mask = output["masks"]
-            target_mask = target["masks"]
+    # TODO: move metrics computations to GPU & move part of this logic into a separate function
+    #       in general, better abstractions are needed for evaluation
+    def process(self, targets, outputs): 
+        if isinstance(outputs[0], dict):
+            output_masks = [output["masks"]  for output in outputs]
+        elif isinstance(outputs[0], Instances):
+            output_masks = [output.masks.tensor for output in outputs]
+        else:
+            raise ValueError("Outputs should be either a dict or Instances object")
+        
+        if isinstance(targets[0], dict):
+            target_masks = [target["masks"] for target in targets]
+        elif isinstance(targets[0], Instances):
+            target_masks = [target.masks.tensor for target in targets]
+        else:
+            raise ValueError("Targets should be either a dict or Instances object")
+            
+        pred_masks, gt_masks = [], []
+        for pred_mask, target_mask in zip(output_masks, target_masks):
             target_mask = merge_instance_masks_binary(target_mask).cpu().numpy()
             if len(pred_mask) > 0:
                 if self.detection_mode:

@@ -18,20 +18,74 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+
+import ray
+from ray.train import get_context
 from contextlib import contextmanager
-from torch import distributed as dist
+from torch import distributed as dist 
 
 
-def get_rank() -> int:
-    if not dist.is_available():
+# TODO: may be better ways to check 
+def in_ray() -> bool:
+    """True if Ray is initialized."""
+    return ray.is_initialized()
+
+def in_torch_dist() -> bool:
+    """True if torch.distributed is initialised."""
+    return dist.is_available() and dist.is_initialized()
+
+
+def process_rank() -> int:
+    """
+    Return the global rank, falling back to 0 for single-process runs.
+    Works for:
+      - Ray Train via `ray.train.get_context()`
+      - Plain torchrun/DDP - via `torch.distributed`
+      - Local debugging - rank 0
+    """
+    if in_ray():
+        return get_context().get_world_rank()
+    elif in_torch_dist():
+        return dist.get_rank()
+    else:
         return 0
-    if not dist.is_initialized():
-        return 0
-    return dist.get_rank()
+    
+
+def get_world_size() -> int:
+    """
+    Return the global world size, falling back to 1 for single-process runs.
+    Works for:
+      - Ray Train via `ray.train.get_context()`
+      - Plain torchrun/DDP - via `torch.distributed`
+      - Local debugging - world size 1
+    """
+    if in_ray():
+        return get_context().get_world_size()
+    elif in_torch_dist():
+        return dist.get_world_size()
+    else:
+        return 1
 
 
 def is_main_process() -> bool:
-    return get_rank() == 0
+    """True for rank-0 worker (or the only process)."""
+    return process_rank() == 0
+
+
+def barrier() -> None:
+    """
+    Global synchronisation:
+      - Ray Train barrier when available
+      - torch.distributed.barrier() otherwise
+      - No-op in single-process mode
+    """
+    if in_ray():
+        ctx = get_context()
+        if hasattr(ctx, "barrier"):
+            ctx.barrier()
+            return
+    if in_torch_dist():
+        dist.barrier()
 
 
 @contextmanager

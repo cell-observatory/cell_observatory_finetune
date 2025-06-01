@@ -30,17 +30,12 @@ import torch.nn.functional as F
 import fvcore.nn.weight_init as weight_init
 from timm.models.layers import DropPath, Mlp
 
-from segmentation.models.backbones.backbone_utils import (
-    PatchEmbed,
-    add_decomposed_rel_pos,
-    get_abs_pos,
-    window_partition,
-    window_unpartition,
-    CNNBlockBase,
-    _assert_strides_are_log2_contiguous
-)
-from segmentation.models.utils.model_utils import Conv3d
-from segmentation.models.backbones.batch_norm import get_norm
+from segmentation.layers.norms import get_norm
+from segmentation.layers.layers import PatchEmbed,CNNBlockBase, Conv3d
+from segmentation.layers.positional_encodings import add_decomposed_rel_pos, get_abs_pos
+from segmentation.layers.utils import (window_partition, 
+                                       window_unpartition,
+                                       _assert_strides_are_log2_contiguous)
 
 
 class Attention(nn.Module):
@@ -263,8 +258,7 @@ class ViT(nn.Module):
 
     def __init__(
         self,
-        weights=None,
-        img_size: int = 1024,
+        img_size: List[int],
         patch_size: int = 16,
         channel_in: int = 3,
         embed_dim: int = 768,
@@ -343,7 +337,7 @@ class ViT(nn.Module):
                 rel_pos_zero_init=rel_pos_zero_init,
                 window_size=window_size if i in window_block_indexes else 0,
                 use_residual_block=i in residual_block_indexes,
-                input_size=(img_size // patch_size, img_size // patch_size, img_size // patch_size),
+                input_size=(img_size[0] // patch_size, img_size[1] // patch_size, img_size[2] // patch_size),
             )
 
             # TODO: Support activation checkpointing
@@ -356,22 +350,6 @@ class ViT(nn.Module):
         if self.pos_embed is not None:
             nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
-        # TODO: unify pretrained weight loading logic across models 
-        # if weights is not None:
-        #     if isinstance(weights, str):
-        #         checkpoint = torch.load(weights, map_location="cpu")
-        #         # if "model" in checkpoint:
-        #         #     # Some checkpoints save under a "model" key 
-        #         #     checkpoint = checkpoint["model"]
-        #         missing, unexpected = self.load_state_dict(checkpoint, strict=False)
-        #         print(f"[ViT] Loaded weights from {weights}")
-        #         if missing:
-        #             print(f"[ViT] Missing keys: {missing}")
-        #         if unexpected:
-        #             print(f"[ViT] Unexpected keys: {unexpected}")
-        #     else:
-        #         raise ValueError(f"'weights' must be a path string, got {type(weights)}")
-        # else:
         self.apply(self._init_weights)
 
     def _init_weights(self, m):

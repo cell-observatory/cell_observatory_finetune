@@ -1,4 +1,4 @@
-_target_: segmentation.models.mask_rcnn.MaskRCNN
+_target_: segmentation.models.meta_arch.mask_rcnn.MaskRCNN
 
 channels: ${datasets.channel_in}
 image_mean: ${datasets.dataset_mean}
@@ -15,9 +15,14 @@ max_size: 128
 #       the contents below are the default values that need to
 #       be specified
 
+# preprocessor
+preprocessor:
+  _target_: segmentation.models.meta_arch.preprocessor.PreProcessor
+  sample_object: "DATA_SAMPLE" 
+
 # RPN config
 rpn_anchor_generator:
-  _target_: segmentation.models.rpn.anchor_generator.AnchorGenerator
+  _target_: segmentation.models.utils.proposal_generators.anchor_generator.AnchorGenerator
   sizes:
     - [32, 64, 128]
   aspect_ratios:
@@ -25,7 +30,7 @@ rpn_anchor_generator:
   aspect_ratios_z:
     - [0.5, 1.0, 2.0]
 rpn_head: 
-  _target_: segmentation.models.rpn.rpn_head.RPNHead
+  _target_: segmentation.models.utils.proposal_generators.rpn_head.RPNHead
   in_channels: ${backbone_out_channels} 
   num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
 rpn_pre_nms_top_n_train: 2000 # per image not per batch
@@ -41,12 +46,12 @@ rpn_score_thresh: 0.0 # filter out low scoring objects
 
 # Box config
 box_roi_pool:
-  _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
+  _target_: segmentation.models.utils.poolers.MultiScaleRoIAlign
   featmap_names: ["0"]
   output_size: 7
   sampling_ratio: 2
 box_head: 
-  _target_: segmentation.models.faster_rcnn.TwoMLPHead
+  _target_: segmentation.models.meta_arch.faster_rcnn.TwoMLPHead
   representation_size: 1024
   backbone_out_channels: ${backbone_out_channels} 
   roi_pool_output_size:
@@ -54,7 +59,7 @@ box_head:
     - ${models.box_roi_pool.output_size}
     - ${models.box_roi_pool.output_size}
 box_predictor: # box class logits and bbox regressor
-  _target_: segmentation.models.faster_rcnn.FastRCNNPredictor
+  _target_: segmentation.models.meta_arch.faster_rcnn.FastRCNNPredictor
   in_channels: 1024
   num_classes: ${datasets.num_classes}
 box_score_thresh: 0.05 # filter out low scoring boxes (TODO: see if this should be higher)
@@ -68,17 +73,17 @@ bbox_reg_weights: null # weights for encoding/decoding of bboxes
 
 # Mask config
 mask_roi_pool:
-  _target_: segmentation.models.heads.poolers.MultiScaleRoIAlign
+  _target_: segmentation.models.utils.poolers.MultiScaleRoIAlign
   featmap_names: ["0"]
   output_size: 14 # ROI pooling output size
   sampling_ratio: 2 # grid subsampling 
 mask_head: 
-  _target_: segmentation.models.mask_rcnn.MaskRCNNHeads
+  _target_: segmentation.models.meta_arch.mask_rcnn.MaskRCNNHeads
   in_channels: ${backbone_out_channels} # backbone_out_channels
   layers: [256, 256, 256, 256]
   dilation: 1
 mask_predictor: # mask class logits and mask regressor
-  _target_: segmentation.models.mask_rcnn.MaskRCNNPredictor
+  _target_: segmentation.models.meta_arch.mask_rcnn.MaskRCNNPredictor
   in_channels: 256
   dim_reduced: 256
   num_classes: ${datasets.num_classes}

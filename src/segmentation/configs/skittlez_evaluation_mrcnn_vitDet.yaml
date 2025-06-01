@@ -1,0 +1,89 @@
+defaults:
+  - /models: maskrcnn_fpn        # Loads configs/models/maskrcnn_fpn.yaml
+  - /models/backbones: vitDet     # Loads configs/models/backbones/vitDet.yaml
+  - datasets: instance_segmentation_eval       # Loads configs/datasets/instance_segmentation_eval.yaml
+  - /metrics: metrics_skittlez_eval        # Loads configs/metrics/metrics_skittlez_eval.yaml
+  - /transforms: transforms_skittlez_eval # Loads configs/transforms/transforms_skittlez_eval.yaml
+  - deepspeed: deepspeed # Loads configs/deepspeed/deepspeed.yaml
+  - clusters: local # Loads configs/clusters/slurm_multinode.yaml
+  - _self_
+  
+# overrides
+# ----------------
+
+# Backbone (TODO: not technically an override, but probably should be) 
+backbone_target: segmentation.models.backbones.vitDet.SimpleFeaturePyramid 
+backbone_out_channels: 256 
+output_features: ["p2", "p3", "p4"]
+
+models:
+  min_size: 256 # images rescaled such that shorter size is min_size
+  max_size: 256
+  mask_roi_pool:
+    _target_: segmentation.models.utils.poolers.MultiScaleRoIAlign
+    featmap_names: ${output_features} 
+    output_size: 14 # ROI pooling output size
+    sampling_ratio: 2 # grid subsampling 
+    canonical_scale: 256
+    canonical_level: 4 # levels are 2,3,4 i.e. 2^2, 2^3, 2^4 downsampling of input
+  rpn_anchor_generator:
+    _target_: segmentation.models.utils.proposal_generators.anchor_generator.AnchorGenerator
+    sizes:
+      - [16, 24, 32]
+      - [32, 48, 64]
+      - [64, 96, 128]
+    aspect_ratios:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+    aspect_ratios_z:
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+      - [0.5, 1.0, 2.0]
+  rpn_head: 
+    _target_: segmentation.models.utils.proposal_generators.rpn_head.RPNHead
+    in_channels: ${backbone_out_channels} 
+    num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+  
+  # NOTE: consider chaning the number of positive samples considered if the model is not learning
+  #       and only predicts background
+  # rpn_fg_iou_thresh: 0.5 # too high of a value will cause the model to not learn anything and always predict the background
+  # rpn_bg_iou_thresh: 0.3
+  # box_positive_fraction: 0.25 # positive fraction of samples in subsampling
+
+clusters:
+  batch_size: 1
+  total_cpus:               4          # total number of cpus to use
+  total_gpus:               1          # total number of gpus to use
+  gpus_per_worker:          1          # number of gpus to use per node
+  mem_per_worker:           31000      # memory per node
+  cpus_per_worker:          4          # number of cpus to use per node  
+  workers:                  1          # number of nodes to use 
+
+
+transforms:
+  transforms_list:
+    - _target_: segmentation.data.transforms.transforms.Normalize
+      # mean: ${dataset_mean}
+      # std: ${dataset_std}
+    - _target_: segmentation.data.transforms.transforms.Resize
+      size: 
+        # - ${datasets.channel_in}
+        - 256
+        - 256 
+        - 256
+
+# ----------------
+
+eval_type: skittlez_eval
+
+outdir: /clusterfs/nvme/segment_4d/test_17
+
+train_db_savedir: ${outdir}/db
+checkpointdir: ${outdir}/checkpoints
+results_dir: ${outdir}/evaluation
+
+# evaluator parameters
+warmup_iters: 1
+ckpt_suffix: "best" # generally, "last" or "best" or "latest"
+amp: fp16  # ["no", "fp16", "bf16"]

@@ -15,11 +15,3 @@ src/ops3d/_C.*.so
 .vscode/
 .ipynb_checkpoints/
 .DS_Store
-
-# Ignore modules that are not finalized
-src/segmentation/models/backbones/swinTransformer.py
-src/segmentation/models/decoders/dino_decoder.py
-src/segmentation/models/decoders/maskdino_decoder.py
-src/segmentation/models/decoders
-src/segmentation/models/encoders/maskdino_pixel_decoder.py
-src/segmentation/models/encoders/positional_encoding.py

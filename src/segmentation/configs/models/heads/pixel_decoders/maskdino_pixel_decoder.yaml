@@ -1,0 +1,25 @@
+_target_: segmentation.models.heads.encoders.maskdino_pixel_decoder.MaskDINOEncoder
+
+# out channels and stride for backbone
+input_shape:
+  "p2": 
+    "channels": 256
+    "stride": 4
+  "p3": 
+    "channels": 512
+    "stride": 8
+  
+transformer_encoder_dropout: 0.1
+transformer_encoder_num_heads: 8
+num_transformer_encoder_layers: 6
+transformer_encoder_dim_feedforward: 1024 
+
+norm: "GN"
+# normally 256, needs to be defined s.t. channels/num_heads
+# divides d_stride=8 due to deform attn AND divides 3 due to sine embeddings
+conv_dim: 384  
+mask_dim: 384 
+
+target_min_stride: 4 
+transformer_in_features: ["p2", "p3"] # backbone features to use in transformer encoder
+total_num_feature_levels: 2 # normally 4 p2-p5

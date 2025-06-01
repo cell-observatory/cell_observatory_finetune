@@ -1,0 +1,3 @@
+[submodule "ops3d"]
+	path = ops3d
+	url = https://github.com/cell-observatory/ops3d.git

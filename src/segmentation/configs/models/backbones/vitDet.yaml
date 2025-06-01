@@ -24,7 +24,6 @@ net:
   _target_: segmentation.models.backbones.vitDet.ViT
   img_size: ${datasets.input_shape} 
   channel_in: ${datasets.channel_in} 
-  weights: null
   # Rationale from VitDet Paper: with patch size 16×16 and 3 colors, 
   # a hidden dimension ≥768 (ViT-B and larger) can preserve all information
   # of a patch if necessary

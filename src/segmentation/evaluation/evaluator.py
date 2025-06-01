@@ -19,13 +19,13 @@ limitations under the License.
 """
 
 
+import abc
 from collections import OrderedDict
-from contextlib import contextmanager
 
 from segmentation.utils.comm import is_main_process
 
 
-class DatasetEvaluator:
+class DatasetEvaluator(metaclass=abc.ABCMeta):
     """
     Base class for a dataset evaluator.
 
@@ -36,6 +36,7 @@ class DatasetEvaluator:
     and produce evaluation results in the end (by :meth:`evaluate`).
     """
 
+    @abc.abstractmethod
     def reset(self):
         """
         Preparation for a new round of evaluation.
@@ -43,6 +44,7 @@ class DatasetEvaluator:
         """
         pass
 
+    @abc.abstractmethod
     def process(self, inputs, outputs):
         """
         Process the pair of inputs and outputs.
@@ -60,6 +62,7 @@ class DatasetEvaluator:
         """
         pass
 
+    @abc.abstractmethod
     def evaluate(self):
         """
         Evaluate/summarize the performance, after processing all input/output pairs.
@@ -68,7 +71,7 @@ class DatasetEvaluator:
             dict:
                 A new evaluator class can return a dict of arbitrary format
                 as long as the user can process the results.
-                In our train_net.py, we expect the following format:
+                The dict should have the following structure:
 
                 * key: the name of the task (e.g., bbox)
                 * value: a dict of {metric name: score}, e.g.: {"AP50": 80}

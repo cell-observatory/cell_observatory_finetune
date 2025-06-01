@@ -1,3 +1,4 @@
+import abc
 from typing import Callable
 
 from segmentation.metrics.utils import (
@@ -6,13 +7,16 @@ from segmentation.metrics.utils import (
 )
 
 
-class Metric:
+class Metric(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
     def __call__(self, outputs, targets):
         pass
 
+    @abc.abstractmethod
     def aggregate(self):
         pass
-
+    
+    @abc.abstractmethod
     def reset(self):
         pass
 

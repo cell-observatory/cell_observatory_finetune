@@ -1,7 +1,8 @@
-from typing import Dict
-
 import torch
 import torch.nn.functional as F
+
+from segmentation.structures.data_objects.masks import BitMasks
+from segmentation.structures.data_objects.image_list import ImageList
 
 
 class Normalize:
@@ -9,11 +10,13 @@ class Normalize:
         self.mean = mean
         self.std = std
 
-    def __call__(self, image, targets):
+    def __call__(self, data_sample):
+        image = data_sample.data_tensor.tensor
         mean = image.mean(dim=(1, 2, 3), keepdim=True) if self.mean is None else self.mean
         std = image.std(dim=(1, 2, 3), keepdim=True) if self.std is None else self.std
         image = (image - mean) / std
-        return image, targets
+        data_sample.data_tensor.tensor = image
+        return data_sample
 
 
 class Resize:
@@ -21,8 +24,8 @@ class Resize:
         self.size = tuple(size)
         self.resize_mode = resize_mode
 
-    def __call__(self, image, targets):
-        orig_d, orig_h, orig_w = image.shape[-3:]
+    def __call__(self, data_sample):
+        orig_d, orig_h, orig_w = data_sample.data_tensor.image_sizes[0]
         new_d, new_h, new_w = self.size
         scale_d, scale_h, scale_w = (
             new_d / orig_d,
@@ -31,43 +34,20 @@ class Resize:
         )
 
         # Resize image
-        image = F.interpolate(image.unsqueeze(0), size=self.size, mode=self.resize_mode, align_corners=False).squeeze(0)
+        data_sample.data_tensor.resize(new_size=self.size)
 
         # Resize masks
-        if 'masks' in targets:
-            targets['masks'] = F.interpolate(
-                targets['masks'].unsqueeze(1).float(),  # (N, 1, D, H, W)
-                size=self.size,
+        if 'masks' in data_sample.gt_instances:
+            data_sample.gt_instances.masks.tensor = F.interpolate(
+                data_sample.gt_instances.masks.tensor.unsqueeze(1).float(), 
+                size=self.size[-3:],
                 mode='nearest'
             ).squeeze(1)
 
         # Scale boxes
-        if 'boxes' in targets:
-            boxes = targets['boxes']
-            # boxes are in (x0, y0, z0, x1, y1, z1) format
+        if 'boxes' in data_sample.gt_instances:
+            # TODO: double check all data object formats for consistency 
+            boxes = data_sample.gt_instances.boxes.tensor
             scale = torch.tensor([scale_w, scale_h, scale_d, scale_w, scale_h, scale_d], device=boxes.device)
-            targets['boxes'] = boxes * scale
-
-        return image, targets
-    
-    
-class RandomSampleInstances:
-    def __init__(self, max_instances: int):
-        self.max_instances = max_instances
-
-    def __call__(self, image: torch.Tensor, targets: Dict[str, torch.Tensor]):
-        N = targets["boxes"].shape[0]
-        if N > self.max_instances:
-            idx = torch.randperm(N)[: self.max_instances]
-            targets['boxes'] = targets['boxes'][idx]
-            targets['masks'] = targets['masks'][idx]
-        return image, targets
-
-class Compose:
-    def __init__(self, transforms):
-        self.transforms = transforms
-
-    def __call__(self, img, targets):
-        for t in self.transforms:
-            img, targets = t(img, targets)
-        return img, targets
+            data_sample.gt_instances.boxes.tensor = boxes * scale
+        return data_sample            

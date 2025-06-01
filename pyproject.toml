@@ -1,40 +1,19 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "torch", "numpy"]
+requires = ["setuptools>=78.1.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "segmentation"
 version = "0.1.0"
 description = "4D & 5D Segmentation Models"
-authors = [{ name = "Hugo Hamilton", email = "hph@berkeley.edu" }]
-dependencies = [
-    "torch==2.4.1",
-    "torchvision==0.19.1",
-    "hydra-core",
-    "deepspeed==0.16.5",
-    "ray[train]==2.44.1",
-    "pandas",
-    "zarr",
-    "fvcore",
-    "matplotlib",
-    "numba",
-    "numpy",
-    "omegaconf",
-    "pytorchvideo",
-    "scipy",
-    "setuptools==72.1.0",
-    "scikit-image",
-    "tensorstore",
-    "tifffile",
-    "timm",
-    "torchinfo",
-    "tqdm",
-    "ujson"
-]
+authors = [{name = "Hugo Hamilton", email = "hph@berkeley.edu" }, {name = "Thayer Alshaabi"}]
+dynamic = ["dependencies"]
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools]
 package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["segmentation", "ops3d"]
+include = ["segmentation"]
