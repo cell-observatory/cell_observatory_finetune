@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: pytorch_25.01-py3.sif
+From: /clusterfs/nvme/hph/env_images/pytorch_25.01-py3.sif
 Stage: base
 
 %environment
@@ -9,6 +9,8 @@ export DS_BUILD_FUSED_LAMB=1
 export DS_BUILD_FUSED_ADAM=1
 export CUDA_HOME=/usr/local/cuda
 export PATH=$CUDA_HOME/bin:$PATH
+export CC=/usr/bin/gcc
+export CXX=/usr/bin/g++
 
 %files
 ops3d          /workspace/ops3d
@@ -31,6 +33,8 @@ sshfs \
 iputils-ping \
 build-essential \
 python3.12-dev \
+libpython3.12-dev \
+python3-dev \
 cmake \
 ninja-build \
 && rm -rf /var/lib/apt/lists/*
@@ -39,12 +43,14 @@ ninja-build \
 # sudo mount --bind ~/.cache/pip /tmp/pip
 # to allow cache dir to be used
 
-pip install --no-cache-dir -r /workspace/requirements.txt
+pip install --no-cache-dir \
+    -r /workspace/requirements.txt \
+    -r /workspace/ops3d/requirements.txt
 
 # optionally, add flags for NVCC
 # export NVCC_FLAGS="-O3 -Xfatbin=-compress-all"
 cd /workspace/ops3d
-pip install --force-reinstall --no-cache-dir .
+pip install --no-deps --force-reinstall --no-cache-dir .
 
 %runscript
 exec /bin/bash -l -c "$@"

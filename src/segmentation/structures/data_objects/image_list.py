@@ -18,12 +18,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
+
 from __future__ import division
 
 from enum import Enum
 from itertools import chain
-from collections.abc import Mapping
-from typing import Any, Dict, Sequence, List, Optional, Tuple
+from typing import Any, Sequence, List, Optional, Tuple
 
 import torch
 from torch import device
@@ -33,93 +33,250 @@ from segmentation.structures.sample_objects.utils import record_init
 
 
 class Shape(Enum):
-  """Supported 3-D image layouts.
+    """Supported image layouts.
 
-  * ``CZYX`` - channel-first (torch / PyTorch convention)  
-  ``(..., C, Z, Y, X)``  e.g. ``(N, C, D, H, W)``
+    * ``CZYX`` - channel-first, no time
+    ``(C, Z, Y, X)``  or ``(N, C, Z, Y, X)``
 
-  * ``ZYXC`` - channel-last (common in Zarr / image stacks)  
-    ``(..., Z, Y, X, C)``  e.g. ``(N, D, H, W, C)``
-  """
+    * ``ZYXC`` - channel-last, no time
+    ``(Z, Y, X, C)``  or ``(N, Z, Y, X, C)``
 
-  CZYX = "CZYX"
-  ZYXC = "ZYXC"
+    * ``TCZYX`` - channel-first with time
+    ``(T, C, Z, Y, X)``  or ``(N, T, C, Z, Y, X)``
 
-  @property
-  def axes(self) -> Tuple[str, ...]:
-      return tuple(self.value)                # e.g. ("C","Z","Y","X")
+    * ``TZYXC`` - channel-last with time
+    ``(T, Z, Y, X, C)``  or ``(N, T, Z, Y, X, C)``
+    """
 
-  def to_standard(self, tensor: torch.Tensor) -> torch.Tensor:
-    """Return a view with **channels first** (CZYX)."""
-    if self is Shape.CZYX:
-        return tensor                       # already correct
-    has_batch = tensor.ndim == 5            # (N, Z, Y, X, C)
-    perm = (0, 4, 1, 2, 3) if has_batch else (3, 0, 1, 2)
-    return tensor.permute(*perm)
+    CZYX = "CZYX"
+    ZYXC = "ZYXC"
+    TCZYX = "TCZYX"  
+    TZYXC = "TZYXC"
 
-  def from_standard(self, tensor: torch.Tensor) -> torch.Tensor:
-    """Convert a *channel-first* tensor back to this layout."""
-    if self is Shape.ZYXC:
-        return tensor
-    has_batch = tensor.ndim == 5            # (N, C, Z, Y, X)
-    perm = (0, 2, 3, 4, 1) if has_batch else (1, 2, 3, 0)
-    return tensor.permute(*perm)
+    @property
+    def axes(self) -> Tuple[str, ...]:
+        # e.g. ("C","Z","Y","X")
+        # very useful function for 
+        # locating the spatial dimensions
+        return tuple(self.value)
+
+    # TODO: not used anymore, will be removed
+    def to_standard(self, tensor: torch.Tensor) -> torch.Tensor:
+        """Return a view with **channels first** (CZYX) or (TCZYX)."""
+        # already correct
+        if self is Shape.CZYX:
+            return tensor
+        if self is Shape.TCZYX:
+            return tensor
+
+        if self is Shape.ZYXC:
+            if tensor.ndim == 5:
+                perm = (0, 4, 1, 2, 3) # (N, C, Z, Y, X)
+            else:
+                perm = (3, 0, 1, 2) # (C, Z, Y, X)
+        elif self is Shape.TZYXC:
+            if tensor.ndim == 6:
+                perm = (0, 1, 5, 2, 3, 4) # (N, T, C, Z, Y, X)
+            else:
+                perm = (0, 4, 1, 2, 3) # (T, C, Z, Y, X)
+        else:
+            raise ValueError(f"Unsupported layout: {self}")
+        
+        return tensor.permute(*perm)
+    
+    def convert_layout(
+        self,
+        tensor: torch.Tensor,
+        image_sizes: List[Tuple[int, ...]],
+        new_layout: "Shape",
+    ) -> Tuple[torch.Tensor, List[Tuple[int, ...]]]:
+        """
+        Convert *tensor* **and** *image_sizes* from layout ``self`` to ``new_layout``.
+        """
+        if self is new_layout:
+            return tensor, image_sizes
+
+        if len(self.axes) != len(new_layout.axes):
+            raise ValueError(
+                f"Incompatible layouts: {self.name} <-> {new_layout.name}"
+            )
+
+        # determine if there is a batch dim (lead == 1) or not (lead == 0)
+        lead = tensor.ndim - len(self.axes)
+        if lead not in (0, 1):
+            raise ValueError(
+                f"Tensor rank ({tensor.ndim}) does not match layout {self.name}"
+            )
+        
+        # this logic is a bit excessive given that we only really
+        # consider an extra batch dimension
+        perm = list(range(lead)) + [
+            lead + self.axes.index(ax) for ax in new_layout.axes
+        ]
+        tensor_out = tensor.permute(*perm)
+
+        # e.g. ["C","Z","Y","X"]
+        old_axes = list(self.axes)
+        # e.g. ["Z","Y","X","C"]
+        new_axes = list(new_layout.axes)
+
+        if any(len(sz) != len(old_axes) for sz in image_sizes):
+            raise ValueError(
+                f"All image_size entries must have {len(old_axes)} dimensions "
+                f"(layout {self.name}); got {[len(sz) for sz in image_sizes]}"
+            )
+
+        # where to pick the value from 
+        # in each tuple
+        axis_map = [
+            old_axes.index(ax)
+            for ax in new_axes
+        ]
+
+        def reorder(sz: Tuple[int, ...]) -> Tuple[int, ...]:
+            return tuple(sz[i] for i in axis_map)
+
+        image_sizes_out = [reorder(sz) for sz in image_sizes]
+
+        return tensor_out, image_sizes_out
+            
 
 
 class ImageList:
     """
     Structure that holds a list of images (of possibly varying sizes)
     as a single tensor. This works by padding the images to the same size.
-    The original sizes of each image is stored in `image_sizes`.
-
-    Attributes:
-    image_sizes (list[tuple[int, int]]): each tuple is (d, h, w).
+    The sizes of each image is stored in `image_sizes`.
     """
     @record_init
     def __init__(self, 
         tensor: torch.Tensor, 
-        image_sizes: List[Tuple[int, int]],
-        standardize: bool = True,
+        image_sizes: List[Tuple[int, int, int, int]],
         layout: Shape = Shape.CZYX, 
         orig_layout: Shape = Shape.CZYX,
         orig_image_sizes: Optional[List[Tuple[int, int]]] = None):
         """
         Arguments:
-        tensor (Tensor): of shape (N, D, H, W) or (N, C_1, ..., C_K, D, H, W) where K >= 1
-        image_sizes (list[tuple[int, int]]): Each tuple is (d, h, w). It can
-            be smaller than (D, H, W) due to padding.
+            tensor (Tensor): image tensor.
+            image_sizes (list[tuple[int, int]]): Each tuple is ((t), d, h, w). It can
+                be smaller than (T, D, H, W) due to padding.
         """
         self.layout = layout
         if tensor.ndim < 4:
             raise ValueError(
                 f"ImageList expects a 4D or 5D tensor, got {tensor.ndim}D tensor with shape {tensor.shape}"
             )
-        if standardize:
-            if tensor.ndim == 4:
-                tensor = tensor.unsqueeze(0)
-            self.tensor: torch.Tensor = tensor
-            self._to_standard()  # convert to CZYX layout
-        else:
-            self.tensor: torch.Tensor = tensor
+        
+        self.tensor = tensor
+
+        if self.layout in (Shape.TCZYX, Shape.TZYXC):
+            if self.tensor.ndim == 5:
+                # (T, C, D, H, W) -> (1, T, C, D, H, W)
+                self.tensor = self.tensor.unsqueeze(0)
+        elif self.layout in (Shape.CZYX, Shape.ZYXC):
+            if self.tensor.ndim == 4:
+                # (C, D, H, W) -> (1, C, D, H, W)
+                self.tensor = self.tensor.unsqueeze(0)
+
         self.image_sizes = image_sizes
         self.orig_layout = orig_layout if orig_layout is not None else layout
         self.orig_image_sizes = orig_image_sizes if orig_image_sizes is not None else image_sizes
 
-    def _to_standard(self):
-        """Convert the tensor to standard CZYX layout."""
-        if self.layout != Shape.CZYX:
-            self.tensor = self.layout.to_standard(self.tensor)
-            self.layout = Shape.CZYX
-    
-    def _from_standard(self):
-        """Convert the tensor from standard CZYX layout to original layout."""
-        if self.layout != Shape.ZYXC:
-            self.tensor = self.layout.from_standard(self.tensor)
-            self.layout = Shape.ZYXC
+    @property
+    def shape(self) -> Tuple[int, int, int, int]:
+        if self.layout == Shape.CZYX:
+            # get: (D, H, W) from (B, C, D, H, W)
+            return self.tensor.shape[2:]
+        elif self.layout == Shape.TCZYX:
+            # get: (D, H, W) from (B, T, C, D, H, W)
+            return self.tensor.shape[3:]
+        elif self.layout == Shape.ZYXC:
+            # get: (D, H, W) from (B, D, H, W, C)
+            return self.tensor.shape[1:4]
+        elif self.layout == Shape.TZYXC:
+            # get: (D, H, W) from (B, T, D, H, W, C)
+            return self.tensor.shape[2:5]
+        else:
+            raise ValueError(f"Unsupported layout: {self.layout}")
+        
+    def convert_layout(self, new_layout: Shape):
+        self.tensor, self.image_sizes = self.layout.convert_layout(self.tensor, self.image_sizes, new_layout)
+        self.layout = new_layout
 
-    def resize(self, new_size: Tuple[int,int,int], mode="trilinear"):
-        self.tensor = F.interpolate(self.tensor, size=new_size, mode=mode, align_corners=False)
-        self.image_sizes = [new_size] * len(self)
+    def _has_time_axis(self) -> bool:
+        return self.layout in (Shape.TCZYX, Shape.TZYXC)
+    
+    def get_image_stats(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        if self.layout == Shape.CZYX:
+            # dimensions: (B, C, D, H, W)
+            mean = self.tensor.mean(dim=(2, 3, 4), keepdim=True) 
+            std = self.tensor.std(dim=(2, 3, 4), keepdim=True)
+        elif self.layout == Shape.TCZYX:
+            # dimensions: (B, T, C, D, H, W)
+            mean = self.tensor.mean(dim=(1, 3, 4, 5), keepdim=True)
+            std = self.tensor.std(dim=(1, 3, 4, 5), keepdim=True)
+        elif self.layout == Shape.ZYXC:
+            # dimensions: (B, D, H, W, C)
+            mean = self.tensor.mean(dim=(1, 2, 3), keepdim=True)
+            std = self.tensor.std(dim=(1, 2, 3), keepdim=True)
+        elif self.layout == Shape.TZYXC:
+            mean = self.tensor.mean(dim=(1, 2, 3, 4), keepdim=True)
+            std = self.tensor.std(dim=(1, 2, 3, 4), keepdim=True)
+        else:
+            raise ValueError(f"Unsupported layout: {self.layout}")
+        return mean, std
+
+    def resize(self, new_size: tuple[int, int, int], mode: str = "trilinear"):
+        """
+        Resize spatial volume to `new_size = (D, H, W)`.
+        Works for layouts:
+            - CZYX   : [B, C, D, H, W]
+            - TCZYX  : [B, T, C, D, H, W]
+            - ZYXC   : [B, D, H, W, C]
+            - TZYXC  : [B, T, D, H, W, C]
+        """
+        # TODO: does this work as intended if tensors
+        #       are not even sized, i.e. if they are padded?
+        x = self.tensor                                   
+        if self.layout == Shape.CZYX:                    
+            x = F.interpolate(x, size=new_size, mode=mode, align_corners=False)
+        elif self.layout == Shape.TCZYX:                 
+            B, T, C = x.shape[:3]
+            # merge T into batch
+            x_flat = x.reshape(B * T, C, *x.shape[-3:])
+            x_flat = F.interpolate(x_flat, size=new_size, mode=mode, align_corners=False)
+            # restore T
+            x = x_flat.view(B, T, C, *new_size)
+        elif self.layout == Shape.ZYXC:
+            # [B, D, H, W, C]
+            B, C = x.shape[0], x.shape[-1]
+            # [B, C, D, H, W]
+            x_perm = x.permute(0, 4, 1, 2, 3)           
+            x_perm = F.interpolate(
+                x_perm, size=new_size, mode=mode, align_corners=False
+            )
+            # restore channel-last order
+            # [B, D′, H′, W′, C]
+            x = x_perm.permute(0, 2, 3, 4, 1)           
+        elif self.layout == Shape.TZYXC:
+            # [B, T, D, H, W, C]
+            B, T = x.shape[:2]
+            C = x.shape[-1]
+            # [B, T, D, H, W, C] -> [B, T, C, D, H, W] 
+            x_perm = x.permute(0, 1, 5, 2, 3, 4)
+            # [BxT, C, D, H, W]
+            x_flat = x_perm.reshape(B * T, C, *x_perm.shape[-3:])
+            x_flat = F.interpolate(
+                x_flat, size=new_size, mode=mode, align_corners=False
+            )
+            # reshape back and restore channel-last
+            x_perm = x_flat.view(B, T, C, *new_size)
+            x = x_perm.permute(0, 1, 3, 4, 5, 2)
+        else:
+            raise NotImplementedError(f"resize not implemented for layout {self.layout}")
+
+        self.tensor = x
+        self.image_sizes = [tuple(x.shape[1:])] * len(self)          
         return self
 
     def __len__(self) -> int:
@@ -130,13 +287,23 @@ class ImageList:
         Access the individual image in its original size.
 
         Args:
-        idx: int or slice
+            idx: int or slice
 
         Returns:
-        Tensor: an image of shape (D, H, W) or (C_1, ..., C_K, D, H, W) where K >= 1
+            Tensor: an image of shape ((T), C, D, H, W)
         """
         size = self.image_sizes[idx]
-        return self.tensor[idx, ..., : size[0], : size[1], : size[2]]
+        # TODO: this is redundant, can be simplified 
+        if self.layout == Shape.TCZYX:
+            return self.tensor[idx, : size[0], : size[1], : size[2], : size[3], : size[4]]
+        elif self.layout == Shape.TZYXC:
+            return self.tensor[idx, : size[0], : size[1], : size[2], : size[3], : size[4]]
+        elif self.layout == Shape.CZYX:
+            return self.tensor[idx, : size[0], : size[1], : size[2], : size[3]]
+        elif self.layout == Shape.ZYXC:
+            return self.tensor[idx, : size[0], : size[1], : size[2], : size[3]]
+        else:
+            raise ValueError(f"Unsupported layout: {self.layout}")
 
     @torch.jit.unused
     def to(self, *args: Any, **kwargs: Any) -> "ImageList":
@@ -152,95 +319,80 @@ class ImageList:
     def device(self) -> device:
         return self.tensor.device
 
-    # TODO: method currently assumes layout CZYX
     @staticmethod
     def from_tensors(
         tensors: List[torch.Tensor],
-        size_divisibility: int = 0,
         pad_value: float = 0.0,
-        padding_constraints: Optional[Dict[str, int]] = None,
+        layout: Shape = Shape.CZYX,
     ) -> "ImageList":
         """
-        Args:
-        tensors: a tuple or list of `torch.Tensor`, each of shape (Di, Hi, Wi) or
-            (C_1, ..., C_K, Di, Hi, Wi) where K >= 1. The Tensors will be padded
-            to the same shape with `pad_value`.
-        size_divisibility (int): If `size_divisibility > 0`, add padding to ensure
-            the common height and width is divisible by `size_divisibility`.
-            This depends on the model and many models need a divisibility of 32.
-        pad_value (float): value to pad.
-        padding_constraints (optional[Dict]): If given, it would follow the format as
-            {"size_divisibility": int, "square_size": int}, where `size_divisibility` will
-            overwrite the above one if presented and `square_size` indicates the
-            square padding size if `square_size` > 0.
-        Returns:
-        an `ImageList`.
+        Build an ImageList from a list of tensors that all follow *layout*.
+        Each tensor must have exactly ``len(layout.axes)`` dimensions
+        (e.g. 4 for CZYX/ZYXC, 5 for TCZYX/TZYXC).
         """
-        assert len(tensors) > 0
-        assert isinstance(tensors, (tuple, list))
-        for t in tensors:
-            assert isinstance(t, torch.Tensor), type(t)
-        # all dimensions should be the same except 
-        # perhaps the last 3
-        assert t.shape[:-3] == tensors[0].shape[:-3], t.shape
+        assert tensors and isinstance(tensors, (list, tuple)), "`tensors` empty!"
 
-        image_sizes = [(im.shape[-3], im.shape[-2], im.shape[-1]) for im in tensors]
-        # List[Tuple[int, int, int]]
-        image_sizes_tensor = [torch.as_tensor(x) for x in image_sizes]
-        # List[Nx3] -> (N, 3) -> (3,)
-        max_size = torch.stack(image_sizes_tensor).max(0).values
+        expected_ndim, image_sizes = len(layout.axes), []
+        for i, t in enumerate(tensors):
+            if t.ndim != expected_ndim:
+                raise ValueError(
+                    f"Tensor #{i} has {t.ndim} dims, but layout {layout.name} "
+                    f"expects {expected_ndim}"
+                )
+            image_sizes.append(tuple(t.shape))
 
-        if padding_constraints is not None:
-            square_size = padding_constraints.get("square_size", 0)
-        if square_size > 0:
-            # pad to square.
-            max_size[0] = max_size[1] = max_size[2] = square_size
-            if "size_divisibility" in padding_constraints:
-                size_divisibility = padding_constraints["size_divisibility"]
-        
-        if size_divisibility > 1:
-            stride = size_divisibility
-        # the last dims D,H,W, all subject to divisibility requirement
-        max_size = (max_size + (stride - 1)).div(stride, rounding_mode="floor") * stride
+        max_size = torch.stack([torch.tensor(sz) for sz in image_sizes]).max(0).values
 
-        if len(tensors) == 1:
-            d_pad = max_size[-3] - image_sizes_tensor[0][0]
-            h_pad = max_size[-2] - image_sizes_tensor[0][1]
-            w_pad = max_size[-1] - image_sizes_tensor[0][2]
-            # F.pad expects (W, H, D) order in its pad tuple:
-            #   (w_left, w_right, h_left, h_right, d_left, d_right)
-            # returns: (1, C, D_max, H_max, W_max)
-            batched_imgs = F.pad(
-                tensors[0],(0, w_pad, 0, h_pad, 0, d_pad),
-                value=pad_value).unsqueeze_(0)  # add batch dim
-        else:
-            # batch_shape: (N, C, D_max, H_max, W_max)
-            batch_shape = [len(tensors)] + list(tensors[0].shape[:-3]) + list(max_size)
-            
-            # allocates tensor (N, C, D_max, H_max, W_max) with pad_value
-            # on device of tensors[0]
-            batched_imgs = tensors[0].new_full(batch_shape, fill_value=pad_value)
-            batched_imgs = batched_imgs.to(tensors[0].device)
-            
-        # fill in the tensor with the images
+        batch_shape = [len(tensors)] + max_size.tolist()
+        batched_imgs = tensors[0].new_full(batch_shape, pad_value)
+
         for i, img in enumerate(tensors):
-            batched_imgs[i, ..., : img.shape[-3], : img.shape[-2], : img.shape[-1]].copy_(img)
+            slices = (i,) + tuple(slice(0, s) for s in img.shape)
+            batched_imgs[slices].copy_(img)
 
-        return ImageList(batched_imgs.contiguous(), image_sizes)
+        return ImageList(
+            batched_imgs.contiguous(),
+            image_sizes,
+            layout=layout,
+            orig_layout=layout,
+        )
   
     def __iter__(self):
         for idx in range(len(self)):
             yield self[idx]
 
+    def copy(self, *, deep: bool = False) -> "ImageList":
+        return ImageList(
+            self.tensor.clone() if deep else self.tensor,
+            self.image_sizes.copy(),
+            layout=self.layout,
+            orig_layout=self.orig_layout,
+            orig_image_sizes=self.orig_image_sizes.copy(),
+        )
+
     def __repr__(self) -> str:
-        b    = self.tensor.shape[0]
-        c    = self.tensor.shape[1]
-        d, h, w = self.tensor.shape[-3:]
-        d_hw   = f"{d}x{h}x{w}"
+        b = self.tensor.shape[0]  
+        # TODO: logic can probably be simplified
+        if self.layout == Shape.TCZYX:
+            t = self.tensor.shape[1]
+            c = self.tensor.shape[2]
+            d, h, w = self.tensor.shape[-3:]        
+        elif self.layout == Shape.TZYXC:
+            t = self.tensor.shape[1]
+            d, h, w = self.tensor.shape[-4:-1]
+            c = self.tensor.shape[-1]
+        elif self.layout == Shape.CZYX:
+            c = self.tensor.shape[1]
+            d, h, w = self.tensor.shape[-3:]
+            t = 1
+        elif self.layout == Shape.ZYXC:
+            d, h, w = self.tensor.shape[-4:-1]
+            c = self.tensor.shape[-1]
+            t = 1
 
         return (
             f"<ImageList  "
-            f"N={b} | C={c} | DxHxW=({d_hw})  "
+            f"N={b} | T={t} | C={c} | DxHxW={d}x{h}x{w})  "
             f"orig={self.orig_layout.name}  "
             f"device={self.tensor.device}>"
         )
@@ -248,9 +400,7 @@ class ImageList:
 def cat_image_lists(
         image_lists: Sequence["ImageList"],
         pad_value: float = 0.0,
-        size_divisibility: int = 0,
-        padding_constraints: Optional[Dict[str, int]] = None,
-    ) -> "ImageList":
+) -> "ImageList":
     """Concatenate multiple :class:`ImageList`s along the batch axis.
 
     All inputs must use the **same** `layout`.
@@ -259,36 +409,34 @@ def cat_image_lists(
         image_lists : Sequence[ImageList]
         pad_value   : float
             Value to pad with when images differ in spatial size.
-        size_divisibility : int
-            Passed straight to :meth:`from_tensors`.
-        padding_constraints : dict | None
-            Passed straight to :meth:`from_tensors`.
 
     Returns:
-        ImageList
-            One batched object with ``N1+N2+...`` images.
+        One ImageList batched object with ``N1+N2+...`` images.
     """
-    if not image_lists:
-        raise ValueError("image_lists must be non-empty")
-
     layout = image_lists[0].layout
     if any(il.layout != layout for il in image_lists):
-        raise ValueError("all ImageList objects must share the same layout")
+        raise ValueError("All ImageList objects must share the same layout")
     
     shapes = {il.tensor.shape for il in image_lists}
     if len(shapes) == 1:                                   
-        batched = torch.cat([il.tensor for il in image_lists], dim=0)  # (N_total, C, D, H, W)
+        # e.g. (N_total, (T), C, D, H, W) OR # (N_total, (T), D, H, W, C)
+        batched = torch.cat([il.tensor for il in image_lists], dim=0)  
         image_sizes = list(chain.from_iterable(il.image_sizes for il in image_lists))
         return ImageList(batched, image_sizes, layout=layout)
 
-    if layout != Shape.CZYX:
-        raise ValueError(f"ImageList concatenation only supports CZYX layout currently, got {layout}")
-
-    tensors = [img for il in image_lists for img in il]     # flat list of (C,D_i,H_i,W_i)
+    tensors = [img for il in image_lists for img in il]
     return ImageList.from_tensors(
         tensors,
-        size_divisibility=size_divisibility,
         pad_value=pad_value,
-        padding_constraints=padding_constraints,
         layout=layout
     )
+
+
+def spatial_dims(layout: Shape, tensor_ndim: int) -> Tuple[int, int, int]:
+    """
+    Return the (Z, Y, X) dimension indices for `tensor` that follows `layout`.
+    """
+    lead = tensor_ndim - len(layout.axes)
+    # map from semantic axis -> absolute dim index
+    ax2dim = {ax: lead + i for i, ax in enumerate(layout.axes)}
+    return (ax2dim["Z"], ax2dim["Y"], ax2dim["X"])

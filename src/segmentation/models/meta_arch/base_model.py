@@ -11,9 +11,7 @@ class BaseModel(torch.nn.Module):
     Base class for segmentation models.
     All segmentation models should subclass this class.
     """
-    def __init__(self, 
-                 preprocessor: Optional[PreProcessor] = None,
-                 ):
+    def __init__(self, preprocessor: Optional[PreProcessor] = None):
         super(BaseModel, self).__init__()
         self.preprocessor = preprocessor 
 

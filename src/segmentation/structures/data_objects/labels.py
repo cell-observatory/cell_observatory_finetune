@@ -7,6 +7,10 @@ import numpy as np
 
 from segmentation.structures.sample_objects.utils import record_init
 
+
+# TODO: extend with time axis
+
+
 class Labels:
     """
     Stores the instance labels for an image.

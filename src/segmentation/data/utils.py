@@ -5,7 +5,7 @@ import random
 import collections.abc
 from pathlib import Path
 from contextlib import nullcontext
-from typing import Sequence, Any, Mapping, Tuple
+from typing import Sequence, Any, Mapping, Tuple, List
 
 import sqlite3
 import tifffile
@@ -16,9 +16,11 @@ import pandas as pd
 from skimage.io import imread, imsave
 
 import torch
+import torch.fft as fft
 from torch.utils.data._utils.collate import \
     default_collate as torch_default_collate
 
+from segmentation.structures.sample_objects.instances import Instances
 from segmentation.structures.sample_objects.data_sample import DataSample
 from segmentation.structures.data_objects.image_list import ImageList
 from segmentation.structures.data_objects.image_list import cat_image_lists
@@ -39,10 +41,13 @@ def read_file(image_path: str | Path, **kwargs) -> str:
     else:
         raise ValueError(f"Unsupported file format for {image_path}")
 
-def read_zarr(image_path : str, zarr_driver: str = "zarr3", return_handle: bool = False) -> np.ndarray:
+def read_zarr(image_path : str | Path, zarr_driver: str = "zarr3", return_handle: bool = False) -> np.ndarray:
     """
     Read a Zarr file and return the data as a NumPy array.
     """
+    if isinstance(image_path, Path):
+        image_path = str(image_path)
+        
     spec = {
         "driver": zarr_driver,
         "kvstore": {"driver": "file", "path": image_path},
@@ -330,7 +335,7 @@ def worker_init_fn(worker_id: int,
     random.seed(worker_seed)
     torch.manual_seed(worker_seed)
 
-def collate_data_samples(samples: list["DataSample"]) -> "DataSample":
+def collate_instance_segmentation(samples: list["DataSample"]) -> "DataSample":
     """Stack images & gather instances into a batched DataSample."""
     metainfo = default_collate([s.metainfo for s in samples])
     batched_img = cat_image_lists(image_lists=[s.data_tensor for s in samples])
@@ -339,6 +344,59 @@ def collate_data_samples(samples: list["DataSample"]) -> "DataSample":
     batch = DataSample(metainfo=metainfo)  
     batch.data_tensor = batched_img
     batch.gt_instances = inst_list
+    return batch.to_dict()
+
+# TODO: merge collate_fns that are identical
+def collate_channel_split(samples: list["DataSample"]) -> "DataSample":
+    metainfo = default_collate([s.metainfo for s in samples])
+    batch = DataSample(metainfo=metainfo)
+    
+    batched_img = cat_image_lists(image_lists=[s.data_tensor for s in samples])
+    batch.data_tensor = batched_img
+
+    instance = Instances()
+    instance.image = cat_image_lists(image_lists=[s.gt_instances.image for s in samples])
+    batch.gt_instances = instance
+
+    return batch.to_dict()
+
+def collate_upsample(samples: list["DataSample"]) -> "DataSample":
+    metainfo = default_collate([s.metainfo for s in samples])
+    batch = DataSample(metainfo=metainfo)
+    
+    batched_img = cat_image_lists(image_lists=[s.data_tensor for s in samples])
+    batch.data_tensor = batched_img
+
+    instance = Instances()
+    instance.image = cat_image_lists(image_lists=[s.gt_instances.image for s in samples])
+    batch.gt_instances = instance
+
+    return batch.to_dict()
+
+def collate_denoise(samples: list["DataSample"]) -> "DataSample":
+    metainfo = default_collate([s.metainfo for s in samples])
+    batch = DataSample(metainfo=metainfo)
+    
+    batched_img = cat_image_lists(image_lists=[s.data_tensor for s in samples])
+    batch.data_tensor = batched_img
+
+    instance = Instances()
+    instance.image = cat_image_lists(image_lists=[s.gt_instances.image for s in samples])
+    batch.gt_instances = instance
+
+    return batch.to_dict()
+
+def collate_channel_predict(samples: list["DataSample"]) -> "DataSample":
+    metainfo = default_collate([s.metainfo for s in samples])
+    batch = DataSample(metainfo=metainfo)
+    
+    batched_img = cat_image_lists(image_lists=[s.data_tensor for s in samples])
+    batch.data_tensor = batched_img
+
+    instance = Instances()
+    instance.image = cat_image_lists(image_lists=[s.gt_instances.image for s in samples])
+    batch.gt_instances = instance
+    
     return batch.to_dict()
 
 # from: https://github.com/open-mmlab/mmengine/main/mmengine/dataset/utils.py
@@ -406,4 +464,57 @@ def default_collate(data_batch: Sequence) -> Any:
         return torch_default_collate(data_batch)
 
 
-# ---------------------------------------- --- ---- ---- ---------------------------------------- #
+# ---------------------------------------- FINETUNING TASK HELPERS  ---------------------------------------- #
+
+
+# from https://github.com/cell-observatory/aovift/src/synthetic.py
+@torch.no_grad()
+def create_na_masks(ipsf: torch.Tensor, thresholds: List[float]) -> torch.Tensor:
+    """
+    OTF Mask by binary thresholding ideal theoretical OTF.
+
+    Args:
+        thresholds: where to threshold after normalizing to the OTF max
+
+    Returns:
+        3D array where == 1 inside NA_Mask, == 0 outside NA mask
+
+    """
+    ipsf = torch.as_tensor(ipsf, dtype=torch.float32)
+    if ipsf.ndim != 3:
+        raise ValueError(f"ipsf must be 3-D, got shape {ipsf.shape}")
+    
+    otf = torch.abs(fft(ipsf))
+
+    # NaN safe max operator
+    max_val = torch.where(torch.isnan(otf), otf.new_full((), float("-inf")), otf).max()
+    if not torch.isfinite(max_val):
+        raise ValueError("OTF is all-NaN — cannot build NA mask")
+
+    # max normalize
+    mask = otf / max_val
+    
+    masks = []
+    for thr in thresholds:
+        if not (0.0 <= thr <= 1.0):
+            raise ValueError(f"Threshold {thr} outside [0,1]")
+        # keep magnitudes >= threshold
+        binary_mask = (mask >= thr).float()
+        masks.append(binary_mask)
+        
+    return torch.stack(masks)
+
+def fft(image):
+    fft_image = torch.fft.ifftshift(image)
+    fft_image = torch.fft.fftn(fft_image)
+    fft_image = torch.fft.fftshift(fft_image)
+    return fft_image
+
+def ifft(fft_image):
+    image = torch.fft.fftshift(fft_image)
+    image = torch.fft.ifftn(image)
+    image = torch.abs(torch.fft.ifftshift(image))
+    return image
+
+
+# ---------------------------------------- --- ---- ---- ---- ----  ---------------------------------------- #

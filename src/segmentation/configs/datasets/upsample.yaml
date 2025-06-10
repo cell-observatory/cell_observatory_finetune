@@ -1,0 +1,42 @@
+defaults:
+  - databases: supabase_database        # Loads configs/datasets/databases/supabase_database.yaml
+  - _self_
+
+# Dataset Parameters (mainly used by other configs)
+name: upsample
+
+split:  0.1
+channel_in: 2
+num_classes: 2   
+input_format: BTZYXC
+input_shape: 
+  - 1    # T
+  - 128
+  - 128
+  - 128
+  - 2    # C
+dataloader_type: torch
+return_dataloader: true
+distributed_sampler: true
+collate_fn: segmentation.data.utils.collate_upsample
+# TODO: remove, not used anymore
+worker_init_fn: segmentation.data.utils.worker_init_fn 
+
+# not used
+dataset_mean: [0,0,0,0,0]  
+dataset_std: [1,1,1,1,1]  
+
+dataset:
+  _target_: segmentation.data.datasets.upsample_dataset.UpsampleDataset 
+  layout: "TZYXC"
+  # TODO: just dummy ipsf for testing, change later
+  ideal_psf_path: /clusterfs/nvme/sayan/AI/psfs_updated/psf-ideal/YuMB_lambda510/z200-y97-x97/z64-y64-x64/z15/single/photons_5000-10000/amp_0-p0/1.tif
+  na_mask_thresholds: [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+  # not used for upsample
+  key_cols:
+    - id
+    - t0
+    - t1
+    - z0
+    - y0
+    - x0

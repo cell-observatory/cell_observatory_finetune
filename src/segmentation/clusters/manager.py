@@ -11,7 +11,6 @@ def q(x: str) -> str:
     """Shortcut for shlex.quote."""
     return shlex.quote(str(x))
 
-
 # modify Hydra config on cmd line to use different models
 @hydra.main(config_path="../configs", config_name="config_mrcnn_hiera_fpn", version_base="1.2") 
 def main(cfg: DictConfig):
@@ -59,7 +58,7 @@ def main(cfg: DictConfig):
     
     sjob_worker_nodes.append(f"--export=ALL")
 
-    # we enforce) two usage patterns for slurm multinode training:
+    # we enforce two usage patterns for slurm multinode training:
     # (1) set number of nodes and necessitate that nodes are exlusive OR
     # (2) do not set nodes, instead only set total number of cpus and gpus
     #     per task and let Slurm allocate nodes as needed
@@ -89,10 +88,6 @@ def main(cfg: DictConfig):
     # pass any additional arguments to the training script
     for (task, task_name) in zip(cfg.clusters.tasks, cfg.clusters.task_names):
         tasks += f" --{task} {task_name}"
-
-    # TODO: features implemented soon: 
-    #       (a) check cluster resource availability before submitting job
-    #       (b) run head node on same node as worker 0 
 
     if cfg.clusters.launcher_type == "local":
         sjob_worker_nodes.append(f" --wrap='{tasks}'")

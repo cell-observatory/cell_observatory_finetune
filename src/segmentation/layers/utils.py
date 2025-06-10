@@ -279,3 +279,6 @@ def compute_unmasked_ratio(mask):
         
         valid_ratio = torch.stack([valid_ratio_d, valid_ratio_w, valid_ratio_h], -1) # [B, 3]
         return valid_ratio
+
+
+# ------------------------------------------------------------  ------------------------------------------------------------

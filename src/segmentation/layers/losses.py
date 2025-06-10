@@ -627,3 +627,65 @@ def maskrcnn_loss(mask_logits, proposals, gt_masks, gt_labels, mask_matched_idxs
         mask_logits[torch.arange(labels.shape[0], device=labels.device), labels], mask_targets
     )
     return mask_loss
+
+
+# ---------------------------------------------  ----------------- MAE LOSSES ----------------- ---------------------------------------------
+
+
+class MAELoss(nn.Module):
+    """
+    Mean Absolute Error (MAE) loss for masked autoencoders.
+    """
+    def __init__(self, reduction: str = "mean"):
+        super().__init__()
+        # TODO: remove probably, since we are 
+        #       not using others most likely
+        self.reduction = reduction
+
+    def forward(
+        self,
+        preds: torch.Tensor, # (B, N, C)
+        targets: torch.Tensor, # (B, N, C)
+        # (B, N) or (B, N, C) or None
+        # (B, N, C) for channel prediction
+        # since masking is accross 
+        # some channels x patches
+        # (B, N) for temporal upsampling
+        # for all patches for some time steps 
+        # None for spatial upsampling, 
+        # denoising, and channel splitting
+        # since we are predicting full
+        # image i.e. all patches
+        mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # (B, N, C) -> (B, N, C)
+        diff = (preds.float() - targets.float()).pow(2)
+
+        # no masking
+        if mask is None:
+            per_patch = diff.mean(dim=-1)
+            loss = per_patch.mean()
+            return loss
+
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(-1)
+        assert mask.shape == diff.shape[:-1] + (diff.shape[-1] if mask.dim() == 3 else 1)
+
+        # broadcasts mask if needed
+        diff.mul_(mask)
+
+        # TODO: for channel predict 
+        #       do we want to do normalization
+        #       accross all elements or rather 
+        #       average across all patches
+        #       notwithstanding that technically
+        #       not all channels for a masked patched
+        #       are predicted
+        per_patch = diff.mean(dim=-1)
+        num = mask.sum()
+        loss = per_patch.sum() / num
+
+        return loss
+
+
+# ---------------------------------------------  ----------------- ----------------- ---------------------------------------------

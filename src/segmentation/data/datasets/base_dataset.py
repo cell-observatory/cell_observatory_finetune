@@ -54,7 +54,7 @@ class BaseDataset(Dataset, metaclass=abc.ABCMeta):
         self.layout = Shape(layout)
         
         self.db = db
-        self.key_cols = list(key_cols)
+        self.key_cols = list(key_cols) if key_cols is not None else []
 
         self._process_tables()
         

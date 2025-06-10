@@ -33,7 +33,8 @@ from segmentation.structures.sample_objects.base_data_element import BaseDataEle
 INSTANCE_FIELDS = {
     "masks": BitMasks,
     "boxes": Boxes,
-    "labels": Labels
+    "labels": Labels,
+    "image": ImageList,
 }
 
 
@@ -105,7 +106,9 @@ class DataSample(BaseDataElement):
         for instance in instance_list:
             instance_dict: Dict[str,Any] = {}
             for field_name in INSTANCE_FIELDS:
-                field_obj = getattr(instance, field_name)
+                field_obj = getattr(instance, field_name, None)
+                if field_obj is None:
+                    continue
                 instance_dict[field_name + "_meta"] = field_obj._init_args
             per_image_instances.append(instance_dict)
 
@@ -125,12 +128,16 @@ class DataSample(BaseDataElement):
         for img_meta in d["gt_instances"]:
             kw = {}
             for field_name, object in INSTANCE_FIELDS.items():
+                if field_name + "_meta" not in img_meta:
+                    continue
                 init_args = img_meta[field_name + "_meta"]
                 kw[field_name] = object(**init_args)
             instances.append(Instances(**kw))
-        inst.gt_instances = instances
+
+        # TODO: double check if this is correct
+        #       approach
+        if len(instances) == 1:
+            inst.gt_instances = instances[0]
+        else:
+            inst.gt_instances = instances
         return inst
-
-
-SampleList = List[DataSample]
-OptSampleList = Optional[SampleList]

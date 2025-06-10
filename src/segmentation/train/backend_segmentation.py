@@ -34,7 +34,7 @@ from omegaconf import DictConfig, OmegaConf
 from segmentation.data.dataloaders import get_dataloader
 from segmentation.checkpoint.checkpoint import load_checkpoint
 from segmentation.train.registry import build_dependency_graph_and_instantiate
-from segmentation.utils.comm import inference_context, is_main_process
+from segmentation.utils.comm import inference_context, is_main_process, process_rank
 
 logger = logging.getLogger("ray")
 logger.setLevel(logging.INFO) # OR: DEBUG, WARNING, ERROR, CRITICAL

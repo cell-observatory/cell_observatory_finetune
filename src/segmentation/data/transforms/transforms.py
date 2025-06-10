@@ -1,9 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-from segmentation.structures.data_objects.masks import BitMasks
-from segmentation.structures.data_objects.image_list import ImageList
-
 
 class Normalize:
     def __init__(self, mean=None, std=None):
@@ -12,9 +9,15 @@ class Normalize:
 
     def __call__(self, data_sample):
         image = data_sample.data_tensor.tensor
-        mean = image.mean(dim=(1, 2, 3), keepdim=True) if self.mean is None else self.mean
-        std = image.std(dim=(1, 2, 3), keepdim=True) if self.std is None else self.std
-        image = (image - mean) / std
+        
+        if self.mean is None and self.std is None:
+            mean, std = data_sample.data_tensor.get_image_stats() 
+            image = (image - mean) / std
+        else:
+            mean = torch.tensor(self.mean, dtype=image.dtype, device=image.device)
+            std = torch.tensor(self.std, dtype=image.dtype, device=image.device)
+            image = (image - mean) / std
+        
         data_sample.data_tensor.tensor = image
         return data_sample
 
@@ -25,7 +28,7 @@ class Resize:
         self.resize_mode = resize_mode
 
     def __call__(self, data_sample):
-        orig_d, orig_h, orig_w = data_sample.data_tensor.image_sizes[0]
+        orig_d, orig_h, orig_w = data_sample.data_tensor.shape
         new_d, new_h, new_w = self.size
         scale_d, scale_h, scale_w = (
             new_d / orig_d,
@@ -33,21 +36,40 @@ class Resize:
             new_w / orig_w,
         )
 
-        # Resize image
+        # resize image
         data_sample.data_tensor.resize(new_size=self.size)
 
-        # Resize masks
-        if 'masks' in data_sample.gt_instances:
-            data_sample.gt_instances.masks.tensor = F.interpolate(
-                data_sample.gt_instances.masks.tensor.unsqueeze(1).float(), 
-                size=self.size[-3:],
-                mode='nearest'
-            ).squeeze(1)
+        # TODO: still need to allow for more flexibility 
+        #       in boxes/labels/masks layout
+        if "masks" in data_sample.gt_instances:
+            # (N, D, H, W) or (N, T, D, H, W)
+            m = data_sample.gt_instances.masks.tensor.float()
 
-        # Scale boxes
-        if 'boxes' in data_sample.gt_instances:
-            # TODO: double check all data object formats for consistency 
+            if m.ndim == 4:
+                # (N,1,D,H,W) -> # (N, D',H',W')
+                m = F.interpolate(m.unsqueeze(1),
+                                   size=self.size,
+                                   mode="nearest").squeeze(1)         
+            elif m.ndim == 5:
+                N, T, D, H, W = m.shape
+                # merge (N,T) into batch
+                m = m.view(N * T, 1, D, H, W)
+                m = F.interpolate(m, size=self.size, mode="nearest")
+                # split (N,T) back into batch, time
+                m = m.view(N, T, *self.size)
+            else:
+                raise ValueError("Mask tensor must be 4- or 5-D")
+
+            data_sample.gt_instances.masks.tensor = m
+
+        if "boxes" in data_sample.gt_instances:
+            # boxes: (N, 6) or (N, T, 6)  -> (x1, y1, z1, x2, y2, z2)
             boxes = data_sample.gt_instances.boxes.tensor
-            scale = torch.tensor([scale_w, scale_h, scale_d, scale_w, scale_h, scale_d], device=boxes.device)
-            data_sample.gt_instances.boxes.tensor = boxes * scale
-        return data_sample            
+            # broadcast to last dim
+            scale_vec = boxes.new_tensor(
+                [scale_w, scale_h, scale_d, scale_w, scale_h, scale_d]
+            ) 
+
+            data_sample.gt_instances.boxes.tensor = boxes * scale_vec
+            
+        return data_sample

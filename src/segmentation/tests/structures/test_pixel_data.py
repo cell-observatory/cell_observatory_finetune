@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from segmentation.structures.sample_objects.pixel_data import PixelData
+from scrap.for_later.pixel_data import PixelData
 
 
 def make_tensor(shape):

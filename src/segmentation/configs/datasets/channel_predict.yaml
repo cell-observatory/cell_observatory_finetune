@@ -1,0 +1,39 @@
+defaults:
+  - databases: supabase_database        # Loads configs/datasets/databases/supabase_database.yaml
+  - _self_
+
+# Dataset Parameters (mainly used by other configs)
+name: channel_predict
+
+split:  0.1
+channel_in: 2
+num_classes: 2   
+input_format: BTZYXC
+input_shape: 
+  - 1    # T
+  - 128
+  - 128
+  - 128
+  - 2    # C
+dataloader_type: torch
+return_dataloader: true
+distributed_sampler: true
+collate_fn: segmentation.data.utils.collate_channel_predict
+# TODO: remove, not used anymore
+worker_init_fn: segmentation.data.utils.worker_init_fn 
+
+# not used
+dataset_mean: [0,0,0,0,0]  
+dataset_std: [1,1,1,1,1]  
+
+dataset:
+  _target_: segmentation.data.datasets.channel_predict_dataset.ChannelPredictDataset 
+  layout: "TZYXC"
+  # not used for channel_split
+  key_cols:
+    - id
+    - t0
+    - t1
+    - z0
+    - y0
+    - x0

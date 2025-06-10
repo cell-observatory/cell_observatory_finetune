@@ -21,16 +21,15 @@ limitations under the License.
 
 
 import math
-from typing import Type, Optional, List, Tuple
+from typing import Type, Optional, List, Tuple, Sequence
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 
-
-from segmentation.layers.norms import FrozenBatchNorm3d
 from segmentation.layers.utils import undo_windowing
-
+from segmentation.layers.norms import FrozenBatchNorm3d
+from segmentation.structures.data_objects.image_list import Shape
 
 # ------------------------------------------------------------ MLP ------------------------------------------------------------
 
@@ -362,4 +361,178 @@ class Reroll(nn.Module):
         return x
 
 
-# ------------------------------------------------------------------------------------------------------------------------
+# -------------------------------------------------------- MASK GENERATOR ----------------------------------------------------------------
+
+
+# TODO: currently assume TDHWC layout and not optimal design 
+#       will be redesigned soon
+class MaskGenerator:
+    def __init__(
+        self,
+        device: str = 'cuda',
+        patchify_scheme='downsample_time',
+        batch_size=1,
+        num_channels: int = 1,
+        input_shape=(1, 128, 128, 128, 1),
+        lateral_patch_size=16,
+        axial_patch_size=16,
+        temporal_patch_size=1,
+        channels_to_mask: Optional[Sequence[int]] = None,
+        time_downsample_pattern: Optional[Sequence[int]] = None,
+        lateral_range: Optional[Tuple[float]]=(0.2, 0.8),
+        axial_range: Optional[Tuple[float]]=(.5, 1.0),
+        temporal_range: Optional[Tuple[float]]=(0.5, 1.0)
+    ):
+        super(MaskGenerator, self).__init__()
+
+        self.device = torch.device(device)
+        self.generator = torch.Generator(device=self.device)
+
+        # task to perform (TODO: make patchify a variable?)        
+        self.patchify_scheme = patchify_scheme
+        patchify = True if patchify_scheme in ['downsample_time'] else False
+        
+        # for time downsampling task
+        self.time_downsample_pattern = time_downsample_pattern
+        
+        # for channel prediction task (TODO: convert to one list)
+        self.axial_range = axial_range
+        self.lateral_range = lateral_range
+        self.temporal_range = temporal_range
+        self.channels_to_mask = channels_to_mask
+
+        # mask/image dimensions (TODO: make all this one list)
+        self.batch_size = batch_size
+        self.num_channels = num_channels
+
+        # TODO: don't assume layout
+        if input_shape[1] > 1:
+            self.time = input_shape[1] // temporal_patch_size if patchify else input_shape[1] 
+        else:
+            self.time = None
+        if input_shape[2] > 1:
+            self.depth = input_shape[2] // axial_patch_size if patchify else input_shape[2]
+        else:
+            self.depth = None
+        self.height  = input_shape[3] // lateral_patch_size if patchify else input_shape[3]
+        self.width = input_shape[4] // lateral_patch_size if patchify else input_shape[4]
+
+        self.axes = [
+            ("T", self.time,  temporal_range, self.time  is not None),
+            ("Z", self.depth, axial_range, self.depth is not None),
+            ("Y", self.height, lateral_range, True),
+            ("X", self.width,  lateral_range, True),
+        ]
+
+    def _sample_block_size(self, low, high, full):
+        """
+        Draws a block length L so that L / full in [low , high].
+        """
+        if not (0.0 <= low <= high <= 1.0):
+            raise ValueError("low <= high must both be in [0,1]")
+
+        if low == high:
+            frac = torch.tensor(low, device=self.device)
+        else:
+            frac = torch.distributions.Uniform(
+            low, high).sample((1,)).to(self.device)
+
+        length = torch.clamp((frac * full).round(), 1, full).int()
+        return length
+
+    # TODO: consider redesigning masking
+    def get_random_block(self):
+        """
+        Returns a *binary* tensor whose rank depends on which axes are active.
+        1 = block area (to mask later)
+        0 = keep
+        """
+        block_shape, slices = [], []
+        for _, axis_len, axis_sample_range, axis_exists in self.axes:
+            if not axis_exists:
+                block_shape.append(axis_len)
+                slices.append(slice(None))
+                continue
+
+            size = self._sample_block_size(*axis_sample_range, axis_len)
+            start = torch.randint(0, axis_len - size + 1, 
+                                  (1,), generator=self.generator, 
+                                  device=self.device).item()
+            block_shape.append(axis_len)
+            slices.append(slice(start, start + size.item()))
+
+        shape = [s for s in block_shape if s is not None]
+
+        block = torch.zeros(*shape, dtype=torch.bool, device=self.device)
+        block[tuple(slices[i] for i, (_, _, _, a) in enumerate(self.axes) if a)] = True
+        return block
+
+    def mask_random_patches_per_channel(self):
+        """
+        1. Draw a block mask on the volume
+        2. Expand it to every item in the batch
+        3. Broadcast it across channels *only* for the
+        indices in `channels_to_mask`
+        """
+        # (T?, Z?, H, W)
+        spatial = self.get_random_block()
+        # (B, T?, Z?, H, W)
+        spatial = spatial.unsqueeze(0)
+        spatial = spatial.expand(self.batch_size, *([-1] * (spatial.dim())))
+
+        # (C,) -> (1,...,C)
+        channels = torch.zeros(self.num_channels,
+                            dtype=spatial.dtype,
+                            device=spatial.device)
+        channels[self.channels_to_mask] = 1
+        channels = channels.view(*(1,) * spatial.dim(), -1)
+        # broadcast multiply: 
+        # (1,...,C) * (B, T?, Z?, H, W, 1) -> (B, T?, Z?, H, W, C)
+        # now blocks are masked for the given channels
+        mask = spatial.unsqueeze(-1) * channels
+
+        return mask, None
+
+    def mask_downsample_time(self, pattern: Sequence[int]):
+        """
+        Generates masks that downsample the time dimension by a factor. 
+        """
+        mask_pattern = torch.tensor(pattern, dtype=torch.bool, device=self.device)  
+        K = mask_pattern.shape[0]  
+        
+        # mod all time values by K to extend 
+        # the mask pattern across the time dimension
+        time_indices = torch.arange(self.time, device=self.device) % K    
+        time_mask = mask_pattern[time_indices]                            
+
+        # mask: (time,) -> (time, (depth), height, width) -> (bs, time * (depth) * height * width)
+        # later, we repeat across channel dimension (see masking.py in platform)
+        # TODO: drop channel dim in logic?
+        if self.depth:
+            mask = time_mask.view(self.time, 1, 1, 1, 1).expand(-1, self.depth, self.height, self.width, 1)
+            mask = mask.unsqueeze(0).expand(self.batch_size, -1, -1, -1, -1, -1)
+            mask = mask.contiguous().view(self.batch_size, -1)
+        else:
+            mask = time_mask.view(self.time, 1, 1, 1).expand(-1, self.height, self.width, 1)
+            mask = mask.unsqueeze(0).expand(self.batch_size, -1, -1, -1)
+            mask = mask.contiguous().view(self.batch_size, -1)
+
+        # masked patches are 1, unmasked are 0
+        # so argsort will give us the original patch indices in (B,L)
+        # TODO: double check this logic
+        original_patch_indices = mask.int().argsort(dim=1, stable=True)
+        
+        return mask, original_patch_indices
+
+    def __call__(self):
+        if self.patchify_scheme == 'downsample_time':
+            if self.time is None:
+                raise ValueError("Time downsampling is not applicable for 3D data without a time dimension.")
+            return self.mask_downsample_time(pattern=self.time_downsample_pattern)
+        elif self.patchify_scheme == 'random_patches_per_channel':
+            return self.mask_random_patches_per_channel()
+        else:
+            raise ValueError(f"Unknown patchify scheme: {self.patchify_scheme}")
+
+
+# --------------------------------------------------------------------------------------------------------------------------------

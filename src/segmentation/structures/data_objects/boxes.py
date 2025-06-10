@@ -32,6 +32,9 @@ from ops3d._C import nms_3d
 from segmentation.structures.sample_objects.utils import record_init
 
 
+# TODO: extend with time axis
+
+
 # ---------------------------------------- HELPER ---------------------------------------------
 
 

@@ -26,6 +26,10 @@ export TORCH_EXTENSIONS_DIR="/tmp/torch_extensions_$$"
 # CFG="config_mrcnn_intern_image_fpn.yaml"
 # CFG="config_mrcnn_hiera_fpn.yaml"
 # CFG="config_mrcnn_vitDet.yaml"
-CFG="config_maskdino_resnet.yaml"
+# CFG="config_maskdino_resnet.yaml"
+CFG="config_channel_split_masked_predictor_mae.yaml"
+# CFG="config_upsample_masked_predictor_mae.yaml"
+# CFG="config_denoise_dnmodel_mae.yaml"
+# CFG="config_channel_predict_masked_predictor_mae.yaml"
 
 python3 /clusterfs/nvme/hph/git_managed/segmentation/src/segmentation/train/train_segmentation.py --config-name=${CFG}

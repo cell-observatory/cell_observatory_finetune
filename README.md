@@ -206,7 +206,7 @@ Here's what each configuration subdirectory handles:
   - Defines matching algorithms for detection and segmentation tasks
 - **`datasets/`**
   - Defines dataset classes and parameters
-- **`losses`**
+- **`losses/`**
   - Defines loss functions used in training
 - **`transforms/`**
   - Defines data augmentation and preprocessing pipelines and parameters
@@ -241,7 +241,7 @@ defaults:
 
 #### Data Objects
 
-• **`ImageList:`** A tensor container that holds images of varying sizes as a single padded tensor, storing original image sizes, layout information (CZYX vs ZYXC etc.), and providing methods for standardization and batch operations.
+• **`ImageList:`** A tensor container that holds images of varying sizes as a single padded tensor, storing original image sizes, layout information (`CZYX` vs `ZYXC` etc.), and providing methods for standardization and batch operations.
 
 • **`Boxes:`** A class that wraps bounding box tensors with methods for geometric operations like resizing, clipping, and coordinate transformations.
 
@@ -253,7 +253,7 @@ defaults:
 
 • **`BaseDataElement:`** A base class that provides dict-like and tensor-like operations for data containers, separating metainfo (image metadata) from data fields (annotations/predictions).
 
-• **`DataSample:`** Inherits from BaseDataElement for instance segmentation tasks, containing an ImageList for image tensors and Instances objects for annotations. Contains class methods `from_dict` and `to_dict` for serialization and deserialization.
+• **`DataSample:`** Inherits from `BaseDataElement` for instance segmentation tasks, containing an `ImageList` for image tensors and `Instances` objects for annotations. Contains class methods `from_dict` and `to_dict` for serialization and deserialization.
 
 • **`Instances:`** A container class that stores masks, boxes, and labels as structured objects, providing indexing, slicing, and concatenation methods while ensuring dimensional consistency across all fields.
 

@@ -6,7 +6,7 @@ from segmentation.structures.data_objects.boxes import Boxes
 from segmentation.structures.data_objects.masks import BitMasks
 
 from segmentation.structures.sample_objects.instances import Instances
-from segmentation.structures.sample_objects.pixel_data import PixelData
+from scrap.for_later.pixel_data import PixelData
 from segmentation.structures.sample_objects.data_sample_old import DataSample
 
 

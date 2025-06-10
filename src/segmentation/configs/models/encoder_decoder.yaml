@@ -1,0 +1,8 @@
+defaults:
+  - _self_
+
+_target_: segmentation.models.meta_arch.encoder_decoder.EncoderDecoder
+
+masking: false
+
+losses: ${losses}

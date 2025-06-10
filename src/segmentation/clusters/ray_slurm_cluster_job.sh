@@ -4,6 +4,13 @@ export NCCL_DEBUG=INFO
 export NCCL_DEBUG_SUBSYS=GRAPH
 export NCCL_P2P_LEVEL=NVL
 
+# set pipefail to ensure that the script exits on any error
+# this is to ensure that status check failing leads to 
+# the script exiting and not proceeding to the workload
+# this is important to ensure that the Ray cluster is not left running
+# in the background and consuming resources even when cluster setup fails
+set -euo pipefail
+
 while getopts ":s:b:o:e:w:W:t:" option;do
     case "${option}" in
     e)  e=${OPTARG}
@@ -146,6 +153,30 @@ workers_num_nodes=$(squeue -j $jobid -h -o "%D")
 
 ############################## CHECK RAY CLUSTER STATUS ##############################
 
+# add exit trap to ensure cleanup on script exit
+# this will ensure that we stop the Ray cluster and cancel worker jobs
+# even if the script fails at any point henceforth
+cleanup() {
+    ec=$? # exit code of the last command that triggered the trap
+    echo "running cleanup (exit code: $ec)"
+
+    # stop Ray on the head node
+    apptainer exec --userns --nv \
+        --bind "$bind" \
+        --bind "$outdir/ray_head_node:$tmpdir" \
+        $env ray stop --force || true
+
+    # cancel worker jobs (if still queued/running)
+    if [[ -n ${jobid:-} ]]; then
+        readarray -t worker_job_ids < <( squeue -j "$jobid" -h -o "%A" )
+        [[ ${#worker_job_ids[@]} -gt 0 ]] && scancel "${worker_job_ids[@]}" || true
+    fi
+
+    # on failure (non-zero exit) also cancel the head-node SLURM job
+    [[ $ec -ne 0 ]] && scancel "$SLURM_JOB_ID" || true
+}
+trap cleanup EXIT 
+
 echo "Checking Ray cluster status..."
 
 apptainer exec --userns --nv \
@@ -157,7 +188,7 @@ apptainer exec --userns --nv \
 
 ############################## RUN WORKLOAD ##############################
 
-echo "Starting workload: $workload"
+echo "Starting workload: $task"
 # NOTE: this works because our training script calls ray.init() with the os.environ["head_node_ip"] 
 #       which allows the worker nodes to connect to the head node for distributed training
 #       across all worker nodes. Ray Actors will be created as needed for all gpu workers.
@@ -175,20 +206,22 @@ apptainer exec --userns --nv \
 
 ############################## CLEANUP ##############################
 
-echo "Tearing down Ray cluster..."
+# TODO: probably remove in favor of the cleanup trap?
 
-apptainer exec --userns --nv \
-   --bind $bind \
-   --bind $outdir/ray_head_node:$tmpdir \
-   $env ray stop --force
+# echo "Tearing down Ray cluster..."
+
+# apptainer exec --userns --nv \
+#    --bind $bind \
+#    --bind $outdir/ray_head_node:$tmpdir \
+#    $env ray stop --force
 
 
-readarray -t worker_job_ids < <( squeue -j "$jobid" -h -o "%A" )
+# readarray -t worker_job_ids < <( squeue -j "$jobid" -h -o "%A" )
 
-echo "Cancelling worker jobs: ${worker_job_ids[*]}"
-scancel "${worker_job_ids[@]}"
+# echo "Cancelling worker jobs: ${worker_job_ids[*]}"
+# scancel "${worker_job_ids[@]}"
 
-echo "Cancelling head node job: $SLURM_JOB_ID"
-scancel $SLURM_JOB_ID
+# echo "Cancelling head node job: $SLURM_JOB_ID"
+# scancel $SLURM_JOB_ID
 
 ######################################################################

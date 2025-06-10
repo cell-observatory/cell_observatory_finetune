@@ -1,0 +1,17 @@
+_target_: segmentation.layers.layers.MaskGenerator
+
+patchify_scheme: random_patches_per_channel
+channels_to_mask: [0]
+
+num_channels: ${datasets.channel_in}
+batch_size: ${clusters.batch_size}
+input_shape: ${datasets.input_shape}
+lateral_patch_size: ${models.backbones.lateral_patch_size}
+axial_patch_size: ${models.backbones.axial_patch_size}
+temporal_patch_size: ${models.backbones.temporal_patch_size}
+
+time_downsample_pattern: [0,1,0, 1]
+
+lateral_range: [0.7, 0.7]
+axial_range: [.7, 0.7]
+temporal_range: [0.0, 0.0]

@@ -1,5 +1,6 @@
 import os
 import sys
+import uuid
 import time
 import logging
 from pathlib import Path
@@ -17,7 +18,7 @@ os.environ["NCCL_CROSS_NIC"] = "1"
 os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "3600"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-from ray import init, cluster_resources, LoggingConfig
+from ray import init, cluster_resources
 from ray.train.torch import TorchTrainer, TorchConfig
 from ray.train import ScalingConfig, CheckpointConfig, RunConfig, FailureConfig
 
@@ -42,10 +43,13 @@ def main(cfg: DictConfig):
     logger.info(f"Log dir: {cfg.logdir}")
     logger.info(f"Checkpoint save dir: {cfg.checkpointdir}")
 
+    # TODO: remove this workaround
     with open_dict(cfg):
         if cfg.clusters.total_gpus is None or cfg.clusters.batch_size is None:
             raise ValueError("total_gpus and batch_size must be specified in the Hydra configuration.")
+        # TODO: enforce setting worker_batch_size directly in config
         cfg.clusters.worker_batch_size = cfg.clusters.batch_size // cfg.clusters.total_gpus
+        # TODO: remove redundant config entries
         cfg.clusters.scaling_config.num_workers = cfg.clusters.total_gpus
         cfg.clusters.scaling_config.resources_per_worker["CPU"] = cfg.clusters.cpus_per_worker  
     
@@ -70,7 +74,10 @@ def main(cfg: DictConfig):
         logger.info(f"Starting a new local Ray cluster...")
         init(
             log_to_driver=True,
-            runtime_env={"NCCL_DEBUG": "INFO", "NCCL_DEBUG_SUBSYS": "GRAPH", "NCCL_P2P_LEVEL": "NVL"},
+            runtime_env={"NCCL_DEBUG": "INFO", 
+                         "NCCL_DEBUG_SUBSYS": "GRAPH", 
+                         "NCCL_P2P_LEVEL": "NVL",
+                         },
             num_cpus=cfg.clusters.total_cpus + 1,  # Reserve 1 CPU for the coordinator
             num_gpus=cfg.clusters.total_gpus,
             ignore_reinit_error=True,
@@ -83,7 +90,10 @@ def main(cfg: DictConfig):
         init(
             address=f"{address}:{port}",
             log_to_driver=True,
-            runtime_env={"NCCL_DEBUG": "INFO", "NCCL_DEBUG_SUBSYS": "GRAPH", "NCCL_P2P_LEVEL": "NVL"},
+            runtime_env={"NCCL_DEBUG": "INFO", 
+                         "NCCL_DEBUG_SUBSYS": "GRAPH", 
+                         "NCCL_P2P_LEVEL": "NVL",
+                         },
         )
     
     logger.info("Cluster resources:")

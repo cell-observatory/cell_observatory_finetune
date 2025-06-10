@@ -28,6 +28,7 @@ python_env: /usr/bin/python # python executable to use (if not using apptainer)
 job_name: ${network}_segmentation_multinode      # name of the job      
 mount_path: /clusterfs/nvme/segment_4d  # path to mount for the job
 src: /clusterfs/nvme/hph/git_managed/segmentation/src/segmentation # path to the repo directory
+apptainer: /clusterfs/nvme/hph/env_images/develop_torch_cuda_12_8_ops3d_v2.sif # path to the apptainer image to use (if using container)
 
 task_names: []         # any additional arguments to pass to train run script
 tasks: []         # arg values to pass
@@ -46,9 +47,9 @@ workers: 3          # number of nodes to use
 
 exclusive: true      # whether to use exclusive node allocation
 nodelist: null       # list of specific nodes to use
-dependency: null       # job dependency
-constraint: null       # constraint for the job
-timelimit: null       # time limit for the job 
+dependency: null     # job dependency
+constraint: null     # constraint for the job
+timelimit: null      # time limit for the job 
 max_worker_heartbeat_timeout: 2 # in minutes (to prevent indefinite hang if one process fails)
 
 qos_head_node: abc_high # qos for the head node
@@ -57,12 +58,6 @@ total_gpus_head_node: 0 # total number of gpus to use for the head node
 workers_head_node: 1 # number of workers to use for the head node
 cpus_per_task_head_node: 24 # number of cpus to use for the head node
 mem_per_cpu_head_node: 31000 # memory to use for the head node
-
-# apptainer image to use for containerized workerloads
-apptainer: /clusterfs/nvme/hph/git_managed/env_images/develop_torch_cuda_12_8_ops3d_v2.sif
-
-# script to launch ray slurm cluster 
-ray: /clusterfs/nvme/hph/git_managed/train/segmentation/src/segmentation/clusters
 
 # Ray ScalingConfig (some variables are set to null to be set in the training loop)
 scaling_config:

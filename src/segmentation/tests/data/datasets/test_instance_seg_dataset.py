@@ -20,9 +20,6 @@ def db():
     label_spec = instantiate(cfg.label_spec)
     data_specs = [instantiate(s) for s in cfg.data_specs]
 
-    label_spec  = instantiate(cfg.label_spec)
-    data_specs = [instantiate(s) for s in cfg.data_specs]
-
     db = SQLiteDatabase(
         db_path      = cfg.db_path,
         data_tile    = cfg.data_tile,

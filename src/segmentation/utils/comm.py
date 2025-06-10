@@ -19,16 +19,12 @@ limitations under the License.
 """
 
 
-import ray
+from typing import Literal, Optional
+
 from ray.train import get_context
 from contextlib import contextmanager
 from torch import distributed as dist 
 
-
-# TODO: may be better ways to check 
-def in_ray() -> bool:
-    """True if Ray is initialized."""
-    return ray.is_initialized()
 
 def in_torch_dist() -> bool:
     """True if torch.distributed is initialised."""
@@ -43,9 +39,13 @@ def process_rank() -> int:
       - Plain torchrun/DDP - via `torch.distributed`
       - Local debugging - rank 0
     """
-    if in_ray():
+    try:
         return get_context().get_world_rank()
-    elif in_torch_dist():
+    except RuntimeError:
+        # can happen if Ray Train is not initialised
+        # or if the context is not available
+        pass
+    if in_torch_dist():
         return dist.get_rank()
     else:
         return 0
@@ -59,9 +59,11 @@ def get_world_size() -> int:
       - Plain torchrun/DDP - via `torch.distributed`
       - Local debugging - world size 1
     """
-    if in_ray():
+    try:
         return get_context().get_world_size()
-    elif in_torch_dist():
+    except RuntimeError:
+        pass
+    if in_torch_dist():
         return dist.get_world_size()
     else:
         return 1
@@ -72,20 +74,25 @@ def is_main_process() -> bool:
     return process_rank() == 0
 
 
-def barrier() -> None:
+def barrier(device_ids: Optional[int] = None) -> None:
     """
     Global synchronisation:
       - Ray Train barrier when available
-      - torch.distributed.barrier() otherwise
+      - torch.distributed.barrier() NCCL backend if available
+      - fallback to cpu/Gloo otherwise 
       - No-op in single-process mode
     """
-    if in_ray():
+    try:
         ctx = get_context()
         if hasattr(ctx, "barrier"):
             ctx.barrier()
             return
+    except RuntimeError:
+        pass
     if in_torch_dist():
-        dist.barrier()
+        dist.barrier(device_ids=[device_ids]) if device_ids is not None else dist.barrier()
+        return
+    return
 
 
 @contextmanager

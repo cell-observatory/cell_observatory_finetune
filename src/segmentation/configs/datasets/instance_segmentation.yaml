@@ -15,7 +15,7 @@ input_shape:
 dataloader_type: torch
 return_dataloader: true
 distributed_sampler: true
-collate_fn: segmentation.data.utils.collate_data_samples
+collate_fn: segmentation.data.utils.collate_instance_segmentation
 # TODO: remove, not used anymore
 worker_init_fn: segmentation.data.utils.worker_init_fn 
 

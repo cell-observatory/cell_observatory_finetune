@@ -24,7 +24,9 @@ def build_dataset(cfg, transforms=None):
         # initial write/setup of *.feather, *.db, etc.
         # if it does not already exist
         _ = instantiate(cfg.datasets.databases)
-    barrier()
+    # cpu synchronization point before torch distributed 
+    # group initialization
+    barrier(device_ids=int(os.environ.get("LOCAL_RANK")))
     # all ranks read local database table and instantiate
     # database and dataset classes
     db = instantiate(cfg.datasets.databases, force_create_db=False)

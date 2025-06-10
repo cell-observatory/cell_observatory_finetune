@@ -25,10 +25,6 @@ models:
   backbones:
     return_intermediates: True # return intermediate features from the backbone
 
-deepspeed:
-  fp16:
-    enabled: false
-
 clusters:
   batch_size:               1          # NOTE: batch size should divide im2col_step in deformable attn
   total_cpus:               4          # total number of cpus to use

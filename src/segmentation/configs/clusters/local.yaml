@@ -5,6 +5,8 @@ launcher_type: local # type of launcher to use
 
 # Ray cluster configuration
 script: /clusterfs/nvme/hph/git_managed/segmentation/src/segmentation/training/train_segmentation.py
+# apptainer image to use for containerized workerloads
+apptainer: /clusterfs/nvme/hph/git_managed/env_images/develop_torch_cuda_12_8_ops3d.sif
 python: python # python executable to use (if not using apptainer)                     
 job_name: ${network}_segmentation_local      # name of the job      
 
@@ -30,9 +32,6 @@ dependency: null       # job dependency
 constraint: null       # constraint for the job
 timelimit: null       # time limit for the job
 max_worker_heartbeat_timeout: 2 # in minutes (to prevent indefinite hang if one process fails)
-
-# apptainer image to use for containerized workerloads
-apptainer: /clusterfs/nvme/hph/git_managed/env_images/develop_torch_cuda_12_8_ops3d.sif
 
 # Ray ScalingConfig (some variables are set to null to be set in the training loop)
 scaling_config:

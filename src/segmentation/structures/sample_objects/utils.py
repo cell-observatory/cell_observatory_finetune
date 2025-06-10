@@ -4,8 +4,9 @@ import functools
 
 def record_init(fn):
     """
-    Decorator for __init__ methods.  Captures every arg/kwarg you passed
-    (with defaults) into self._init_args.
+    Decorator for __init__ methods.  Captures every 
+    arg/kwarg you passed (with defaults) into 
+    self._init_args.
     """
     sig = inspect.signature(fn)
     @functools.wraps(fn)

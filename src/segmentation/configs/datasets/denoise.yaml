@@ -1,0 +1,40 @@
+defaults:
+  - databases: supabase_database        # Loads configs/datasets/databases/supabase_database.yaml
+  - _self_
+
+# Dataset Parameters (mainly used by other configs)
+name: denoise
+
+split:  0.1
+channel_in: 2
+num_classes: 2   
+# TODO: merge with layout
+input_format: BTZYXC
+input_shape: 
+  - 1    # T
+  - 128
+  - 128
+  - 128
+  - 2    # C
+dataloader_type: torch
+return_dataloader: true
+distributed_sampler: true
+collate_fn: segmentation.data.utils.collate_denoise
+# TODO: remove, not used anymore
+worker_init_fn: segmentation.data.utils.worker_init_fn 
+
+# not used
+dataset_mean: [0,0,0,0,0]  
+dataset_std: [1,1,1,1,1]  
+
+dataset:
+  _target_: segmentation.data.datasets.denoise_dataset.DenoiseDataset 
+  layout: "TZYXC"
+  # not used for upsample
+  key_cols:
+    - id
+    - t0
+    - t1
+    - z0
+    - y0
+    - x0
