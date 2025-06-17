@@ -1,0 +1,72 @@
+defaults:
+  - trainer: epoch_based_trainer # Loads configs/trainers/epoch_based_trainer.yaml
+  - models: maskrcnn        # Loads configs/models/mask_rcnn.yaml
+  - models/backbones: resnet     # Loads configs/models/backbones/resnet.yaml
+  - datasets: instance_segmentation       # Loads configs/datasets/instance_segmentation.yaml
+  - hooks: hooks # Loads configs/hooks/hooks.yaml
+  - transforms: transforms_skittlez # Loads configs/transforms/transforms_skittlez.yaml
+  - optimizers: adamw # Loads configs/optimizers/adamw.yaml
+  - schedulers: warmup_cosine_decay # Loads configs/schedulers/warmup_cosine_decay.yaml
+  - evaluation: evaluator        # Loads configs/evaluation/evaluator.yaml
+  - logging: logging          # Loads configs/logging/logging.yaml
+  - visualizer: visualizer # Loads configs/visualizer/visualizer.yaml
+  - checkpoint: checkpoint # Loads configs/checkpoint/checkpoint.yaml
+  - deepspeed: deepspeed # Loads configs/deepspeed/deepspeed.yaml
+  - clusters: local # Loads configs/clusters/slurm_multinode.yaml
+  - _self_  # self reference last to allow for overrides
+
+# overrides
+# ----------------
+
+# Backbone (TODO: not technically an override, but probably should be) 
+backbone_target: finetune.models.backbones.resnet.resnet50 # options: resnet50, resnet101, resnet152
+backbone_out_channels: 512 # C5 = 2048
+
+models:
+  min_size: 256 
+  max_size: 256
+
+clusters:
+  batch_size: 1
+  total_cpus:               4          # total number of cpus to use
+  total_gpus:               1          # total number of gpus to use
+  gpus_per_worker:          1          # number of gpus to use per node
+  mem_per_worker:           31000      # memory per node
+  cpus_per_worker:          4          # number of cpus to use per node  
+  workers:                  1          # number of nodes to use 
+
+checkpoint:
+  resume_run: false # whether to resume from a previous run
+  load_checkpointdir: none
+  load_chekpoint_prefix: best_model
+  state_dict_filter: none
+  checkpoint_manager:
+    _target_: finetune.utils.checkpoint.CheckpointManager
+    checkpointdir: ${outdir}/checkpoints # directory to save checkpoints
+    engine: ${engine} # engine to use for training
+    max_keep: 3 # maximum number of checkpoints to keep
+
+evaluation:
+  val_begin: 0
+  val_interval: 1
+
+logging:
+  outdir: /clusterfs/nvme/segment_4d/test_17
+  logdir: ${outdir}/logs
+
+# ----------------
+
+# Model type
+network: maskrcnn
+
+# engine type
+engine: deepspeed
+
+# Trainer type
+trainer: finetune.train.loops.EpochBasedTrainer
+
+# training quantization
+quantization: float16 # data type for training, options: float32, float16
+
+# base output directory for logs, checkpoints, etc.
+outdir: /clusterfs/nvme/segment_4d/test_17

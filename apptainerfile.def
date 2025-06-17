@@ -1,12 +1,8 @@
 Bootstrap: localimage
-From: /clusterfs/nvme/hph/env_images/pytorch_25.01-py3.sif
+From: /clusterfs/nvme/hph/env_images/develop_torch_cuda_12_8.sif
 Stage: base
 
 %environment
-export RUNNING_IN_DOCKER=TRUE
-export TERM=xterm-256color
-export DS_BUILD_FUSED_LAMB=1
-export DS_BUILD_FUSED_ADAM=1
 export CUDA_HOME=/usr/local/cuda
 export PATH=$CUDA_HOME/bin:$PATH
 export CC=/usr/bin/gcc
@@ -14,23 +10,12 @@ export CXX=/usr/bin/g++
 
 %files
 ops3d          /workspace/ops3d
-requirements.txt /workspace/requirements.txt
 
 %post
 set -eux
-RUNNING_IN_DOCKER=TRUE
-TERM=xterm-256color
-echo "PS1='\e[97m\u\e[0m@\e[94m\h\e[0m:\e[35m\w\e[0m# '" >> /root/.bashrc
 
 apt-get update \
 && apt-get install -y --no-install-recommends \
-sudo \
-htop \
-cifs-utils \
-winbind \
-smbclient \
-sshfs \
-iputils-ping \
 build-essential \
 python3.12-dev \
 libpython3.12-dev \
@@ -44,7 +29,6 @@ ninja-build \
 # to allow cache dir to be used
 
 pip install --no-cache-dir \
-    -r /workspace/requirements.txt \
     -r /workspace/ops3d/requirements.txt
 
 # optionally, add flags for NVCC

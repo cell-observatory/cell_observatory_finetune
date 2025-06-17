@@ -1,0 +1,188 @@
+defaults:
+  # - trainer: epoch_based_trainer # Loads configs/trainers/epoch_based_trainer.yaml
+  - models: encoder_decoder # Loads configs/models/encoder_decoder.yaml
+  - models/preprocessors: preprocessor # Loads configs/models/preprocessors/preprocessor.yaml
+  - models/backbones: masked_encoder_wrapper # Loads configs/models/backbones/masked_encoder_wrapper.yaml
+  - models/heads: masked_predictor_wrapper # Loads configs/models/heads/masked_predictor_wrapper.yaml
+  - models/patch_embeddings: patch_embedding # Loads configs/models/patch_embeddings/patch_embedding.yaml
+  - hooks: hooks # Loads configs/hooks/hooks.yaml
+  - losses: mae_loss # Loads configs/losses/mae_loss.yaml
+  - datasets: channel_split # Loads configs/datasets/channel_split.yaml
+  - transforms: transforms_channel_split # Loads configs/transforms/transforms_channel_split.yaml
+  - optimizers: adamw # Loads configs/optimizers/adamw.yaml
+  - schedulers: warmup_cosine_decay # Loads configs/schedulers/warmup_cosine_decay.yaml
+  - evaluation: evaluator        # Loads configs/evaluation/evaluator.yaml
+  - logging: logging          # Loads configs/logging/logging.yaml
+  - visualization: visualizer # Loads configs/visualizer/visualizer.yaml
+  - checkpoint: checkpoint # Loads configs/checkpoint/checkpoint.yaml
+  - deepspeed: deepspeed # Loads configs/deepspeed/deepspeed.yaml
+  - clusters: local # Loads configs/clusters/slurm_multinode.yaml
+  - _self_  # self reference last to allow for overrides
+
+# overrides
+# ----------------
+
+clusters:
+  mount_path: /clusterfs/vast/matthewmueller/dataTest/2025
+  batch_size:               2          # NOTE: batch size should divide im2col_step in deformable attn
+  worker_batch_size:        1
+  total_cpus:               8          # total number of cpus to use
+  total_gpus:               2          # total number of gpus to use
+  gpus_per_worker:          1          # number of gpus to use per node
+  mem_per_worker:           31000      # memory per node
+  cpus_per_worker:          4          # number of cpus to use per node  
+  workers:                  2          # number of nodes to use 
+
+models:
+  masking: false # enable masking
+  backbones:
+    channel_predict: false
+    temporal_patch_size: 1
+    axial_patch_size: 16 
+    lateral_patch_size: 16
+    # TODO: unify layout between data structures and patch_embeddings
+    input_fmt: BTZYXC
+    input_shape: 
+      - 1    # B
+      - 1    # T
+      - 128  # Z
+      - 128  # Y
+      - 128  # X 
+      - 1    # C
+  heads:
+    output_embed_dim: 4096
+    channel_predict: false
+    # TODO: unify layout between data structures and patch_embeddings
+    input_fmt: BTZYXC
+    input_shape: 
+      - 1    # B
+      - 1    # T
+      - 128  # Z
+      - 128  # Y
+      - 128  # X 
+      - 1    # C
+  losses:
+    reduction: mean
+  patch_embeddings:
+    input_shape:
+      - 1    # B
+      - 1    # T
+      - 128  # Z
+      - 128  # Y
+      - 128  # X 
+      - 1  # C
+    channels: 1
+
+datasets:
+  split:  0.0
+  channel_in: 1
+  num_classes: 1   
+  input_format: 
+    _target_: finetune.data.structures.data_objects.data_shapes.MULTICHANNEL_4D_HYPERCUBE
+    value: TZYXC
+
+  input_shape: 
+    - 1    # T
+    - 128
+    - 128
+    - 128
+    - 1    # C
+  patch_shape: 
+    - ${models.backbones.temporal_patch_size} # T
+    - ${models.backbones.lateral_patch_size} # Z
+    - ${models.backbones.axial_patch_size} # Y
+    - ${models.backbones.axial_patch_size} # X
+    - 1 # C
+  databases:
+    dotenv_path: /clusterfs/nvme/hph/git_managed/env/credentials.env
+
+    db_readpath: /clusterfs/nvme/segment_4d/testing2/db_tables_test19/metadata_table_test2.feather
+    db_savepath: /clusterfs/nvme/segment_4d/testing2/db_tables_test19/metadata_table_test2.feather
+
+    db_read_method: "feather"
+    db_save_method: "feather"
+
+    load_cached_db: true
+    force_create_db: false
+
+    data_cubes_table: "prepared_cubes"
+    label_cubes_table: null
+
+    table_specs:
+      _target_: finetune.data.databases.schema.TableSchemaList
+      schemas:
+        - _target_: finetune.data.databases.schema.DB_TableSchema
+          table: "prepared_tiles_view"
+          attributes:
+            prepared_id: null
+            tile_name: null
+            server_folder: null
+            output_folder: null
+            time_size: null
+            channel_size: null
+            cube_size: null
+            z_start: null
+            y_start: null
+            x_start: null
+  dataset:
+    _target_: finetune.data.datasets.channel_split_dataset.ChannelSplitDataset 
+    db: null
+    transforms: null
+    input_format: 
+      _target_: finetune.data.structures.data_objects.data_shapes.MULTICHANNEL_4D_HYPERCUBE
+      value: TZYXC
+    # not used for channel_split
+    key_cols:
+      - id
+      - t0
+      - t1
+      - z0
+      - y0
+      - x0
+
+checkpoint:
+  # for resuming training from previous checkpoint
+  resume_run: true # whether to resume from a previous run
+  load_checkpointdir: /clusterfs/nvme/segment_4d/test_17/checkpoints
+  checkpoint_tag: latest_model
+  # TODO: make a helper that infers this from folder
+  num_ckpt_shards: 2
+  # state_dict_filter_fn: null
+
+  # used by Ray Report
+  ray_checkpoint_config:
+    num_to_keep: 3
+    # keeping this as step_loss for now
+    # but probably better to use ${evaluation.val_metric}
+    checkpoint_score_attribute: step_loss
+    checkpoint_score_order: min
+  
+  checkpoint_manager:
+    _target_: finetune.utils.checkpoint.CheckpointManager
+    checkpointdir: ${outdir}/checkpoints # directory to save checkpoints
+    engine: ${engine} # engine to use for training
+    max_keep: 3 # maximum number of checkpoints to keep
+
+evaluation:
+  val_begin: 0
+  val_interval: 1
+
+logging:
+  logdir: ${outdir}/logs
+
+# ----------------
+
+# Model type
+network: mae
+
+# engine type
+engine: deepspeed
+
+# trainer type
+trainer: finetune.train.loops.EpochBasedTrainer
+
+# training quantization
+quantization: float16 # data type for training, options: float32, float16
+
+# base output directory for logs, checkpoints, etc.
+outdir: /clusterfs/nvme/segment_4d/test_17

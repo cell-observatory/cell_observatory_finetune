@@ -1,0 +1,41 @@
+defaults:
+  - _self_
+
+_target_: finetune.models.backbones.masked_encoder_wrapper.MaskedEncoderWrapper
+
+channel_predict: false # perform channel predict task
+num_channels: ${datasets.channel_in} # number of channels in input data
+
+# template options:
+# 'me-tiny',
+# 'me-small',
+# 'me-base',
+# 'me-large',
+# 'me-huge',
+# 'me-giant',
+# 'me-gigantic'
+
+model_template: me # custom use `embed_dim`, `depth`, `num_heads` and `mlp_ratio` to config model
+# input_fmt: ${datasets.input_format}
+# TODO: unify layout between data structures and patch_embeddings
+input_fmt: BTZYXC
+input_shape: ${datasets.input_shape}
+lateral_patch_size: 16
+axial_patch_size: 16
+temporal_patch_size: 1
+embed_dim: 768
+depth: 12
+num_heads: 12
+mlp_ratio: 4.0
+proj_drop_rate: 0.0
+att_drop_rate: 0.0
+drop_path_rate: 0.1
+init_std: 0.02
+fixed_dropout_depth: False
+# norm layers: 'RmsNorm', 'LayerNorm', 'SyncBatchNorm', 'GroupNorm' 
+norm_layer: RmsNorm
+# act layers: 'GELU', 'SiLU', 'LeakyReLU', 'GLU', 'Sigmoid', 'Tanh'
+act_layer: SiLU
+# mlp layers: 'Mlp', 'SwiGLU'
+mlp_layer: SwiGLU
+use_conv_proj: False

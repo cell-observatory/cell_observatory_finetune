@@ -1,0 +1,92 @@
+_target_: finetune.models.meta_arch.mask_rcnn.MaskRCNN
+
+skip_resize: false # set to true to skip resizing in transforms
+skip_normalize: true # set to true to skip normalization in transforms
+
+channels: ${datasets.channel_in}
+image_mean: ${datasets.dataset_mean}
+image_std: ${datasets.dataset_std}
+
+min_size: 256 # images rescaled such that shorter size is min_size
+max_size: 256
+
+# NOTE: many of the parameters are (and must be) overwritten 
+#       in the main config file for each model configuration
+#       the contents below are the default values that need to
+#       be specified
+
+# preprocessor
+preprocessor:
+  _target_: finetune.models.meta_arch.preprocessor.PreProcessor
+  sample_object: "DATA_SAMPLE" 
+
+# RPN config
+rpn_anchor_generator:
+  _target_: finetune.models.utils.proposal_generators.anchor_generator.AnchorGenerator
+  sizes:
+    - [16, 24, 32]
+    - [32, 48, 64]
+  aspect_ratios:
+    - [0.5, 1.0, 2.0]
+    - [0.5, 1.0, 2.0]
+  aspect_ratios_z:
+    - [0.5, 1.0, 2.0]
+    - [0.5, 1.0, 2.0]
+rpn_head: 
+  _target_: finetune.models.utils.proposal_generators.rpn_head.RPNHead
+  in_channels: ${backbone_out_channels} 
+  num_anchors: 27 # 3 sizes * 3 aspect ratios * 3 aspect ratios_z (TODO: make this dynamic)
+rpn_pre_nms_top_n_train: 2000 # per image not per batch
+rpn_pre_nms_top_n_test: 1000
+rpn_post_nms_top_n_train: 2000
+rpn_post_nms_top_n_test: 1000
+rpn_nms_thresh: 0.7
+rpn_fg_iou_thresh: 0.7
+rpn_bg_iou_thresh: 0.3
+rpn_batch_size_per_image: 256 # used for loss computation in RPN (nr of positive samples + nr of negative samples considered)
+rpn_positive_fraction: 0.5 # used for loss computation in RPN (nr of positive samples / total samples)
+rpn_score_thresh: 0.0 # filter out low scoring objects 
+
+# Box config
+box_roi_pool:
+  _target_: finetune.models.utils.poolers.MultiScaleRoIAlign
+  featmap_names: ${output_features}
+  output_size: 7
+  sampling_ratio: 2
+box_head: 
+  _target_: finetune.models.meta_arch.faster_rcnn.TwoMLPHead
+  representation_size: 1024
+  backbone_out_channels: ${backbone_out_channels} 
+  roi_pool_output_size:
+    - ${models.box_roi_pool.output_size}
+    - ${models.box_roi_pool.output_size}
+    - ${models.box_roi_pool.output_size}
+box_predictor: # box class logits and bbox regressor
+  _target_: finetune.models.meta_arch.faster_rcnn.FastRCNNPredictor
+  in_channels: 1024
+  num_classes: ${datasets.num_classes}
+box_score_thresh: 0.05 # filter out low scoring boxes (TODO: see if this should be higher)
+box_nms_thresh: 0.5 # used in ROI_Head for post-processing of box predictions
+box_detections_per_img: 100 # keep only top k detections per image in post-processing (TODO: Consider making this higher/lower)
+box_fg_iou_thresh: 0.5
+box_bg_iou_thresh: 0.5
+box_batch_size_per_image: 512 # used in subsampling of positive and negative samples for training of ROI_Heads (only used in training)
+box_positive_fraction: 0.25 # positive fraction of samples in subsampling
+bbox_reg_weights: null # weights for encoding/decoding of bboxes 
+
+# Mask config
+mask_roi_pool:
+  _target_: finetune.models.utils.poolers.MultiScaleRoIAlign
+  featmap_names: ${output_features}
+  output_size: 14 # ROI pooling output size
+  sampling_ratio: 2 # grid subsampling 
+mask_head: 
+  _target_: finetune.models.meta_arch.mask_rcnn.MaskRCNNHeads
+  in_channels: ${backbone_out_channels} # backbone_out_channels
+  layers: [256, 256, 256, 256]
+  dilation: 1
+mask_predictor: # mask class logits and mask regressor
+  _target_: finetune.models.meta_arch.mask_rcnn.MaskRCNNPredictor
+  in_channels: 256
+  dim_reduced: 256
+  num_classes: ${datasets.num_classes}

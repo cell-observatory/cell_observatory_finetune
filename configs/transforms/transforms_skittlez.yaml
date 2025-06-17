@@ -1,0 +1,13 @@
+defaults:
+  - _self_
+
+transforms_list:
+  - _target_: finetune.data.transforms.transforms.Normalize
+    # mean: ${dataset_mean}
+    # std: ${dataset_std}
+  - _target_: finetune.data.transforms.transforms.Resize
+    size: 
+      # - ${datasets.channel_in}
+      - 256
+      - 256 
+      - 256

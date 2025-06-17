@@ -1,0 +1,53 @@
+defaults:
+  - _self_
+
+_target_: finetune.data.databases.supabase_database.SupabaseDatabase
+
+dotenv_path: /clusterfs/nvme/hph/git_managed/env/credentials.env
+
+db_readpath: /clusterfs/nvme/segment_4d/testing2/db_tables_test19/metadata_table.feather
+db_savepath: /clusterfs/nvme/segment_4d/testing2/db_tables_test19/metadata_table.feather
+
+db_read_method: "feather"
+db_save_method: "feather"
+
+load_cached_db: false
+force_create_db: false
+
+data_cubes_table: "prepared_cubes"
+label_cubes_table: null
+
+# NOTE: the base specs should purposefully be kept 
+# minimal to allow for easy overrides in other configs
+# since dataclass classes are more tricky to override
+# in Hydra configs
+
+table_specs:
+  _target_: finetune.data.databases.schema.TableSchemaList
+  schemas:
+    - _target_: finetune.data.databases.schema.DB_TableSchema
+      table: "prepared_tiles_view"
+      attributes:
+        prepared_id: null
+        tile_name: null
+        server_folder: null
+        output_folder: null
+        time_size: null
+        channel_size: null
+        z_start: null
+        y_start: null
+        x_start: null
+        cube_size: null
+  # NOTE: does not exist yet 
+  # - _target_: finetune.data.databases.schema.DB_LabelSchema
+  #   table: "prepared_labels"
+  #   label_metadata:
+  #     id: null
+  #     server_folder: null
+  #     output_folder: null
+  #     z_start: null
+  #     z_end: null
+  #     y_start: null
+  #     y_end: null
+  #     x_start: null
+  #     x_end: null

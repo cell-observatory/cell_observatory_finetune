@@ -1,0 +1,7 @@
+defaults:
+  - _self_
+
+_target_: finetune.utils.visualization.Visualizer
+
+save_format: tiff
+save_metadata: none # only relevant when saving as zarr then specifies chunking/sharding metadata

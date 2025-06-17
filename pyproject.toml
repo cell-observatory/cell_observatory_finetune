@@ -3,17 +3,17 @@ requires = ["setuptools>=78.1.1", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "segmentation"
+name = "finetune"
 version = "0.1.0"
-description = "4D & 5D Segmentation Models"
+description = "4D & 5D decoders"
 authors = [{name = "Hugo Hamilton", email = "hph@berkeley.edu" }, {name = "Thayer Alshaabi"}]
 dynamic = ["dependencies"]
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools]
-package-dir = { "" = "src" }
+package-dir = { "" = "." }
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["segmentation*"]
+where   = ["."]
+include = ["finetune", "finetune.*"]

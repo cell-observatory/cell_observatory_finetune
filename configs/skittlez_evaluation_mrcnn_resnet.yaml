@@ -1,0 +1,49 @@
+defaults:
+  - /models: maskrcnn        # Loads configs/models/mask_rcnn.yaml
+  - /models/backbones: resnet     # Loads configs/models/backbones/resnet.yaml
+  - datasets: instance_segmentation_eval       # Loads configs/datasets/instance_segmentation_eval.yaml
+  - /metrics: metrics_skittlez_eval        # Loads configs/metrics/metrics_skittlez_eval.yaml
+  - /transforms: transforms_skittlez_eval # Loads configs/transforms/transforms_skittlez_eval.yaml
+  - deepspeed: deepspeed # Loads configs/deepspeed/deepspeed.yaml
+  - clusters: local # Loads configs/clusters/slurm_multinode.yaml
+  - _self_
+
+# overrides
+# ----------------
+
+# Backbone (TODO: not technically an override, but probably should be) 
+backbone_target: finetune.models.backbones.resnet.resnet50 # options: resnet50, resnet101, resnet152
+backbone_out_channels: 512 # C5 = 2048
+
+models:
+  min_size: 256 
+  max_size: 256
+
+clusters:
+  batch_size: 1
+  total_cpus:               4          # total number of cpus to use
+  total_gpus:               1          # total number of gpus to use
+  gpus_per_worker:          1          # number of gpus to use per node
+  mem_per_worker:           31000      # memory per node
+  cpus_per_worker:          4          # number of cpus to use per node  
+  workers:                  1          # number of nodes to use 
+
+# datasets:
+#   databases:
+#     db_readpath: ${outdir}/tables
+#     db_savepath: ${outdir}/tables
+
+# ----------------
+
+eval_type: skittlez_eval
+
+outdir: /clusterfs/nvme/segment_4d/test_17
+
+train_db_savedir: ${outdir}/db
+checkpointdir: ${outdir}/checkpoints
+results_dir: ${outdir}/evaluation
+
+# evaluator parameters
+warmup_iters: 1
+ckpt_suffix: "best" # generally, "last" or "best" or "latest"
+amp: fp16  # ["no", "fp16", "bf16"]

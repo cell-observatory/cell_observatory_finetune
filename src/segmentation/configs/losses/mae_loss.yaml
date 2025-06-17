@@ -1,4 +1,0 @@
-_target_: segmentation.layers.losses.MAELoss
-
-reduction: mean
-patchify: true

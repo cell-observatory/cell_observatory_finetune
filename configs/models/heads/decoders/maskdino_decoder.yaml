@@ -1,0 +1,33 @@
+_target_: finetune.models.heads.decoders.maskdino_decoder.MaskDINODecoder
+
+# TODO: make enum
+initialize_box_type: "mask2box" #"mask2box"
+initial_prediction_flag: True
+
+two_stage_flag: True
+decoder_num_layers: 9
+total_num_feature_levels: 2 # normally 4, p2-p5
+
+query_dim: 6
+num_queries: 300
+learn_query_embeddings: False
+
+noise_scale: 0.4
+denoise_queries_flag: "seg"  
+total_denosing_queries: 100
+
+# normally 256, needs to be defined s.t. channels/num_heads
+# divides d_stride=8 due to deform attn AND divides 3 due to sine embeddings
+mask_dim: 384 
+hidden_dim: 384 
+
+dropout: 0.0 
+activation: "relu" 
+num_heads: 8 
+in_channels: 384 # depends on pixel decoder, see maskdino_pixel_decoder.yaml
+num_classes: ${datasets.num_classes}
+feedforward_dim: 2048
+decoder_num_points: 4
+share_decoder_layers: False 
+enforce_input_projection: False
+return_intermediates_decoder: True

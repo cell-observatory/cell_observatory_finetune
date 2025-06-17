@@ -1,0 +1,24 @@
+defaults:
+  - _self_
+
+# for resuming training from previous checkpoint
+resume_run: true # whether to resume from a previous run
+load_checkpointdir: /clusterfs/nvme/segment_4d/test_17/checkpoints
+checkpoint_tag: latest_model
+# TODO: make a helper that infers this from folder
+num_ckpt_shards: 2
+# state_dict_filter_fn: null
+
+# used by Ray Report
+ray_checkpoint_config:
+  num_to_keep: 3
+  # keeping this as step_loss for now
+  # but probably better to use ${evaluation.val_metric}
+  checkpoint_score_attribute: step_loss
+  checkpoint_score_order: min
+
+checkpoint_manager:
+  _target_: finetune.utils.checkpoint.CheckpointManager
+  checkpointdir: ${outdir}/checkpoints # directory to save checkpoints
+  engine: ${engine} # engine to use for training
+  max_keep: 3 # maximum number of checkpoints to keep

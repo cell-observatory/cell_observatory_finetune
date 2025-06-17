@@ -1,0 +1,25 @@
+defaults:
+  - _self_
+
+logdir: ${outdir}/logs
+
+event_writers_list:
+  _target_: finetune.utils.logging.EventWriterList
+  
+event_writers:
+    - _target_: finetune.utils.logging.LocalEventWriter
+      # event_recorder and visualizer will be set 
+      # by the AsyncEventWriter
+      # when the event writers are initialized
+      # in the train loop
+      save_dir: ${logging.logdir}
+      step_scalars_prefix: step_logbook
+      epoch_scalars_prefix: epoch_logbook
+      tensors_prefix: predictions
+      scalars_save_format: csv
+      tensors_save_format: tiff
+    - _target_: finetune.utils.logging.RayEventWriter
+      checkpointdir: ${checkpoint.checkpoint_manager.checkpointdir}
+
+event_recorder:
+  _target_: finetune.utils.logging.EventRecorder
