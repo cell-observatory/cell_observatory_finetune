@@ -12,7 +12,7 @@ split:  0.1
 channel_in: 1
 num_classes: 2   
 input_format: 
-  _target_: finetune.data.structures.data_objects.data_shapes.MULTICHANNEL_4D_HYPERCUBE
+  _target_: cell_observatory_finetune.data.structures.data_objects.data_shapes.MULTICHANNEL_4D_HYPERCUBE
   value: TZYXC
 
 input_shape: 
@@ -31,19 +31,19 @@ patch_shape:
 dataloader_type: torch
 return_dataloader: true
 distributed_sampler: true
-collate_fn: finetune.data.utils.collate_channel_split
+collate_fn: cell_observatory_finetune.data.utils.collate_channel_split
 
 # TODO: remove, not used anymore
-worker_init_fn: finetune.data.utils.worker_init_fn 
+worker_init_fn: cell_observatory_finetune.data.utils.worker_init_fn 
 dataset_mean: [0,0,0,0,0]  
 dataset_std: [1,1,1,1,1]  
 
 dataset:
-  _target_: finetune.data.datasets.channel_split_dataset.ChannelSplitDataset 
+  _target_: cell_observatory_finetune.data.datasets.channel_split_dataset.ChannelSplitDataset 
   db: null
   transforms: null
   input_format: 
-    _target_: finetune.data.structures.data_objects.data_shapes.MULTICHANNEL_4D_HYPERCUBE
+    _target_: cell_observatory_finetune.data.structures.data_objects.data_shapes.MULTICHANNEL_4D_HYPERCUBE
     value: TZYXC
   # not used for channel_split
   key_cols:

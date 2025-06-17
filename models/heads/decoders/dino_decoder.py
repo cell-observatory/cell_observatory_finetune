@@ -26,9 +26,9 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
-from finetune.models.layers.layers import MLP
-from finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
-from finetune.models.layers.positional_encodings import PositionEmbeddingSine
+from cell_observatory_finetune.models.layers.layers import MLP
+from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
+from cell_observatory_finetune.models.layers.positional_encodings import PositionEmbeddingSine
 
 
 class DeformableTransformerDecoderLayer(nn.Module):

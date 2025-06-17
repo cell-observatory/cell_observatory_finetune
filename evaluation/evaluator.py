@@ -22,7 +22,7 @@ limitations under the License.
 import abc
 from collections import OrderedDict
 
-from finetune.utils.comm import is_main_process
+from cell_observatory_finetune.utils.comm import is_main_process
 
 
 class DatasetEvaluator(metaclass=abc.ABCMeta):

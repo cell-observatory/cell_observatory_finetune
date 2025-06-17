@@ -3,7 +3,7 @@ defaults:
 
 # NOTE: some configs here should be moved to own .yaml!!!
 
-_target_: finetune.models.heads.masked_predictor_wrapper.MaskedPredictorWrapper
+_target_: cell_observatory_finetune.models.heads.masked_predictor_wrapper.MaskedPredictorWrapper
 
 channel_predict: false # perform channel predict task
 num_channels: ${datasets.channel_in} # number of channels in input data

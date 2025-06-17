@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.nn.init import xavier_uniform_, constant_
 
-from finetune.data.ops.dcnv4_func import DCNv4Function
+from cell_observatory_finetune.data.ops.dcnv4_func import DCNv4Function
 
 
 class CenterFeatureScaleModule(nn.Module):

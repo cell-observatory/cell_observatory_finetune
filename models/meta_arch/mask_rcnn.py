@@ -39,10 +39,10 @@ from typing import Any, Callable, Optional
 from torch import nn
 from torchvision.ops import Conv3dNormActivation
 
-from finetune.models.backbones.resnet import resnet50
-from finetune.models.utils.poolers import MultiScaleRoIAlign
-from finetune.models.meta_arch.faster_rcnn import FasterRCNN
-from finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.models.backbones.resnet import resnet50
+from cell_observatory_finetune.models.utils.poolers import MultiScaleRoIAlign
+from cell_observatory_finetune.models.meta_arch.faster_rcnn import FasterRCNN
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
 
 
 class MaskRCNN(FasterRCNN):

@@ -5,8 +5,8 @@ from hydra import initialize, compose
 
 import torch
 
-from finetune.models.heads.roi_heads.roi_heads import maskrcnn_inference
-from finetune.train.registry import build_dependency_graph_and_instantiate
+from cell_observatory_finetune.models.heads.roi_heads.roi_heads import maskrcnn_inference
+from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
 
 
 @pytest.fixture(scope="module")

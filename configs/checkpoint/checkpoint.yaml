@@ -18,7 +18,7 @@ ray_checkpoint_config:
   checkpoint_score_order: min
 
 checkpoint_manager:
-  _target_: finetune.utils.checkpoint.CheckpointManager
+  _target_: cell_observatory_finetune.utils.checkpoint.CheckpointManager
   checkpointdir: ${outdir}/checkpoints # directory to save checkpoints
   engine: ${engine} # engine to use for training
   max_keep: 3 # maximum number of checkpoints to keep

@@ -4,9 +4,9 @@ from typing import Literal, Union, List, Dict, Any
 
 import torch
 
-from finetune.data.utils import save_file
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.utils import save_file
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
 
 
 class COLOR_MAP(Enum):

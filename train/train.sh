@@ -10,7 +10,7 @@
 #SBATCH --mem-per-cpu=31000
 #SBATCH --ntasks-per-node=1
 
-# USAGE: bash /clusterfs/nvme/hph/git_managed/finetune/train/train.sh
+# USAGE: bash /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/train/train.sh
 
 source /global/home/users/hph/miniconda3/etc/profile.d/conda.sh
 conda activate 4d_seg
@@ -19,7 +19,9 @@ conda activate 4d_seg
 
 # using tmp/torch_extensions causes stalling in DeepSpeed init 
 export TORCH_EXTENSIONS_DIR="/tmp/torch_extensions_$$"
-export PYTHONPATH="/clusterfs/nvme/hph/git_managed:/clusterfs/nvme/hph/git_managed/train_platform:${PYTHONPATH}"
+export PYTHONPATH="/clusterfs/nvme/hph/git_managed/cell_observatory_finetune:${PYTHONPATH}"
+export PYTHONPATH="/clusterfs/nvme/hph/git_managed/cell_observatory_finetune/cell_observatory_platform:${PYTHONPATH}"
+export PYTHONPATH="/clusterfs/nvme/hph/git_managed:${PYTHONPATH}"
 
 # CFG="config_mrcnn_resnet.yaml"
 # CFG="config_mrcnn_resnet_fpn.yaml"
@@ -33,4 +35,4 @@ CFG="config_channel_split_masked_predictor_mae.yaml"
 # CFG="config_denoise_dnmodel_mae.yaml"
 # CFG="config_channel_predict_masked_predictor_mae.yaml"
 
-python3 /clusterfs/nvme/hph/git_managed/finetune/train/train.py --config-name=${CFG}
+python3 /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/train/train.py --config-name=${CFG}

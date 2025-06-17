@@ -2,8 +2,8 @@ from typing import Optional
 
 from torch import nn
 
-from finetune.models.meta_arch.base_model import BaseModel
-from finetune.models.meta_arch.preprocessor import PreProcessor
+from cell_observatory_finetune.models.meta_arch.base_model import BaseModel
+from cell_observatory_finetune.models.meta_arch.preprocessor import PreProcessor
 
 
 class EncoderDecoder(BaseModel):

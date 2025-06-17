@@ -1,1 +1,1 @@
-_target_: finetune.train.loops.EpochBasedTrainer
+_target_: cell_observatory_finetune.train.loops.EpochBasedTrainer

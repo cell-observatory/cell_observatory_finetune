@@ -23,13 +23,13 @@ launcher_type: slurm # type of launcher to use
 framework: ray # framework to use for distributed training
 
 # Ray cluster configuration
-head_node_script: /clusterfs/nvme/hph/git_managed/finetune/clusters/ray_slurm_cluster_job.sh
-workers_script: /clusterfs/nvme/hph/git_managed/finetune/clusters/ray_slurm_workers.sh
-script: /clusterfs/nvme/hph/git_managed/finetune/train/train_segmentation.py
+head_node_script: /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/clusters/ray_slurm_cluster_job.sh
+workers_script: /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/clusters/ray_slurm_workers.sh
+script: /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/train/train_segmentation.py
 python_env: /usr/bin/python # python executable to use (if not using apptainer)                     
 job_name: ${network}_segmentation_multinode      # name of the job      
 mount_path: /clusterfs/nvme/segment_4d  # path to mount for the job
-src: /clusterfs/nvme/hph/git_managed/finetune # path to the repo directory
+src: /clusterfs/nvme/hph/git_managed/cell_observatory_finetune # path to the repo directory
 apptainer: /clusterfs/nvme/hph/env_images/develop_torch_cuda_12_8_ops3d_v2.sif # path to the apptainer image to use (if using container)
 
 task_names: []         # any additional arguments to pass to train run script

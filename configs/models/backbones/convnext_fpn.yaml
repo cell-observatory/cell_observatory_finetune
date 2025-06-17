@@ -3,7 +3,7 @@ defaults:
 
 # FPN
 
-_target_: finetune.models.backbones.fpn.BackboneWithFPN
+_target_: cell_observatory_finetune.models.backbones.fpn.BackboneWithFPN
 # NOTE: FPN may add an extra LastLevelMaxPool layer to the last feature map
 # Hence, the output feature maps may have len(return_layers) + 1 maps
 # return layers specifies which feature maps to run through the FPN

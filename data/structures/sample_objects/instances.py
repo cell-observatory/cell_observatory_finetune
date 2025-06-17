@@ -26,10 +26,10 @@ from typing import Any, List, Union, Dict
 import numpy as np
 import torch
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.labels import Labels
-from finetune.data.structures.data_objects.masks import BitMasks
-from finetune.data.structures.sample_objects.base_data_element import BaseDataElement
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.labels import Labels
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.structures.sample_objects.base_data_element import BaseDataElement
 
 BoolTypeTensor = Union[torch.BoolTensor, torch.cuda.BoolTensor]
 LongTypeTensor = Union[torch.LongTensor, torch.cuda.LongTensor]

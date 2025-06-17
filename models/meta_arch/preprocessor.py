@@ -3,8 +3,8 @@ from typing import Dict, Union
 
 import torch
 
-from finetune.data.structures.sample_objects.data_sample import DataSample
-from finetune.data.structures.sample_objects.base_data_element import BaseDataElement
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.sample_objects.base_data_element import BaseDataElement
 
 class SampleObjectType(Enum):
     DATA_SAMPLE = DataSample

@@ -1,4 +1,4 @@
-_target_: finetune.models.heads.encoders.maskdino_pixel_decoder.MaskDINOEncoder
+_target_: cell_observatory_finetune.models.heads.encoders.maskdino_pixel_decoder.MaskDINOEncoder
 
 # out channels and stride for backbone
 input_shape:

@@ -33,17 +33,17 @@ from ray.train import get_context
 import torch
 from deepspeed import initialize
 
-from finetune.train.utils import (
+from cell_observatory_finetune.train.utils import (
     get_optimizer,
     get_lr_scheduler,
     get_steps_per_epoch,
     resume_run
 )
-from finetune.train.hooks import HookBase
-from finetune.utils.logging import EventRecorder
-from finetune.utils.comm import inference_context
-from finetune.data.dataloaders import get_dataloader
-from finetune.train.registry import build_dependency_graph_and_instantiate
+from cell_observatory_finetune.train.hooks import HookBase
+from cell_observatory_finetune.utils.logging import EventRecorder
+from cell_observatory_finetune.utils.comm import inference_context
+from cell_observatory_finetune.data.dataloaders import get_dataloader
+from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
 
 
 logger = logging.getLogger("ray")
@@ -92,7 +92,7 @@ class BaseTrainer:
         writers = []
         for writer in w_cfgs:
             # TODO: is there a better way to do this?
-            if writer._target_ == "finetune.utils.logging.LocalEventWriter":
+            if writer._target_ == "cell_observatory_finetune.utils.logging.LocalEventWriter":
                 writer = instantiate(
                     writer,
                     event_recorder=recorder,
@@ -109,7 +109,7 @@ class BaseTrainer:
         for hc in h_cfgs:
             # inject writers into PeriodicWriter-like hooks
             # TODO: is there a better way to do this?
-            if hc._target_ == "finetune.train.hooks.PeriodicWriter":
+            if hc._target_ == "cell_observatory_finetune.train.hooks.PeriodicWriter":
                 hook = instantiate(hc, writers=event_writers)
             else:
                 hook = instantiate(hc)

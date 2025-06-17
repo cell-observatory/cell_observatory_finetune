@@ -2,7 +2,7 @@ defaults:
   - _self_
 
 transforms_list:
-  - _target_: finetune.data.transforms.transforms.Normalize
+  - _target_: cell_observatory_finetune.data.transforms.transforms.Normalize
     # mean: ${dataset_mean}
     # std: ${dataset_std}
   # - _target_: segmentation.data.transforms.transforms.Resize

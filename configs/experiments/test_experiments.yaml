@@ -1,7 +1,7 @@
 defaults:
   - _self_
 
-manager_script: /clusterfs/nvme/hph/git_managed/finetune/clusters/manager.py
+manager_script: /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/clusters/manager.py
 allocation_policy: streaming # job allocation policy: gang or streaming
 exclusive: true # whether to use exclusive node allocation
 cluster_partitions: # partitions to use
@@ -68,7 +68,7 @@ runs:
           label_tile: [1, 128, 128, 128]
 
           label_spec:
-            _target_: finetune.data.databases.schema.DB_LabelSchema
+            _target_: cell_observatory_finetune.data.databases.schema.DB_LabelSchema
             # table name based on database nomenclature
             table: "prepared"
             # since we don't have denoise
@@ -149,7 +149,7 @@ runs:
           label_tile: [1, 128, 128, 128]
 
           label_spec:
-            _target_: finetune.data.databases.schema.DB_LabelSchema
+            _target_: cell_observatory_finetune.data.databases.schema.DB_LabelSchema
             # table name based on database nomenclature
             table: "prepared"
             # since we don't have denoise

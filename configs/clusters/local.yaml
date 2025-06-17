@@ -6,7 +6,7 @@ launcher_type: local # type of launcher to use
 framework: ray # framework to use for distributed training
 
 # Ray cluster configuration
-script: /clusterfs/nvme/hph/git_managed/finetune/train/train_segmentation.py
+script: /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/train/train_segmentation.py
 # apptainer image to use for containerized workerloads
 apptainer: /clusterfs/nvme/hph/git_managed/env_images/develop_torch_cuda_12_8_ops3d.sif
 python: python # python executable to use (if not using apptainer)                     

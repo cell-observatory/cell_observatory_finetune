@@ -23,7 +23,7 @@ from ray.train import ScalingConfig, CheckpointConfig, RunConfig, FailureConfig
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from finetune.train.loops import train_loop_per_worker
+from cell_observatory_finetune.train.loops import train_loop_per_worker
 
 logger = logging.getLogger("ray")
 logger.setLevel(logging.DEBUG)

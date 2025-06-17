@@ -1,6 +1,6 @@
 import pytest
 
-from finetune.data.databases.supabase_database import SupabaseDatabase
+from cell_observatory_finetune.data.databases.supabase_database import SupabaseDatabase
 
 
 def test_supabase_fetch_and_init():

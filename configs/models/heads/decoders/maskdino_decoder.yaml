@@ -1,4 +1,4 @@
-_target_: finetune.models.heads.decoders.maskdino_decoder.MaskDINODecoder
+_target_: cell_observatory_finetune.models.heads.decoders.maskdino_decoder.MaskDINODecoder
 
 # TODO: make enum
 initialize_box_type: "mask2box" #"mask2box"

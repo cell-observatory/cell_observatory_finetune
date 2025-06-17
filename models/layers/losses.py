@@ -24,11 +24,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from finetune.models.layers.utils import batch_tensors
-from finetune.data.structures.data_objects import boxes
-from finetune.utils.comm import get_world_size, in_torch_dist
-from finetune.data.structures.data_objects.masks import project_masks_on_boxes
-from finetune.models.layers.utils import point_sample, get_uncertain_point_coords_with_randomness
+from cell_observatory_finetune.models.layers.utils import batch_tensors
+from cell_observatory_finetune.data.structures.data_objects import boxes
+from cell_observatory_finetune.utils.comm import get_world_size, in_torch_dist
+from cell_observatory_finetune.data.structures.data_objects.masks import project_masks_on_boxes
+from cell_observatory_finetune.models.layers.utils import point_sample, get_uncertain_point_coords_with_randomness
 
 
 # --------------------------------------------- GENERAL LOSSES ---------------------------------------------

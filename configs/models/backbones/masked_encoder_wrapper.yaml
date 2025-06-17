@@ -1,7 +1,7 @@
 defaults:
   - _self_
 
-_target_: finetune.models.backbones.masked_encoder_wrapper.MaskedEncoderWrapper
+_target_: cell_observatory_finetune.models.backbones.masked_encoder_wrapper.MaskedEncoderWrapper
 
 channel_predict: false # perform channel predict task
 num_channels: ${datasets.channel_in} # number of channels in input data

@@ -3,8 +3,8 @@ from typing import Union, Literal
 import torch
 from torch import nn
 
-from train_platform.training.masking import apply_masks
-from train_platform.models.maskedencoder import MaskedEncoder
+from cell_observatory_platform.training.masking import apply_masks
+from cell_observatory_platform.models.maskedencoder import MaskedEncoder
 
 
 class MaskedEncoderWrapper(MaskedEncoder):

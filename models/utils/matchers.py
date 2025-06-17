@@ -41,9 +41,9 @@ from torch import nn
 from torch import Tensor
 from torch.amp import autocast
 
-from finetune.models.layers.utils import point_sample
-from finetune.data.structures.data_objects.boxes import generalized_box_iou, box_cxcyczwhd_to_xyzxyz
-from finetune.models.layers.losses import batch_sigmoid_ce_loss, batch_sigmoid_ce_loss_jit, batch_dice_loss, batch_dice_loss_jit
+from cell_observatory_finetune.models.layers.utils import point_sample
+from cell_observatory_finetune.data.structures.data_objects.boxes import generalized_box_iou, box_cxcyczwhd_to_xyzxyz
+from cell_observatory_finetune.models.layers.losses import batch_sigmoid_ce_loss, batch_sigmoid_ce_loss_jit, batch_dice_loss, batch_dice_loss_jit
 
 
 # ------------------------------ ------------------------------ MASKRCNN ------------------------------ ------------------------------

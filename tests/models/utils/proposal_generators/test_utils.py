@@ -2,7 +2,7 @@ import pytest
 
 import torch
 
-from finetune.models.utils.samplers import samplers
+from cell_observatory_finetune.models.utils.samplers import samplers
 
 
 @pytest.fixture

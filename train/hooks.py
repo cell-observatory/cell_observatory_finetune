@@ -36,8 +36,8 @@ import torch
 from torch.profiler import ProfilerActivity
 from fvcore.common.timer import Timer
 
-from finetune.utils.logging import EventWriter
-from finetune.utils.comm import is_main_process, process_rank
+from cell_observatory_finetune.utils.logging import EventWriter
+from cell_observatory_finetune.utils.comm import is_main_process, process_rank
 
 
 logging.basicConfig(
@@ -476,7 +476,7 @@ class ModelSummaryHook(HookBase):
         self.input_shape = input_shape
 
     def before_train(self):
-        from finetune.train.utils import summarize_model
+        from cell_observatory_finetune.train.utils import summarize_model
         if is_main_process():
             summarize_model(
                 model=self.trainer.model,

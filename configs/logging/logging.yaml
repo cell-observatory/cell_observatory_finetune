@@ -4,10 +4,10 @@ defaults:
 logdir: ${outdir}/logs
 
 event_writers_list:
-  _target_: finetune.utils.logging.EventWriterList
+  _target_: cell_observatory_finetune.utils.logging.EventWriterList
   
 event_writers:
-    - _target_: finetune.utils.logging.LocalEventWriter
+    - _target_: cell_observatory_finetune.utils.logging.LocalEventWriter
       # event_recorder and visualizer will be set 
       # by the AsyncEventWriter
       # when the event writers are initialized
@@ -18,8 +18,8 @@ event_writers:
       tensors_prefix: predictions
       scalars_save_format: csv
       tensors_save_format: tiff
-    - _target_: finetune.utils.logging.RayEventWriter
+    - _target_: cell_observatory_finetune.utils.logging.RayEventWriter
       checkpointdir: ${checkpoint.checkpoint_manager.checkpointdir}
 
 event_recorder:
-  _target_: finetune.utils.logging.EventRecorder
+  _target_: cell_observatory_finetune.utils.logging.EventRecorder

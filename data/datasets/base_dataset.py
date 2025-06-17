@@ -9,12 +9,12 @@ from omegaconf import ListConfig
 
 from torch.utils.data import Dataset
 
-from finetune.data.databases.database import Database
-from finetune.data.structures.data_objects.data_shapes import (
+from cell_observatory_finetune.data.databases.database import Database
+from cell_observatory_finetune.data.structures.data_objects.data_shapes import (
     MULTICHANNEL_3D_HYPERCUBE,
     MULTICHANNEL_4D_HYPERCUBE
 )
-from finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
 
 
 class Compose:

@@ -4,13 +4,13 @@ from typing import Dict, Any
 import torch
 from torch.utils.data import get_worker_info
 
-from finetune.data.utils import read_zarr
+from cell_observatory_finetune.data.utils import read_zarr
 
-from finetune.data.structures.data_objects.image_list import ImageList
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.data_objects.image_list import ImageList
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
 
-from finetune.data.datasets.base_dataset import BaseDataset
+from cell_observatory_finetune.data.datasets.base_dataset import BaseDataset
 
 
 class ChannelPredictDataset(BaseDataset):

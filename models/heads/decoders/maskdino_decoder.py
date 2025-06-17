@@ -24,12 +24,12 @@ import fvcore.nn.weight_init as weight_init
 import torch
 from torch import nn
 
-from finetune.models.layers.activations import get_activation
-from finetune.models.layers.utils import compute_unmasked_ratio
-from finetune.data.structures.data_objects.masks import BitMasks
-from finetune.models.layers.layers import Conv3d, MLP, inverse_sigmoid
-from finetune.data.structures.data_objects.boxes import box_xyzxyz_to_cxcyczwhd, masks_to_boxes, masks_to_boxes_v2
-from finetune.models.heads.decoders.dino_decoder import TransformerDecoder, DeformableTransformerDecoderLayer
+from cell_observatory_finetune.models.layers.activations import get_activation
+from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.models.layers.layers import Conv3d, MLP, inverse_sigmoid
+from cell_observatory_finetune.data.structures.data_objects.boxes import box_xyzxyz_to_cxcyczwhd, masks_to_boxes, masks_to_boxes_v2
+from cell_observatory_finetune.models.heads.decoders.dino_decoder import TransformerDecoder, DeformableTransformerDecoderLayer
 
 
 class MaskDINODecoder(nn.Module):

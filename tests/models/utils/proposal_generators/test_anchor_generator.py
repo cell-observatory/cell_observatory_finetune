@@ -2,7 +2,7 @@ import pytest
 
 import torch
 
-from finetune.models.proposal_generators.anchor_generator import AnchorGenerator
+from cell_observatory_finetune.models.proposal_generators.anchor_generator import AnchorGenerator
 
 
 @pytest.fixture

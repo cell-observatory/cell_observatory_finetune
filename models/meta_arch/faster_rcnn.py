@@ -40,16 +40,16 @@ from torch import nn
 import torch.nn.functional as F
 from torchvision.ops import misc as misc_nn_ops
 
-from finetune.models.meta_arch.preprocessor import PreProcessor
-from finetune.models.utils.proposal_generators.rpn_head import RPNHead
-from finetune.models.utils.proposal_generators.rpn import RegionProposalNetwork
-from finetune.models.utils.proposal_generators.anchor_generator import AnchorGenerator
+from cell_observatory_finetune.models.meta_arch.preprocessor import PreProcessor
+from cell_observatory_finetune.models.utils.proposal_generators.rpn_head import RPNHead
+from cell_observatory_finetune.models.utils.proposal_generators.rpn import RegionProposalNetwork
+from cell_observatory_finetune.models.utils.proposal_generators.anchor_generator import AnchorGenerator
 
-from finetune.models.utils.poolers import MultiScaleRoIAlign
-from finetune.models.heads.roi_heads import RoIHeads
-from finetune.models.meta_arch.generalized_rcnn import GeneralizedRCNN
+from cell_observatory_finetune.models.utils.poolers import MultiScaleRoIAlign
+from cell_observatory_finetune.models.heads.roi_heads import RoIHeads
+from cell_observatory_finetune.models.meta_arch.generalized_rcnn import GeneralizedRCNN
 
-from finetune.models.utils.transforms import GeneralizedRCNNTransform
+from cell_observatory_finetune.models.utils.transforms import GeneralizedRCNNTransform
 
 
 def _default_anchorgen():

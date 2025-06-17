@@ -30,10 +30,10 @@ import torch.nn.functional as F
 import fvcore.nn.weight_init as weight_init
 from timm.models.layers import DropPath, Mlp
 
-from finetune.models.layers.norms import get_norm
-from finetune.models.layers.layers import PatchEmbed,CNNBlockBase, Conv3d
-from finetune.models.layers.positional_encodings import add_decomposed_rel_pos, get_abs_pos
-from finetune.models.layers.utils import (window_partition, 
+from cell_observatory_finetune.models.layers.norms import get_norm
+from cell_observatory_finetune.models.layers.layers import PatchEmbed,CNNBlockBase, Conv3d
+from cell_observatory_finetune.models.layers.positional_encodings import add_decomposed_rel_pos, get_abs_pos
+from cell_observatory_finetune.models.layers.utils import (window_partition, 
                                        window_unpartition,
                                        _assert_strides_are_log2_contiguous)
 

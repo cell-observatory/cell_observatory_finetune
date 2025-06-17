@@ -1,4 +1,4 @@
-_target_: finetune.data.masking.mask_generator.MaskGenerator
+_target_: cell_observatory_finetune.data.masking.mask_generator.MaskGenerator
 
 data_layout: ${datasets.input_format}
 input_shape: ${datasets.input_shape}

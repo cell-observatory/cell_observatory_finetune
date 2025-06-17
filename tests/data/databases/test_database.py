@@ -2,8 +2,8 @@ import pytest
 from hydra.utils import instantiate
 from hydra import initialize, compose                               
 
-from finetune.data.utils import print_db
-from finetune.data.databases.database import SQLiteDatabase
+from cell_observatory_finetune.data.utils import print_db
+from cell_observatory_finetune.data.databases.database import SQLiteDatabase
 
 
 @pytest.fixture(scope="module")

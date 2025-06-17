@@ -4,9 +4,9 @@ import torch
 from hydra.utils import instantiate
 from hydra import initialize, compose
 
-from finetune.data.databases.supabase_database import SupabaseDatabase
-from finetune.data.structures.sample_objects.data_sample import DataSample
-from finetune.data.datasets.channel_split_dataset import ChannelSplitDataset
+from cell_observatory_finetune.data.databases.supabase_database import SupabaseDatabase
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.datasets.channel_split_dataset import ChannelSplitDataset
 
 
 @pytest.fixture(scope="module")

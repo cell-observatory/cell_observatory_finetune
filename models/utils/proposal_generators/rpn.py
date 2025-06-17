@@ -39,13 +39,13 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
-from finetune.models.utils import matchers
-from finetune.models.utils import samplers
-from finetune.data.structures.data_objects import boxes
-from finetune.data.structures.data_objects.image_list import ImageList
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.models.utils.proposal_generators.anchor_generator import AnchorGenerator
-from finetune.data.structures.data_objects.boxes import (BoxCoder, box_iou, clip_boxes_to_image,
+from cell_observatory_finetune.models.utils import matchers
+from cell_observatory_finetune.models.utils import samplers
+from cell_observatory_finetune.data.structures.data_objects import boxes
+from cell_observatory_finetune.data.structures.data_objects.image_list import ImageList
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.models.utils.proposal_generators.anchor_generator import AnchorGenerator
+from cell_observatory_finetune.data.structures.data_objects.boxes import (BoxCoder, box_iou, clip_boxes_to_image,
                                                         remove_small_boxes, batched_nms)
 
 

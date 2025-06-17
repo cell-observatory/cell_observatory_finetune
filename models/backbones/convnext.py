@@ -59,7 +59,7 @@ import torch.nn as nn
 
 from timm.models.layers import DropPath
 
-from finetune.models.layers.norms import get_norm
+from cell_observatory_finetune.models.layers.norms import get_norm
 
 logging.basicConfig(
     stream=sys.stdout,

@@ -1,4 +1,4 @@
-from finetune.data.ops.dcnv4 import DCNv4
+from cell_observatory_finetune.data.ops.dcnv4 import DCNv4
 
 
 def DCN(channels=64,

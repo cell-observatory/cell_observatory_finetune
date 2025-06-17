@@ -3,7 +3,7 @@ import numpy as np
 
 import torch
 
-from finetune.data.structures.sample_objects.base_data_element_old import BaseDataElement
+from cell_observatory_finetune.data.structures.sample_objects.base_data_element_old import BaseDataElement
 
 
 @pytest.fixture

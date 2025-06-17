@@ -5,8 +5,8 @@ import pandas as pd
 
 import torch
 
-from finetune.utils.visualization import Visualizer
-from finetune.utils.logging import EventRecorder, LocalEventWriter
+from cell_observatory_finetune.utils.visualization import Visualizer
+from cell_observatory_finetune.utils.logging import EventRecorder, LocalEventWriter
 
 
 TMP_PATH="/clusterfs/nvme/hph/git_managed/scrap/scrap"

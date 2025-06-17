@@ -3,7 +3,7 @@ defaults:
 
 # NOTE: not used change how masked encoder wrapper and patch_embeddings are initialized!!!
 
-_target_: train_platform.models.patch_embeddings.PatchEmbedding
+_target_: cell_observatory_platform.models.patch_embeddings.PatchEmbedding
 
 # input_fmt: ${datasets.input_format}
 # TODO: unify layout between data structures and patch_embeddings

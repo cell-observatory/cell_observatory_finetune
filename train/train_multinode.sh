@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# USAGE: bash /clusterfs/nvme/hph/git_managed/finetune/train/train_multinode.sh
+# USAGE: bash /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/train/train_multinode.sh
 
 # Available configurations:
 
@@ -16,4 +16,4 @@ CFG="config_channel_split_masked_predictor_mae.yaml"
 # CFG="config_denoise_dnmodel_mae.yaml"
 # CFG="config_channel_predict_masked_predictor_mae.yaml"
 
-python /clusterfs/nvme/hph/git_managed/finetune/clusters/manager.py --config-name=${CFG}
+python /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/clusters/manager.py --config-name=${CFG}

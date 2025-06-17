@@ -1,4 +1,4 @@
-_target_: finetune.models.layers.losses.DETR_Set_Loss
+_target_: cell_observatory_finetune.models.layers.losses.DETR_Set_Loss
 
 losses: ["labels", "masks", "boxes"]
 denoise_losses: ["labels", "masks", "boxes"]

@@ -23,17 +23,17 @@ import torch
 from torch import nn
 from torch.nn import functional as F
  
-from finetune.utils.memory import retry_if_cuda_oom
+from cell_observatory_finetune.utils.memory import retry_if_cuda_oom
 
-from finetune.models.meta_arch.base_model import BaseModel
-from finetune.models.meta_arch.preprocessor import PreProcessor
+from cell_observatory_finetune.models.meta_arch.base_model import BaseModel
+from cell_observatory_finetune.models.meta_arch.preprocessor import PreProcessor
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.labels import Labels
-from finetune.data.structures.data_objects.masks import BitMasks
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.sample_objects.data_sample import DataSample
-from finetune.data.structures.data_objects.boxes import box_cxcyczwhd_to_xyzxyz
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.labels import Labels
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.data_objects.boxes import box_cxcyczwhd_to_xyzxyz
 
 
 # NOTE: removed pixel_mean and pixel_std, perform normalization in dataloader transforms

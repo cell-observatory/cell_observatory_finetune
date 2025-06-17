@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from finetune.data.structures.data_objects.image_list import ImageList
+from cell_observatory_finetune.data.structures.data_objects.image_list import ImageList
 
 
 def rand_img(shape, device="cpu", val=1.0):

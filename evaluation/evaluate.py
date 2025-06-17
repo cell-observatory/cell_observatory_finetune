@@ -30,13 +30,13 @@ from typing import List, Union, Dict, Any, Callable, Optional, Sequence, Tuple
 
 import torch
 
-from finetune.data.utils import move_to_device
-from finetune.utils.comm import inference_context
-from finetune.data.dataloaders import get_dataloader
-from finetune.utils.checkpoint import load_checkpoint
-from finetune.data.structures.sample_objects.data_sample import DataSample
-from finetune.train.registry import build_dependency_graph_and_instantiate
-from finetune.evaluation.evaluator import DatasetEvaluator, DatasetEvaluators
+from cell_observatory_finetune.data.utils import move_to_device
+from cell_observatory_finetune.utils.comm import inference_context
+from cell_observatory_finetune.data.dataloaders import get_dataloader
+from cell_observatory_finetune.utils.checkpoint import load_checkpoint
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
+from cell_observatory_finetune.evaluation.evaluator import DatasetEvaluator, DatasetEvaluators
 
 import hydra
 from omegaconf import DictConfig, OmegaConf, open_dict

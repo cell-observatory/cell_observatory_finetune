@@ -29,12 +29,12 @@ from torch.nn.init import normal_
 
 import fvcore.nn.weight_init as weight_init
 
-from finetune.models.layers.layers import Conv3d
-from finetune.models.layers.activations import get_activation
-from finetune.models.layers.utils import compute_unmasked_ratio
-from finetune.models.layers.positional_encodings import PositionEmbeddingSine
+from cell_observatory_finetune.models.layers.layers import Conv3d
+from cell_observatory_finetune.models.layers.activations import get_activation
+from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio
+from cell_observatory_finetune.models.layers.positional_encodings import PositionEmbeddingSine
 
-from finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
+from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
 
 
 class MSDeformAttnTransformerEncoderLayer(nn.Module):

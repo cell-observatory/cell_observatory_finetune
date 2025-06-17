@@ -32,10 +32,10 @@ import torch.utils.checkpoint as checkpoint
 
 from timm.models.layers import DropPath, trunc_normal_
 
-from finetune.models.ops.dcn import DCN
-from finetune.models.layers.norms import get_norm
-from finetune.models.ops.dcnv4 import DCNv4
-from finetune.models.layers.activations import get_activation
+from cell_observatory_finetune.models.ops.dcn import DCN
+from cell_observatory_finetune.models.layers.norms import get_norm
+from cell_observatory_finetune.models.ops.dcnv4 import DCNv4
+from cell_observatory_finetune.models.layers.activations import get_activation
 
 
 

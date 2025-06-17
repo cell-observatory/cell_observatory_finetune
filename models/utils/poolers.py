@@ -39,8 +39,8 @@ import torch.fx
 import torchvision
 from torch import nn, Tensor
 
-from finetune.data.structures.data_objects.boxes import box_volume
-from finetune.models.ops.roi_align_nd import RoIAlign3DFunction
+from cell_observatory_finetune.data.structures.data_objects.boxes import box_volume
+from cell_observatory_finetune.models.ops.roi_align_nd import RoIAlign3DFunction
 
 
 # TODO: (eellison) T54974082 https://github.com/pytorch/pytorch/issues/26744/pytorch/issues/26744

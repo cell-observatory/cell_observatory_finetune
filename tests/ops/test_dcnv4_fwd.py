@@ -6,7 +6,7 @@ import pytest
 
 import torch
 
-from finetune.models.ops.dcnv4_func import DCNv4Function, dcn_core_pytorch
+from cell_observatory_finetune.models.ops.dcnv4_func import DCNv4Function, dcn_core_pytorch
 
 
 cuda_is_available = torch.cuda.is_available()

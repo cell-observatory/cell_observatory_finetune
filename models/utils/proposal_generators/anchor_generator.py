@@ -38,7 +38,7 @@ from typing import List, Optional
 import torch
 from torch import nn, Tensor
 
-from finetune.data.structures.data_objects.image_list import ImageList
+from cell_observatory_finetune.data.structures.data_objects.image_list import ImageList
 
 
 class AnchorGenerator(nn.Module):

@@ -1,7 +1,7 @@
 defaults:
   - _self_
 
-_target_: finetune.data.databases.supabase_database.SupabaseDatabase
+_target_: cell_observatory_finetune.data.databases.supabase_database.SupabaseDatabase
 
 dotenv_path: /clusterfs/nvme/hph/git_managed/env/credentials.env
 
@@ -23,9 +23,9 @@ label_cubes_table: null
 # in Hydra configs
 
 table_specs:
-  _target_: finetune.data.databases.schema.TableSchemaList
+  _target_: cell_observatory_finetune.data.databases.schema.TableSchemaList
   schemas:
-    - _target_: finetune.data.databases.schema.DB_TableSchema
+    - _target_: cell_observatory_finetune.data.databases.schema.DB_TableSchema
       table: "prepared_tiles_view"
       attributes:
         prepared_id: null
@@ -39,7 +39,7 @@ table_specs:
         x_start: null
         cube_size: null
   # NOTE: does not exist yet 
-  # - _target_: finetune.data.databases.schema.DB_LabelSchema
+  # - _target_: cell_observatory_finetune.data.databases.schema.DB_LabelSchema
   #   table: "prepared_labels"
   #   label_metadata:
   #     id: null

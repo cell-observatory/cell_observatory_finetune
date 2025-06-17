@@ -2,8 +2,8 @@ import abc
 from typing import Optional, Dict
 
 import torch
-from finetune.models.meta_arch.preprocessor import PreProcessor
-from finetune.data.structures.sample_objects.base_data_element import BaseDataElement
+from cell_observatory_finetune.models.meta_arch.preprocessor import PreProcessor
+from cell_observatory_finetune.data.structures.sample_objects.base_data_element import BaseDataElement
 
 
 class BaseModel(torch.nn.Module):

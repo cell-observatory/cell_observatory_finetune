@@ -14,8 +14,8 @@ import torch
 
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
-from train_platform.data.data_types import TORCH_DTYPES
-from finetune.utils.comm import is_main_process, get_world_size, barrier
+from cell_observatory_platform.data.data_types import TORCH_DTYPES
+from cell_observatory_finetune.utils.comm import is_main_process, get_world_size, barrier
 
 
 class CheckpointManager:

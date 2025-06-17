@@ -3,7 +3,7 @@ from typing import Union, Literal
 import torch
 from torch import nn
 
-from train_platform.models.maskedpredictor import MaskedPredictor
+from cell_observatory_platform.models.maskedpredictor import MaskedPredictor
 
 
 class MaskedPredictorWrapper(MaskedPredictor):

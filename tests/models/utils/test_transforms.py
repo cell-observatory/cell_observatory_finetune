@@ -4,9 +4,9 @@ import pytest
 from omegaconf import OmegaConf
 from hydra import initialize, compose
 
-from finetune.models.utils.transforms import resize_boxes
-from finetune.models.heads.roi_heads.roi_heads import paste_masks_in_image
-from finetune.train.registry import build_dependency_graph_and_instantiate
+from cell_observatory_finetune.models.utils.transforms import resize_boxes
+from cell_observatory_finetune.models.heads.roi_heads.roi_heads import paste_masks_in_image
+from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
 
 
 def test_resize_boxes_scales_correctly():

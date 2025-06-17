@@ -5,7 +5,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
-from train_platform.data.io import record_init
+from cell_observatory_platform.data.io import record_init
 
 
 # TODO: extend with time axis

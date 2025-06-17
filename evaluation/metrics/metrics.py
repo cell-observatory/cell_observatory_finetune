@@ -1,7 +1,7 @@
 import abc
 from typing import Callable
 
-from finetune.evaluation.metrics.utils import (
+from cell_observatory_finetune.evaluation.metrics.utils import (
     average_precision,
     compute_mean
 )

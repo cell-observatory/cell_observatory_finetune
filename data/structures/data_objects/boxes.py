@@ -29,7 +29,7 @@ from torch import Tensor
 from torch import device
 
 from ops3d._C import nms_3d
-from train_platform.data.io import record_init
+from cell_observatory_platform.data.io import record_init
 
 
 # TODO: extend with time axis

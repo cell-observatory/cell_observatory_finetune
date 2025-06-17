@@ -18,16 +18,16 @@ input_shape:
 dataloader_type: torch
 return_dataloader: true
 distributed_sampler: true
-collate_fn: finetune.data.utils.collate_channel_predict
+collate_fn: cell_observatory_finetune.data.utils.collate_channel_predict
 # TODO: remove, not used anymore
-worker_init_fn: finetune.data.utils.worker_init_fn 
+worker_init_fn: cell_observatory_finetune.data.utils.worker_init_fn 
 
 # not used
 dataset_mean: [0,0,0,0,0]  
 dataset_std: [1,1,1,1,1]  
 
 dataset:
-  _target_: finetune.data.datasets.channel_predict_dataset.ChannelPredictDataset 
+  _target_: cell_observatory_finetune.data.datasets.channel_predict_dataset.ChannelPredictDataset 
   layout: "TZYXC"
   # not used for channel_split
   key_cols:

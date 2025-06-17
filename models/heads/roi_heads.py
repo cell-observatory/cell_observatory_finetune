@@ -25,21 +25,21 @@ import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
 
-from finetune.models.utils import matchers
-from finetune.models.utils import samplers
-from finetune.data.structures.data_objects import boxes 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.labels import Labels
-from finetune.data.structures.data_objects.masks import BitMasks
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.data_objects.boxes import (remove_small_boxes, 
+from cell_observatory_finetune.models.utils import matchers
+from cell_observatory_finetune.models.utils import samplers
+from cell_observatory_finetune.data.structures.data_objects import boxes 
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.labels import Labels
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.data_objects.boxes import (remove_small_boxes, 
                                                         clip_boxes_to_image, 
                                                         BoxCoder, 
                                                         box_iou,
                                                         batched_nms
                                                         )
 
-from finetune.models.layers.losses import fastrcnn_loss, maskrcnn_loss
+from cell_observatory_finetune.models.layers.losses import fastrcnn_loss, maskrcnn_loss
 
 
 def maskrcnn_inference(x, labels):

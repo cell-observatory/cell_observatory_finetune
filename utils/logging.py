@@ -40,12 +40,12 @@ from torch.utils.tensorboard import SummaryWriter
 
 from ray.train import Checkpoint, report
 
-from finetune.utils.comm import (is_main_process, 
+from cell_observatory_finetune.utils.comm import (is_main_process, 
                                  in_torch_dist, 
                                  process_rank, 
                                  get_world_size,
                                  barrier)
-from finetune.utils.visualization import Visualizer
+from cell_observatory_finetune.utils.visualization import Visualizer
 
 
 class EventRecorder:

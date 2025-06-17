@@ -27,9 +27,9 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from finetune.models.layers.utils import undo_windowing
-from finetune.models.layers.norms import FrozenBatchNorm3d
-from finetune.data.structures.data_objects.image_list import Shape
+from cell_observatory_finetune.models.layers.utils import undo_windowing
+from cell_observatory_finetune.models.layers.norms import FrozenBatchNorm3d
+from cell_observatory_finetune.data.structures.data_objects.image_list import Shape
 
 
 # ------------------------------------------------------------ MLP ------------------------------------------------------------

@@ -14,14 +14,14 @@ out_channels: ${backbone_out_channels} # 256 generally
 scale_factors: [4.0, 2.0, 1.0] # , 0.5 (scale factors dictate output feature map size, here: p4 -> p3 -> p2)
 top_block: null
 # top_block: 
-#   _target_: finetune.models.backbones.vitDet.LastLevelMaxPool # if add last level max pool to PN
+#   _target_: cell_observatory_finetune.models.backbones.vitDet.LastLevelMaxPool # if add last level max pool to PN
 norm: "LN"
 square_pad: null # not used currently
 
 # ViTDet Backbone (adapted patch sizes, window stages etc. to make sense for 3D data)
 
 net:
-  _target_: finetune.models.backbones.vitDet.ViT
+  _target_: cell_observatory_finetune.models.backbones.vitDet.ViT
   img_size: ${datasets.input_shape} 
   channel_in: ${datasets.channel_in} 
   # Rationale from VitDet Paper: with patch size 16×16 and 3 colors, 

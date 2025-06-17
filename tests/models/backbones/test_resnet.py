@@ -4,7 +4,7 @@ import torch
 
 from hydra import initialize, compose
 
-from finetune.train.registry import build_dependency_graph_and_instantiate
+from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
 
 
 @pytest.fixture(scope="module")

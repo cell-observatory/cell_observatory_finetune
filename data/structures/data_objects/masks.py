@@ -29,9 +29,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from train_platform.data.io import record_init
-from finetune.models.ops.roi_align_nd import RoIAlign3DFunction
-from finetune.data.structures.data_objects.boxes import Boxes, expand_boxes
+from cell_observatory_platform.data.io import record_init
+from cell_observatory_finetune.models.ops.roi_align_nd import RoIAlign3DFunction
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes, expand_boxes
 
 
 class BitMasks:

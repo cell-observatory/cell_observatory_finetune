@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function
 import pytest
 import torch
 
-from finetune.models.ops.dcnv4_func import DCNv4Function, dcn_core_pytorch
+from cell_observatory_finetune.models.ops.dcnv4_func import DCNv4Function, dcn_core_pytorch
 
 CUDA_AVAILABLE = torch.cuda.is_available()
 pytestmark = pytest.mark.skipif(

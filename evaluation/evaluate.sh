@@ -10,7 +10,7 @@
 #SBATCH --mem-per-cpu=31000
 #SBATCH --ntasks-per-node=1
 
-# USAGE: bash /clusterfs/nvme/hph/git_managed/finetune/evaluation/evaluate.sh
+# USAGE: bash /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/evaluation/evaluate.sh
 
 source /global/home/users/hph/miniconda3/etc/profile.d/conda.sh
 conda activate 4d_seg
@@ -25,4 +25,4 @@ export TORCH_EXTENSIONS_DIR="/tmp/torch_extensions_$$"
 # CFG="skittlez_evaluation_mrcnn_vitDet.yaml"
 CFG="skittlez_evaluation_maskdino_resnet.yaml"
 
-python3 /clusterfs/nvme/hph/git_managed/finetune/evaluation/evaluate.py --config-name=${CFG}
+python3 /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/evaluation/evaluate.py --config-name=${CFG}

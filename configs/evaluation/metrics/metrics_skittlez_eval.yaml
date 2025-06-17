@@ -1,16 +1,16 @@
 defaults:
   - _self_
 
-_target_: finetune.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
+_target_: cell_observatory_finetune.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
 
 metrics:
   # TODO: would be more efficient to use a single AveragePrecision metric with multiple thresholds
   ap@50:
-    _target_: finetune.evaluation.metrics.metrics.AveragePrecision
+    _target_: cell_observatory_finetune.evaluation.metrics.metrics.AveragePrecision
     iou_threshold: 0.5
   ap@75:
-    _target_: finetune.evaluation.metrics.AveragePrecision
+    _target_: cell_observatory_finetune.evaluation.metrics.AveragePrecision
     iou_threshold: 0.75
   ap@90:
-    _target_: finetune.evaluation.metrics.metrics.AveragePrecision
+    _target_: cell_observatory_finetune.evaluation.metrics.metrics.AveragePrecision
     iou_threshold: 0.9

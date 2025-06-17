@@ -4,8 +4,8 @@ import pytest
 
 import torch
 
-from finetune.models.ops.flash_deform_attn_func import FlashDeformAttnFunction
-from finetune.models.ops.flash_deform_attn_func import ms_deform_attn_core_pytorch_3d
+from cell_observatory_finetune.models.ops.flash_deform_attn_func import FlashDeformAttnFunction
+from cell_observatory_finetune.models.ops.flash_deform_attn_func import ms_deform_attn_core_pytorch_3d
 
 
 #------------------------ FIXED TESTING PARAMS -------------------------------------

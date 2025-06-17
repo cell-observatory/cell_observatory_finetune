@@ -10,5 +10,5 @@ val_metric: ap@50 # needs to be one of the metrics defined in metrics.yaml
 val_mode: max # mode for the validation metric, can be 'max' or 'min'
 
 evaluator:
-  _target_: finetune.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
+  _target_: cell_observatory_finetune.evaluation.skittlez_evaluation.SkittlezInstanceEvaluator
   metrics: ${evaluation.metrics}  # metrics to use for evaluation

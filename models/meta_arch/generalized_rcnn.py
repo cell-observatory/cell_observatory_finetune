@@ -38,12 +38,12 @@ from collections import OrderedDict
 import torch
 from torch import nn
 
-from finetune.models.meta_arch.base_model import BaseModel
-from finetune.models.meta_arch.preprocessor import PreProcessor
+from cell_observatory_finetune.models.meta_arch.base_model import BaseModel
+from cell_observatory_finetune.models.meta_arch.preprocessor import PreProcessor
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
 
 
 class GeneralizedRCNN(BaseModel):

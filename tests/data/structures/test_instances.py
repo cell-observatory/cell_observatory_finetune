@@ -3,9 +3,9 @@ import pytest
 import torch
 import numpy as np
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.masks import BitMasks
-from finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
 
 
 @pytest.fixture

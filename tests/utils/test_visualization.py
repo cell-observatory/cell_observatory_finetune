@@ -5,8 +5,8 @@ import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use('Agg')
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.utils.visualization import Visualizer, COLOR_MAP
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.utils.visualization import Visualizer, COLOR_MAP
 
 
 @pytest.fixture

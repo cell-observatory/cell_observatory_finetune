@@ -10,7 +10,7 @@ from hydra.utils import instantiate, get_method
 
 import ray.train.torch as raytorch
 
-from finetune.utils.comm import process_rank, barrier
+from cell_observatory_finetune.utils.comm import process_rank, barrier
 
 
 logging.basicConfig(

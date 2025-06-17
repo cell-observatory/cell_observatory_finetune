@@ -2,11 +2,11 @@ from typing import Dict, List
 
 import torch
 
-from finetune.evaluation.metrics.metrics import Metric
-from finetune.evaluation.evaluator import DatasetEvaluator 
-from finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.evaluation.metrics.metrics import Metric
+from cell_observatory_finetune.evaluation.evaluator import DatasetEvaluator 
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
 
-from finetune.evaluation.metrics.utils import (
+from cell_observatory_finetune.evaluation.metrics.utils import (
     merge_instance_masks_binary,
     merge_instance_masks_logits,
 )

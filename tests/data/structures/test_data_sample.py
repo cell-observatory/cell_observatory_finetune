@@ -2,11 +2,11 @@ import pytest
 
 import torch
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
 
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.sample_objects.data_sample_old import DataSample
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.sample_objects.data_sample_old import DataSample
 
 
 def make_instances(N=3):

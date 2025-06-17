@@ -7,18 +7,18 @@ import numpy as np
 import torch
 from torch.utils.data import get_worker_info
 
-from finetune.data.utils import read_zarr
+from cell_observatory_finetune.data.utils import read_zarr
 
-from finetune.data.structures.data_objects.boxes import Boxes
-from finetune.data.structures.data_objects.labels import Labels
-from finetune.data.structures.data_objects.masks import BitMasks
-from finetune.data.structures.data_objects.image_list import Shape
-from finetune.data.structures.data_objects.image_list import ImageList
+from cell_observatory_finetune.data.structures.data_objects.boxes import Boxes
+from cell_observatory_finetune.data.structures.data_objects.labels import Labels
+from cell_observatory_finetune.data.structures.data_objects.masks import BitMasks
+from cell_observatory_finetune.data.structures.data_objects.image_list import Shape
+from cell_observatory_finetune.data.structures.data_objects.image_list import ImageList
 
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
 
-from finetune.data.datasets.base_dataset import BaseDataset
+from cell_observatory_finetune.data.datasets.base_dataset import BaseDataset
 
 
 class InstanceSegDataset(BaseDataset):

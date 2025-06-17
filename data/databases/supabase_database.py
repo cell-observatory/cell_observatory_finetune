@@ -9,9 +9,9 @@ import pandas as pd
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
-from finetune.data.utils import sql_quote_ident
-from finetune.data.databases.database import Database
-from finetune.data.databases.schema import TableSchemaList, Comparators, DB_TableSchema
+from cell_observatory_finetune.data.utils import sql_quote_ident
+from cell_observatory_finetune.data.databases.database import Database
+from cell_observatory_finetune.data.databases.schema import TableSchemaList, Comparators, DB_TableSchema
 
 
 class SupabaseDatabase(Database):

@@ -5,9 +5,9 @@ import torch
 from hydra.utils import instantiate
 from hydra import initialize, compose
 
-from finetune.data.datasets.instance_seg_dataset import InstanceSegDataset
-from finetune.data.databases.database import SQLiteDatabase
-from finetune.structures.sample_objects.data_sample_old import DataSample
+from cell_observatory_finetune.data.datasets.instance_seg_dataset import InstanceSegDataset
+from cell_observatory_finetune.data.databases.database import SQLiteDatabase
+from cell_observatory_finetune.structures.sample_objects.data_sample_old import DataSample
 
 
 KEY_COLS=["img_id", "t0", "t1", "z0", "y0", "x0"]

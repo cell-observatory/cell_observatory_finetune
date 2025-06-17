@@ -39,11 +39,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from torch import nn, Tensor
 
-from finetune.data.structures.sample_objects.instances import Instances
-from finetune.data.structures.sample_objects.data_sample import DataSample
+from cell_observatory_finetune.data.structures.sample_objects.instances import Instances
+from cell_observatory_finetune.data.structures.sample_objects.data_sample import DataSample
 
-from finetune.data.structures.data_objects.image_list import ImageList
-from finetune.data.structures.data_objects.masks import paste_masks_in_image
+from cell_observatory_finetune.data.structures.data_objects.image_list import ImageList
+from cell_observatory_finetune.data.structures.data_objects.masks import paste_masks_in_image
 
 
 def _resize_image_and_masks(

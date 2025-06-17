@@ -2,22 +2,22 @@ defaults:
   - _self_
 
 hooks_list:
-- _target_: finetune.train.hooks.SamplerSetter
-- _target_: finetune.train.hooks.LRScheduler
-- _target_: finetune.train.hooks.IterationTimer
+- _target_: cell_observatory_finetune.train.hooks.SamplerSetter
+- _target_: cell_observatory_finetune.train.hooks.LRScheduler
+- _target_: cell_observatory_finetune.train.hooks.IterationTimer
   warmup_iter: 10
-- _target_: finetune.train.hooks.PeriodicWriter
+- _target_: cell_observatory_finetune.train.hooks.PeriodicWriter
   period: 1
   writers: null
-- _target_: finetune.train.hooks.PeriodicCheckpointer
+- _target_: cell_observatory_finetune.train.hooks.PeriodicCheckpointer
   period: 1
   file_prefix: latest_model
-# - _target_: finetune.train.hooks.BestCheckpointer
+# - _target_: cell_observatory_finetune.train.hooks.BestCheckpointer
 #   eval_period: 1
 #   val_metric: ${evaluation.val_metric}
 #   file_prefix: best_model
 #   mode: ${evaluation.val_mode}
-# - _target_: finetune.train.hooks.TorchProfiler
+# - _target_: cell_observatory_finetune.train.hooks.TorchProfiler
 #   output_dir: ${logging.logdir}/profiler
 #   schedule:
 #     skip_first: 1
@@ -29,7 +29,7 @@ hooks_list:
 #     - CUDA
 #     - CPU
 #   save_tensorboard: true
-- _target_: finetune.train.hooks.TorchMemoryStats
+- _target_: cell_observatory_finetune.train.hooks.TorchMemoryStats
   step_period: 100
   epoch_period: 1
   max_runs: 10

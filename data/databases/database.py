@@ -11,8 +11,8 @@ import sqlite3
 import pandas as pd
 from supabase import Client
 
-from finetune.data.utils import sql_quote_ident
-from finetune.data.databases.schema import TableSchemaList, Comparators
+from cell_observatory_finetune.data.utils import sql_quote_ident
+from cell_observatory_finetune.data.databases.schema import TableSchemaList, Comparators
 
 
 class Database(ABC):

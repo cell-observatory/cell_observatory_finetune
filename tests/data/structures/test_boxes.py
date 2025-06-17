@@ -2,7 +2,7 @@ import pytest
 
 import torch
 
-from finetune.data.structures.data_objects.boxes import (
+from cell_observatory_finetune.data.structures.data_objects.boxes import (
     Boxes,
     BoxMode3D,
 )

@@ -25,12 +25,11 @@ from typing import Any, List, Tuple, Optional, Dict, Sequence
 import torch
 from torch import device
 
-from train_platform.data.io import record_init
-from finetune.data.structures.data_objects.data_shapes import (
+from cell_observatory_platform.data.io import record_init
+from cell_observatory_finetune.data.structures.data_objects.data_shapes import (
     MULTICHANNEL_3D_HYPERCUBE,
     MULTICHANNEL_4D_HYPERCUBE
 )
-# from train_platform.data.data_shapes import MULTICHANNEL_3D_HYPERCUBE, MULTICHANNEL_4D_HYPERCUBE
 
 
 class ImageList:

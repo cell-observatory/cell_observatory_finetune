@@ -29,8 +29,8 @@ import torch.nn.functional as F
 
 from timm.models.layers import DropPath, Mlp
 
-from finetune.models.layers.norms import get_norm
-from finetune.models.layers.layers import conv_nd, do_masked_conv, do_pool, Unroll, Reroll
+from cell_observatory_finetune.models.layers.norms import get_norm
+from cell_observatory_finetune.models.layers.layers import conv_nd, do_masked_conv, do_pool, Unroll, Reroll
 
 
 class MaskUnitAttention(nn.Module):

@@ -5,8 +5,8 @@ from hydra import initialize, compose
 
 import torch
 
-from finetune.models.utils.proposal_generators.anchor_generator import concat_box_prediction_layers
-from finetune.train.registry import build_dependency_graph_and_instantiate
+from cell_observatory_finetune.models.utils.proposal_generators.anchor_generator import concat_box_prediction_layers
+from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
 
 
 @pytest.fixture(scope="module")
