@@ -3,29 +3,13 @@ defaults:
 
 hooks_list:
 - _target_: cell_observatory_finetune.train.hooks.SamplerSetter
-- _target_: cell_observatory_finetune.train.hooks.LRScheduler
 - _target_: cell_observatory_finetune.train.hooks.IterationTimer
   warmup_iter: 10
 - _target_: cell_observatory_finetune.train.hooks.PeriodicWriter
   period: 1
   writers: null
-- _target_: cell_observatory_finetune.train.hooks.PeriodicCheckpointer
-  period: 1
-  file_prefix: latest_model
-# - _target_: cell_observatory_finetune.train.hooks.TorchProfiler
-#   output_dir: ${logging.logdir}/profiler
-#   schedule:
-#     skip_first: 1
-#     warmup: 1
-#     active: 3
-#     repeat: 2
-#     wait: 1  
-#   activities: 
-#     - CUDA
-#     - CPU
-#   save_tensorboard: true
 - _target_: cell_observatory_finetune.train.hooks.TorchMemoryStats
-  step_period: 100
+  step_period: 10
   epoch_period: 1
   max_runs: 10
   logdir: ${logging.logdir}

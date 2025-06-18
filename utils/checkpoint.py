@@ -21,7 +21,9 @@ from cell_observatory_finetune.utils.comm import is_main_process, get_world_size
 class CheckpointManager:
     def __init__(self,
                  model: torch.nn.Module, 
-                 checkpointdir: Union[str, Path],
+                 save_checkpointdir: Union[str, Path],
+                 resume_checkpointdir: Optional[Union[str, Path]] = None,
+                 pretrained_checkpointdir: Optional[Union[str, Path]] = None,
                  engine: Literal["deepspeed"] = "deepspeed", 
                  checkpoint_tag: str = "best_model",
                  load_dtype: Optional[Literal["fp16", "bf16"]] = None,
@@ -32,9 +34,20 @@ class CheckpointManager:
         self.checkpoint_tag = checkpoint_tag
         self.load_dtype = load_dtype
 
-        self.checkpointdir = Path(checkpointdir)
-        assert self.checkpointdir.is_dir(), f"Checkpoint \
-            directory does not exist: {self.checkpointdir}"
+        assert not (resume_checkpointdir is not None and \
+            pretrained_checkpointdir is not None), \
+            "Cannot specify both `resume_checkpointdir` and `pretrained_checkpointdir`. " \
+            "Please choose one of them or neither." 
+        
+        if resume_checkpointdir is not None:
+            self.load_checkpointdir = Path(resume_checkpointdir)
+        if pretrained_checkpointdir is not None:
+            self.load_checkpointdir = Path(pretrained_checkpointdir)
+        self.save_checkpointdir = Path(save_checkpointdir) \
+            if isinstance(save_checkpointdir, str) else save_checkpointdir
+        
+        assert self.load_checkpointdir.is_dir(), f"Checkpoint \
+            directory does not exist: {self.load_checkpointdir}"
 
         self.max_keep = max_keep
 
@@ -44,13 +57,14 @@ class CheckpointManager:
              iter: int = None, 
              best_loss: Optional[float] = None,
     ):
+        self.save_checkpointdir.mkdir(parents=True, exist_ok=True)
         if self.engine == "deepspeed":
             client_state = {
                 "epoch": epoch,
                 "iter": iter,
                 "best_loss": best_loss
             }
-            self.model.save_checkpoint(self.checkpointdir, client_state=client_state, tag=prefix)
+            self.model.save_checkpoint(self.save_checkpointdir, client_state=client_state, tag=prefix)
         else:
             raise NotImplementedError("Saving sharded checkpoints for " \
                 "other engines not implemented yet.")
@@ -58,7 +72,7 @@ class CheckpointManager:
     def load(self):  
         world_size = get_world_size()
         num_ckpt_shards = self._infer_ckpt_shards_num(
-            ckpt_dir=os.path.join(self.checkpointdir, self.checkpoint_tag),
+            ckpt_dir=os.path.join(self.load_checkpointdir, self.checkpoint_tag),
             pattern=r"mp_rank_.+_model_states\.pt$$"
         )
         
@@ -71,16 +85,16 @@ class CheckpointManager:
                         "Converting to a standard checkpoint and saving to disk."
                     )
                     self._convert_zero_checkpoint_to_universal(
-                        input_folder=os.path.join(self.checkpointdir, 
+                        input_folder=os.path.join(self.load_checkpointdir, 
                         self.checkpoint_tag),
-                        output_folder=os.path.join(self.checkpointdir, 
+                        output_folder=os.path.join(self.load_checkpointdir, 
                                                    f"{self.checkpoint_tag}_universal"),
                     )
                 
                 barrier()
                 
                 ckpt_path, client_state = self.model.load_checkpoint(
-                    load_dir=self.checkpointdir,
+                    load_dir=self.load_checkpointdir,
                     tag=f"{self.checkpoint_tag}_universal",
                     # custom_load_fn=state_dict_filter_fn
                 )
@@ -90,7 +104,7 @@ class CheckpointManager:
         else:
             if self.engine == "deepspeed":
                 ckpt_path, client_state = self.model.load_checkpoint(
-                    load_dir=self.checkpointdir,
+                    load_dir=self.load_checkpointdir,
                     tag=self.checkpoint_tag,
                     # custom_load_fn=state_dict_filter_fn,
                 )

@@ -5,16 +5,15 @@ defaults:
   - models/backbones: masked_encoder_wrapper # Loads configs/models/backbones/masked_encoder_wrapper.yaml
   - models/heads: masked_predictor_wrapper # Loads configs/models/heads/masked_predictor_wrapper.yaml
   - models/patch_embeddings: patch_embedding # Loads configs/models/patch_embeddings/patch_embedding.yaml
-  - hooks: hooks # Loads configs/hooks/hooks.yaml
+  - hooks: hooks_evaluation # Loads configs/hooks/hooks.yaml
   - losses: mae_loss # Loads configs/losses/mae_loss.yaml
-  - datasets: channel_split # Loads configs/datasets/channel_split.yaml
-  - transforms: transforms_channel_split # Loads configs/transforms/transforms_channel_split.yaml
+  - datasets: channel_split_evaluation # Loads configs/datasets/channel_split.yaml
+  - transforms: transforms_channel_split_evaluation # Loads configs/transforms/transforms_channel_split.yaml
   - optimizers: adamw # Loads configs/optimizers/adamw.yaml
-  - schedulers: warmup_cosine_decay # Loads configs/schedulers/warmup_cosine_decay.yaml
   - evaluation: base_evaluator        # Loads configs/evaluation/evaluator.yaml
-  - logging: logging          # Loads configs/logging/logging.yaml
+  - logging: logging_evaluation          # Loads configs/logging/logging.yaml
   - visualization: visualizer # Loads configs/visualizer/visualizer.yaml
-  - checkpoint: checkpoint # Loads configs/checkpoint/checkpoint.yaml
+  - checkpoint: checkpoint_evaluation # Loads configs/checkpoint/checkpoint.yaml
   - deepspeed: deepspeed # Loads configs/deepspeed/deepspeed.yaml
   - clusters: local # Loads configs/clusters/slurm_multinode.yaml
   - _self_  # self reference last to allow for overrides
@@ -74,7 +73,7 @@ models:
     channels: 1
 
 datasets:
-  split:  0.1
+  split:  0.0
   channel_in: 1
   num_classes: 1   
   input_format: 
@@ -149,14 +148,16 @@ checkpoint:
   # used by Ray Report
   ray_checkpoint_config:
     num_to_keep: 3
-    checkpoint_score_attribute: ${evaluation.val_metric}
+    # keeping this as step_loss for now
+    # but probably better to use ${evaluation.val_metric}
+    checkpoint_score_attribute: step_loss
     checkpoint_score_order: min
   
   checkpoint_manager:
     _target_: cell_observatory_finetune.utils.checkpoint.CheckpointManager
-    pretrained_checkpointdir: null
-    resume_checkpointdir: /clusterfs/nvme/segment_4d/test_17/checkpoints
-    save_checkpointdir: ${outdir}/checkpoints # directory to save checkpoints
+    pretrained_checkpointdir: /clusterfs/nvme/segment_4d/test_17/checkpoints
+    resume_checkpointdir: null
+    save_checkpointdir: null # directory to save checkpoints
     engine: ${engine} # engine to use for training
     max_keep: 3 # maximum number of checkpoints to keep
     load_dtype: ${quantization}
@@ -165,13 +166,18 @@ evaluation:
   val_begin: 0
   val_interval: 1
   # used by BestMetricSaver to save best metric
-  # needs to match one of metrics saved per epoch by loss_dict
-  # in the training loop or evaluator.evaluate() in the evaluation loop
-  val_metric: val_step_loss
+  # needs to match one of metrics saved per epoch 
+  # in the val/test loop. note that in both cases
+  # do we append test or loss prefix to the metric name
+  # and thus we need to add that to val_metric variable also
+  val_metric: test_step_loss
   val_mode: lt # mode for the validation metric, can be 'gt' or 'lt'
   evaluator:
     _target_: cell_observatory_finetune.evaluation.base_evaluation.BaseEvaluator
     training_metrics:
+      # BaseEvaluator just aggregates metrics from normal loss computation
+      # and hence our metric_name : agg_method needs to match one of losses
+      # in loss_dict
       - "step_loss": "mean"
 
 logging:
@@ -186,13 +192,13 @@ network: mae
 engine: deepspeed
 
 # job type
-job_type: train # train or test
+job_type: test # train or test
 
 # trainer type
-trainer: cell_observatory_finetune.train.loops.EpochBasedTrainer
+trainer: cell_observatory_finetune.train.loops.TestTrainer
 
 # training quantization
 quantization: float16 # data type for training, options: float32, float16
 
 # base output directory for logs, checkpoints, etc.
-outdir: /clusterfs/nvme/segment_4d/test_22
+outdir: /clusterfs/nvme/segment_4d/test_21

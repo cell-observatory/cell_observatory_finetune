@@ -18,8 +18,6 @@ event_writers:
       tensors_prefix: predictions
       scalars_save_format: csv
       tensors_save_format: tiff
-    - _target_: cell_observatory_finetune.utils.logging.RayEventWriter
-      checkpointdir: ${checkpoint.checkpoint_manager.save_checkpointdir}
 
 event_recorder:
   _target_: cell_observatory_finetune.utils.logging.EventRecorder

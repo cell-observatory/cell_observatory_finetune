@@ -138,6 +138,30 @@ class HookBase:
         """
         pass
 
+    def before_test(self):
+        """
+        Called before the test loop starts.
+        """
+        pass
+
+    def after_test(self):
+        """
+        Called after the test loop ends.
+        """
+        pass
+
+    def before_test_step(self):
+        """
+        Called before each test step.
+        """
+        pass
+
+    def after_test_step(self, data_sample, outputs, loss_dict):
+        """
+        Called after each test step.
+        """
+        pass
+
     def state_dict(self):
         """
         Hooks are stateless by default, but can be made checkpointable by
@@ -241,11 +265,22 @@ class IterationTimer(HookBase):
         """
         self._warmup_iter = warmup_iter
 
-        # for step, epoch, and validation 
-        # step timing
+        # train step timer and
+        # train epoch timer
         self._step_timer = Timer()
         self._epoch_timer = Timer()
+        
+        # validation step timer and
+        # validation epoch timer
+        self._val_step_timer = Timer()
         self._val_timer = Timer()
+        
+        # test step timer
+        # total time spent in test
+        # given by the difference
+        # between _start_time and current time
+        self._test_timer = Timer()
+        
         # for the total time spent not in hooks
         # different from time between
         # _start_time and current time
@@ -306,22 +341,6 @@ class IterationTimer(HookBase):
         # total time in step excluding hooks
         self._total_timer.pause()
 
-    def before_val_step(self):
-        """
-        Reset the timer at the beginning of each validation step.
-        """
-        self._val_timer.reset()
-    
-    def after_val_step(self, data_sample, outputs, loss_dict):
-        """
-        Record the time spent on the validation step.
-        """
-        sec = self._val_timer.seconds()
-        self.trainer.event_recorder.put_scalars(val_step_time=sec, prefix="val_")
-
-        # Reset the timer for the next validation step
-        self._val_timer.reset()
-    
     def before_epoch(self):
         """
         Reset the timer at the beginning of each epoch.
@@ -335,6 +354,91 @@ class IterationTimer(HookBase):
         remaining_epochs = self.trainer._max_epochs - (self.trainer._epoch + 1)
         eta = sec * remaining_epochs / 3600
         self.trainer.event_recorder.put_scalars(eta=eta)
+
+    def before_validation(self):
+        # stop epoch timer
+        # to omit counting
+        # validation time
+        self._val_timer.reset()
+        self._epoch_timer.pause()
+
+    def after_validation(self):
+        # resume the epoch timer
+        # after the validation loop
+        sec = self._val_timer.seconds()
+        self.trainer.event_recorder.put_scalars(val_time=sec, \
+                                                scope="epoch")
+        self._epoch_timer.resume()
+
+    def before_val_step(self):
+        """
+        Reset the timer at the beginning of each validation step.
+        """
+        self._val_step_timer.reset()
+
+    def after_val_step(self, data_sample, outputs, loss_dict):
+        """
+        Record the time spent on the validation step.
+        """
+        sec = self._val_step_timer.seconds()
+        self.trainer.event_recorder.put_scalars(val_step_time=sec)
+
+        # Reset the timer for the next validation step
+        self._val_step_timer.reset()
+    
+    def before_test(self):
+        """
+        Reset the timer at the beginning of each test step.
+        """
+        self._start_time = time.perf_counter()
+        self._test_timer.reset()
+        self._total_timer.reset()
+        self._total_timer.pause()
+
+    def after_test(self):
+        total_time = time.perf_counter() - self._start_time
+        total_time_minus_hooks = self._total_timer.seconds()
+        hook_time = total_time - total_time_minus_hooks
+
+        num_iter = self.trainer._iter + 1 - self.trainer.start_iter - self._warmup_iter
+
+        if num_iter > 0 and total_time_minus_hooks > 0:
+            # speed is meaningful only after warmup
+            logger.info(
+                "Overall test speed: {} iterations in {} ({:.4f} s / it)".format(
+                    num_iter,
+                    str(datetime.timedelta(seconds=int(total_time_minus_hooks))),
+                    total_time_minus_hooks / num_iter,
+                )
+            )
+
+        logger.info(
+            "Total test time: {} ({} on hooks/not train step)".format(
+                str(datetime.timedelta(seconds=int(total_time))),
+                str(datetime.timedelta(seconds=int(hook_time))),
+            )
+        )
+
+    def before_test_step(self):
+        self._test_timer.reset()
+        self._total_timer.resume()
+
+    def after_test_step(self, data_sample, outputs, loss_dict):
+        # +1 because we're in after_step, the current step is done
+        # but not yet counted
+        iter_done = self.trainer._iter - self.trainer.start_iter + 1
+        if iter_done >= self._warmup_iter:
+            sec = self._test_timer.seconds()
+            self.trainer.event_recorder.put_scalars(test_step_time=sec)
+        else:
+            # reset _total_timer and _start_time
+            # to avoid counting the warmup iterations
+            self._start_time = time.perf_counter()
+            self._total_timer.reset()
+
+        # _total_timer only counts
+        # total time in step excluding hooks
+        self._total_timer.pause()
 
 
 class PeriodicWriter(HookBase):
@@ -368,6 +472,13 @@ class PeriodicWriter(HookBase):
     def after_train(self):
         # for writer in self._writers:
             # write last epoch's data before closing
+        self._writers.write()
+        self._writers.close()
+
+    def after_test(self):
+        """
+        Write events after the test loop ends.
+        """
         self._writers.write()
         self._writers.close()
 
@@ -460,6 +571,40 @@ class TorchMemoryStats(HookBase):
             if is_main_process():
                 with (self._logdir / f'{self.trainer._epoch}.log').open('w') as f:
                     f.write(str(mem_log))
+
+    def after_test_step(self, data_sample, outputs, loss_dict):
+        """
+        Write memory stats after each test step.
+        """
+        if self._runs > self._max_runs:
+            return
+
+        if (self.trainer._iter + 1) % self._step_period == 0:
+            if torch.cuda.is_available():
+                max_reserved_gb = torch.cuda.max_memory_reserved() / (1024 ** 3)
+                reserved_gb = torch.cuda.memory_reserved() / (1024 ** 3)
+                max_allocated_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+                allocated_gb = torch.cuda.memory_allocated() / (1024 ** 3)
+
+                self.trainer.event_recorder.put_scalars(
+                    max_reserved_mem=max_reserved_gb,
+                    reserved_mem=reserved_gb,
+                    max_allocated_mem=max_allocated_gb,
+                    allocated_mem=allocated_gb,
+                )
+
+                self._runs += 1
+                torch.cuda.reset_peak_memory_stats()
+
+    def after_test(self):
+        """
+        Write memory stats after the test loop ends.
+        """
+        mem_log = torch.cuda.memory_summary()
+        if is_main_process():
+            os.makedirs(self._logdir / 'test', exist_ok=True)
+            with (self._logdir / 'test' / 'memory_test.log').open('w') as f:
+                f.write(str(mem_log))
 
 
 # TODO: support for saving table to wandb/tensorboard
@@ -570,11 +715,14 @@ class BestMetricSaver(HookBase):
     def __init__(self, 
                  metric_name: str, 
                  compare_fn: Literal["gt", "lt"] = "lt",
-                 eval_after_validation: bool = True
+                 eval_after_validation: bool = True, 
+                 period: int = 1
     ):
         self.metric_name = metric_name
         self.compare_fn = operator.gt if compare_fn == "gt" else operator.lt
+        
         self.eval_after_validation = eval_after_validation
+        self.period = period
 
     def _update_best_metrics(self, val):
         if math.isnan(val) or math.isinf(val):
@@ -601,15 +749,26 @@ class BestMetricSaver(HookBase):
         """
         Check if the latest metric is the best so far.
         """
-        if not self.eval_after_validation:
-            epoch_scalars = self.trainer.event_recorder.get_epoch_scalars()
-            if self.metric_name not in epoch_scalars:
-                raise ValueError(
-                    f"Metric {self.metric_name} not found in epoch logs. "
-                    "Make sure to set `val_metric` in the trainer config."
-                )
-            latest_metric_val, *_ = epoch_scalars[self.metric_name].pop()
-            self.update_best_metrics(latest_metric_val)
+        # should match period of validation loop
+        if (self.trainer._epoch + 1) % self.period == 0:
+            if not self.eval_after_validation:
+                epoch_scalars = self.trainer.event_recorder.get_epoch_scalars()
+                if self.metric_name not in epoch_scalars:
+                    raise ValueError(
+                        f"Metric {self.metric_name} not found in epoch logs. "
+                        "Make sure to set `val_metric` in the trainer config."
+                    )
+                latest_metric_val, *_ = epoch_scalars[self.metric_name].pop()
+                self.update_best_metrics(latest_metric_val)
+
+    def after_test(self):
+        test_scalars = self.trainer.event_recorder.get_epoch_scalars()
+        if self.metric_name not in test_scalars:
+            raise ValueError(
+                f"Metric {self.metric_name} not found in test logs. "
+            )
+        test_metric_val, *_ = test_scalars[self.metric_name].pop()
+        self._update_best_metrics(test_metric_val)
 
 # TODO: (-1) Torch Profiler Hook (almost done)
 #       (0) Early Stop Hook

@@ -24,9 +24,8 @@ class TrainLosses(Metric):
         self.reduce_method = reduce_method
         self.loss_values = []
 
-    def __call__(self, outputs, targets, loss_dict):
-        for loss_name, loss_value in loss_dict.items(): 
-            self.loss_values.append(loss_value.item())
+    def __call__(self, outputs, targets, loss):
+        self.loss_values.append(loss.item())
 
     def aggregate(self):
         if self.reduce_method == "mean":

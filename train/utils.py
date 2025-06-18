@@ -145,9 +145,9 @@ def get_steps_per_epoch(train_dataloader, val_dataloader, config: DictConfig):
 #       strategies to resume training after training 
 #       instabilities
 def resume_model_state(config: DictConfig, checkpoint_manager):
-    assert config.checkpoint.load_checkpointdir is not None and \
-        Path(config.checkpoint.load_checkpointdir).is_dir(), \
-        f"Checkpoint directory does not exist: {config.checkpoint.load_checkpointdir}" \
+    assert config.checkpoint.checkpoint_manager.resume_checkpointdir is not None and \
+        Path(config.checkpoint.checkpoint_manager.resume_checkpointdir).is_dir(), \
+        f"Checkpoint directory does not exist: {config.checkpoint.checkpoint_manager.resume_checkpointdir}" \
         f"Checkpoint directory must be populated " \
         f"with a valid checkpoint to resume training."
     
@@ -163,15 +163,29 @@ def resume_model_state(config: DictConfig, checkpoint_manager):
             f"No epochs left to train. Starting epoch {starting_epoch} "
             f"exceeds total epochs {config.schedulers.epochs}."
         )
+    
+    if config.checkpoint.checkpoint_manager.resume_checkpointdir != \
+        config.checkpoint.checkpoint_manager.save_checkpointdir:
+        logger.warning(
+            f"Checkpoint resume directory {config.checkpoint.checkpoint_manager.resume_checkpointdir} "
+            f"does not match new save checkpoint directory {config.checkpoint.checkpoint_manager.save_checkpointdir}. "
+            "New checkpoints will NOT be saved to the previous checkpoint directory!"
+        )
+        Path(config.checkpoint.checkpoint_manager.save_checkpointdir).mkdir(exist_ok=True, parents=True)
+    
+    if not Path(config.logging.logdir).exists():
+        logger.warning(
+            f"Log directory {config.logging.logdir} does not exist. "
+            f"Creating new log directory. New logs from starting epoch {starting_epoch} "
+            f"will not contain any previous training run data!"
+        )
+        Path(config.logging.logdir).mkdir(exist_ok=True, parents=True) 
 
     return best_loss, starting_iter, starting_epoch
 
 
 def resume_run(trainer, config: DictConfig):
-    # NOTE: load_checkpointdir and checkpoint_manager.checkpointdir
-    # are two different paths, the former is used to load
-    # a pre-existing checkpoint, the latter is used to save
-    # new checkpoints for the current run
+    Path(config.outdir).mkdir(exist_ok=True, parents=True)
     if config.checkpoint.resume_run:
         best_loss, iter, epoch = resume_model_state(config, 
                                     checkpoint_manager=trainer.checkpoint_manager)        
@@ -181,14 +195,18 @@ def resume_run(trainer, config: DictConfig):
         )
 
     else:
+        assert config.checkpoint.checkpoint_manager.save_checkpointdir is None, \
+            "Checkpoint directory must be None when starting a new training run."
+        assert config.logging.logdir is None, \
+            "Checkpoint directory must be None when starting a new training run."
+        
         epoch, iter, best_loss = 0, 0, np.inf
 
-        Path(config.outdir).mkdir(exist_ok=True, parents=True)
         Path(config.logging.logdir).mkdir(exist_ok=True, parents=True)
-        Path(config.checkpoint.checkpoint_manager.checkpointdir).mkdir(exist_ok=True, parents=True)
+        Path(config.checkpoint.checkpoint_manager.save_checkpointdir).mkdir(exist_ok=True, parents=True)
 
         logger.info(f"Output dir: {config.outdir}")
         logger.info(f"Log dir: {config.logging.logdir}")
-        logger.info(f"Checkpoint save dir: {config.checkpoint.checkpoint_manager.checkpointdir}")
+        logger.info(f"Checkpoint save dir: {config.checkpoint.checkpoint_manager.save_checkpointdir}")
     
     return best_loss, iter, epoch

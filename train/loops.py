@@ -58,7 +58,13 @@ logging.getLogger("ray.train._internal.checkpoint_manager").setLevel(logging.INF
 def train_loop_per_worker(config):
     trainer_cls = get_class(config.trainer)
     trainer_per_worker = trainer_cls(config)
-    trainer_per_worker.run()
+    if config.job_type == "train":
+        trainer_per_worker.run()
+    elif config.job_type == "test":
+        trainer_per_worker.test()
+    else:
+        raise ValueError(f"Unknown job type: {config.job_type}. "
+                         f"Expected 'train' or 'test', got '{config.job_type}'.")
     return {"best_metric": trainer_per_worker.best_metric}
 
 
@@ -199,6 +205,28 @@ class BaseTrainer:
         for h in self._hooks:
             h.after_val_step(*args, **kwargs)
 
+    def before_test(self):
+        self.event_recorder._iter = 0
+        for h in self._hooks:
+            h.before_test()
+
+    def after_test(self):
+        self.event_recorder._iter = self._iter
+        for h in self._hooks:
+            h.after_test()
+    
+    def before_test_step(self):
+        # maintain the invariant that 
+        # event_recorder.test_iter == trainer.test_iter
+        # for the entire execution of each test step
+        self.event_recorder._iter = self._iter
+        for h in self._hooks:
+            h.before_test_step()
+    
+    def after_test_step(self, *args, **kwargs):
+        for h in self._hooks:
+            h.after_test_step(*args, **kwargs)
+
     def state_dict(self):
         ret = {"iteration": self.iter, "epoch": self._epoch}
         hooks_state = {}
@@ -242,6 +270,9 @@ class EpochBasedTrainer(BaseTrainer):
         self.stop_training, self._max_epochs = False, cfg.schedulers.epochs
 
         # initialize dataset and dataloader
+        # get_dataloader() returns a tuple of dataloaders
+        # (train_dataloader, val_dataloader) where
+        # val_dataloader is None if no validation set is provided
         self.train_dataloader, self.val_dataloader = get_dataloader(cfg) 
 
         steps_per_epoch, val_steps_per_epoch = get_steps_per_epoch(
@@ -280,6 +311,21 @@ class EpochBasedTrainer(BaseTrainer):
             cfg.checkpoint.checkpoint_manager,
             model=self.model
         )
+
+        if cfg.checkpoint.checkpoint_manager.pretrained_checkpointdir:
+            # load model state from checkpoint
+            # if load_checkpointdir is not None, 
+            # the model will be loaded from the specified directory
+            # this is different from loading a checkpoint
+            # in resume_run() where a pre-existing checkpoint is  
+            # loaded to resume a job, here we load a checkpoint to
+            # start a new job with part of or the entire state of
+            # a pre-existing model (e.g. for fine-tuning)
+            # should only be used with resume_run=False 
+            self.checkpoint_manager.load(
+                load_checkpointdir=cfg.checkpoint.checkpoint_manager.pretrained_checkpointdir,
+                load_dtype=cfg.checkpoint.load_dtype
+            )
 
         # if resume job, gather the state from the checkpoint
         # else intialize outdir, logdir, and checkpointdir
@@ -383,3 +429,75 @@ class EpochBasedTrainer(BaseTrainer):
         self.after_val_step(data_sample=data_sample, 
                             outputs=outputs, loss_dict=loss_dict)
         self._val_iter += 1
+
+
+class TestTrainer(BaseTrainer):
+    def __init__(self, cfg: DictConfig) -> None:
+        super().__init__(cfg)
+        
+        self.ray_context = get_context()
+        self.event_recorder._iter = 0
+        self.event_recorder._epoch = 0
+        self._iter, self.start_iter, self.start_epoch = 0, 0, 0
+
+        # initialize dataset and dataloader
+        self.test_dataloader, _ = get_dataloader(cfg)
+
+        # initialize model
+        model = build_dependency_graph_and_instantiate(cfg.models)
+
+        # initialize deepspeed
+        self.model, _, _, _ = initialize(
+            model=model,
+            config=OmegaConf.to_container(cfg.deepspeed, resolve=True)
+        )
+
+        # initialize checkpoint manager and
+        # load model state from checkpoint
+        self.checkpoint_manager = instantiate(
+            cfg.checkpoint.checkpoint_manager,
+            model=self.model
+        )
+        self.checkpoint_manager.load()
+
+        # initialize evaluator
+        self.evaluator = instantiate(cfg.evaluation.evaluator)
+
+    def test(self):
+        """
+        Run Model testing.
+        """
+        self.before_test()
+
+        with inference_context(self.model):
+            with torch.no_grad():
+                for idx, data_sample in enumerate(self.test_dataloader):
+                    self.run_test_step(idx, data_sample)
+                    if idx > 100: # for testing purposes, remove later
+                        break
+        
+        metrics = self.evaluator.evaluate()
+        self.event_recorder.put_scalars(
+            prefix="test_",
+            scope="epoch",
+            **{k: (v.item() if torch.is_tensor(v) else v)
+                for k, v in metrics.items()
+            }
+        )
+        self.evaluator.reset()
+
+        self.after_test()
+    
+    def run_test_step(self, idx: int, data_sample: Sequence[dict]) -> None:
+        """
+        Iterate one test step.
+        """
+        self.before_test_step()
+
+        loss_dict, outputs = self.model(data_sample)
+        
+        self.evaluator.process(data_sample, outputs, loss_dict)
+
+        self.after_test_step(data_sample=data_sample, 
+                             outputs=outputs, loss_dict=loss_dict)
+        self._iter += 1
