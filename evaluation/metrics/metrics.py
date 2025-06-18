@@ -1,9 +1,7 @@
 import abc
-from typing import Callable
 
 from cell_observatory_finetune.evaluation.metrics.utils import (
-    average_precision,
-    compute_mean
+    average_precision
 )
 
 
@@ -21,12 +19,38 @@ class Metric(metaclass=abc.ABCMeta):
         pass
 
 
+class TrainLosses(Metric):
+    def __init__(self, reduce_method: str = "mean"):
+        self.reduce_method = reduce_method
+        self.loss_values = []
+
+    def __call__(self, outputs, targets, loss_dict):
+        for loss_name, loss_value in loss_dict.items(): 
+            self.loss_values.append(loss_value.item())
+
+    def aggregate(self):
+        if self.reduce_method == "mean":
+            return sum(self.loss_values) / len(self.loss_values) \
+                if self.loss_values else 0.0
+        elif self.reduce_method == "min":
+            return min(self.loss_values) if self.loss_values \
+                else 0.0
+        elif self.reduce_method == "max":
+            return max(self.loss_values) if self.loss_values \
+                else 0.0
+        else:
+            raise ValueError(f"Unknown reduce method: {self.reduce_method}")
+
+    def reset(self):
+        self.loss_values.clear()
+
+
 class AveragePrecision(Metric):
     def __init__(self, 
-                 aggregate_method: Callable = compute_mean, 
+                 reduce_method: str = "mean", 
                  iou_threshold: float = 0.5
     ):
-        self.aggregate_method = aggregate_method
+        self.reduce_method = reduce_method
         self.iou_threshold = iou_threshold
         self.ap_values = []
 
@@ -37,7 +61,7 @@ class AveragePrecision(Metric):
         return ap
 
     def aggregate(self):
-        return self.aggregate_method(self.ap_values)
+        return self.reduce_method(self.ap_values)
 
     def reset(self):
         self.ap_values.clear()

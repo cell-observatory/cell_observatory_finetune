@@ -23,20 +23,31 @@ class CheckpointManager:
                  model: torch.nn.Module, 
                  checkpointdir: Union[str, Path],
                  engine: Literal["deepspeed"] = "deepspeed", 
+                 checkpoint_tag: str = "best_model",
+                 load_dtype: Optional[Literal["fp16", "bf16"]] = None,
                  max_keep: Optional[int] = None
     ):
         self.model = model
         self.engine = engine
+        self.checkpoint_tag = checkpoint_tag
+        self.load_dtype = load_dtype
 
         self.checkpointdir = Path(checkpointdir)
-        assert self.checkpointdir.is_dir(), f"Checkpoint directory does not exist: {self.checkpointdir}"
+        assert self.checkpointdir.is_dir(), f"Checkpoint \
+            directory does not exist: {self.checkpointdir}"
 
         self.max_keep = max_keep
 
-    def save(self, prefix: str, epoch: int = None, best_loss: Optional[float] = None):
+    def save(self, 
+             prefix: str, 
+             epoch: int = None,
+             iter: int = None, 
+             best_loss: Optional[float] = None,
+    ):
         if self.engine == "deepspeed":
             client_state = {
                 "epoch": epoch,
+                "iter": iter,
                 "best_loss": best_loss
             }
             self.model.save_checkpoint(self.checkpointdir, client_state=client_state, tag=prefix)
@@ -44,57 +55,71 @@ class CheckpointManager:
             raise NotImplementedError("Saving sharded checkpoints for " \
                 "other engines not implemented yet.")
 
-    # currently this only supports loading with 
-    # DeepSpeed intialized models
-    # TODO: add support for inferring number of 
-    # checkpoint shards from the checkpoint directory
-    def load(self, 
-             prefix: str, 
-             dtype: Optional[Literal["float32", "fp32", "float16", "fp16", "bfloat16", "bf16"]] = None,   
-             engine: Literal["deepspeed"] = "deepspeed",
-            #  state_dict_filter_fn: str = None,
-            # TODO: write helper to make automatically 
-            #       infer the number of checkpoint shards
-             num_ckpt_shards: Optional[int] = None          
-    ):  
+    def load(self):  
         world_size = get_world_size()
+        num_ckpt_shards = self._infer_ckpt_shards_num(
+            ckpt_dir=os.path.join(self.checkpointdir, self.checkpoint_tag),
+            pattern=r"mp_rank_.+_model_states\.pt$$"
+        )
         
-        if num_ckpt_shards == world_size:
-            if engine == "deepspeed":
-                ckpt_path, client_state = self.model.load_checkpoint(
-                    load_dir=self.checkpointdir,
-                    tag=prefix,
-                    # custom_load_fn=state_dict_filter_fn,
-                )
-        else:
-            if engine == "deepspeed":
+        if num_ckpt_shards > 1 and num_ckpt_shards != world_size:
+            if self.engine == "deepspeed":
                 if is_main_process():
                     warnings.warn(
                         "Loading a checkpoint with DeepSpeed where number of processes. " \
                         "does not match the number of checkpoint shards. " \
                         "Converting to a standard checkpoint and saving to disk."
                     )
-                    self._convert_zero_checkpoint_to_universal(input_folder=os.path.join(self.checkpointdir, prefix),
-                                            output_folder=os.path.join(self.checkpointdir, f"{prefix}_universal"),
+                    self._convert_zero_checkpoint_to_universal(
+                        input_folder=os.path.join(self.checkpointdir, 
+                        self.checkpoint_tag),
+                        output_folder=os.path.join(self.checkpointdir, 
+                                                   f"{self.checkpoint_tag}_universal"),
                     )
                 
                 barrier()
                 
                 ckpt_path, client_state = self.model.load_checkpoint(
                     load_dir=self.checkpointdir,
-                    tag=f"{prefix}_universal",
+                    tag=f"{self.checkpoint_tag}_universal",
                     # custom_load_fn=state_dict_filter_fn
+                )
+            else:
+                raise NotImplementedError("Loading checkpoints for " \
+                    "other engines not implemented yet.")
+        else:
+            if self.engine == "deepspeed":
+                ckpt_path, client_state = self.model.load_checkpoint(
+                    load_dir=self.checkpointdir,
+                    tag=self.checkpoint_tag,
+                    # custom_load_fn=state_dict_filter_fn,
                 )
             else:
                 raise NotImplementedError("Loading checkpoints for " \
                     "other engines not implemented yet.")
 
         # get target dtype if specified
-        if dtype is not None:
+        if self.load_dtype is not None:
             module = getattr(self.model, "module", self.model)
-            module.to(TORCH_DTYPES[dtype].value)
+            module.to(TORCH_DTYPES[self.load_dtype].value)
 
         return ckpt_path, client_state
+    
+    def _infer_ckpt_shards_num(self, 
+                               ckpt_dir: Union[str, Path], 
+                               pattern: str = r"mp_rank_.+_model_states\.pt$$",
+    ) -> int:
+        """
+        Infer the number of checkpoint shards in a directory.
+        """
+        ckpt_dir = Path(ckpt_dir)
+        if not ckpt_dir.is_dir():
+            raise ValueError(f"Checkpoint directory does not exist: {ckpt_dir}")
+
+        # find all files that match the pattern
+        regex = re.compile(pattern)
+        ckpt_files = [f for f in ckpt_dir.iterdir() if regex.match(f.name)]
+        return len(ckpt_files)
 
     def _prefix_aware_load_state_dict(self, 
                                       state_dict: Dict[str, torch.Tensor], 

@@ -335,7 +335,10 @@ class EpochBasedTrainer(BaseTrainer):
         self.model.step()
 
         self.event_recorder.put_scalars(
-            {k: (v.item() if torch.is_tensor(v) else v) for k, v in loss_dict.items()}
+            scope="step",
+            **{k: (v.item() if torch.is_tensor(v) else v)
+            for k, v in loss_dict.items()
+            }
         )
 
         self.after_step(data_sample=data_sample,
@@ -353,15 +356,18 @@ class EpochBasedTrainer(BaseTrainer):
             with torch.no_grad():
                 for idx, data_sample in enumerate(self.val_dataloader):
                     self.run_validation_step(idx, data_sample)
+                    if idx > 100:
+                        break  # for testing purposes, remove later
 
         metrics = self.evaluator.evaluate()
         self.event_recorder.put_scalars(
-            {k: (v.item() if torch.is_tensor(v) else v)
-            for k, v in metrics.items()}, prefix="val_"
+            scope="epoch",
+            prefix="val_",
+            **{k: (v.item() if torch.is_tensor(v) else v)
+                for k, v in metrics.items()
+            }
         )
         self.evaluator.reset()
-
-        # TODO: (almost done) store best loss
 
         self.after_validation()
     
@@ -371,8 +377,9 @@ class EpochBasedTrainer(BaseTrainer):
         """
         self.before_val_step()
 
-        outputs = self.model(data_sample)
-        self.evaluator.process(data_sample, outputs)
+        loss_dict, outputs = self.model(data_sample)
+        self.evaluator.process(data_sample, outputs, loss_dict)
 
-        self.after_val_step(data_sample=data_sample, outputs=outputs)
+        self.after_val_step(data_sample=data_sample, 
+                            outputs=outputs, loss_dict=loss_dict)
         self._val_iter += 1

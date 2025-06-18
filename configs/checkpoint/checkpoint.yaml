@@ -5,8 +5,6 @@ defaults:
 resume_run: true # whether to resume from a previous run
 load_checkpointdir: /clusterfs/nvme/segment_4d/test_17/checkpoints
 checkpoint_tag: latest_model
-# TODO: make a helper that infers this from folder
-num_ckpt_shards: 2
 # state_dict_filter_fn: null
 
 # used by Ray Report
@@ -20,5 +18,7 @@ ray_checkpoint_config:
 checkpoint_manager:
   _target_: cell_observatory_finetune.utils.checkpoint.CheckpointManager
   checkpointdir: ${outdir}/checkpoints # directory to save checkpoints
+  load_dtype: ${quantization}
+  checkpoint_tag: latest_model
   engine: ${engine} # engine to use for training
   max_keep: 3 # maximum number of checkpoints to keep

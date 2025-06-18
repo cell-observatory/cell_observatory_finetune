@@ -24,15 +24,18 @@ import os
 import sys
 import time
 import math
+import ujson
 import logging
 import operator
 import datetime
 from enum import Enum
 from pathlib import Path
 from collections import Counter
-from typing import Optional, Union, Sequence, List
+from typing import Optional, Union, Sequence, List, Literal
 
 import torch
+import torch.nn as nn
+from torchinfo import summary
 from torch.profiler import ProfilerActivity
 from fvcore.common.timer import Timer
 
@@ -384,9 +387,10 @@ class PeriodicCheckpointer(HookBase):
         if (self.trainer._epoch + 1) % self.period == 0:
             self.trainer.checkpoint_manager.save(prefix=self.file_prefix, 
                                                  epoch=self.trainer._epoch + 1,
-                                                best_loss=0)
+                                                best_loss=self.trainer.best_metric,
+                                                iter=self.trainer._iter
                                                 #  best_loss=self.trainer._best_loss
-                                                #  )
+                                                 )
         
     def after_train(self):
         """
@@ -395,7 +399,8 @@ class PeriodicCheckpointer(HookBase):
         if self.trainer._epoch + 1 >= self.trainer._max_epochs:
             self.trainer.checkpoint_manager.save(prefix=self.file_prefix, 
                                                  epoch=self.trainer._epoch + 1,
-                                                 best_loss=0
+                                                 best_loss=self.trainer.best_metric,
+                                                 iter=self.trainer._iter
                                                 #  best_loss=self.trainer._best_loss
                                                 )
 
@@ -470,20 +475,141 @@ class ModelSummaryHook(HookBase):
                  batch_size: int
     ):
         self._logdir = Path(logdir)
-        assert self._logdir.is_dir(), f"Log directory does not exist: {self._logdir}"
+        assert self._logdir.is_dir(), f"Log directory does \
+            not exist: {self._logdir}"
 
         self.batch_size = batch_size
         self.input_shape = input_shape
 
     def before_train(self):
-        from cell_observatory_finetune.train.utils import summarize_model
         if is_main_process():
-            summarize_model(
+            self.summarize_model(
                 model=self.trainer.model,
                 inputs=self.input_shape,
                 batch_size=self.batch_size,
                 logdir=self._logdir
             )
+    
+    def summarize_model(self, 
+                        model: nn.Module, 
+                        inputs: tuple, 
+                        batch_size: int, 
+                        logdir: Path
+    ):
+        model_logbook = {}
+        model_stats = summary(
+            model=model,
+            input_size=inputs,
+            depth=5,
+            col_width=25,
+            col_names=["kernel_size", "output_size", "num_params"],
+            row_settings=["var_names"],
+            verbose=0,
+            mode='eval'
+        )
+        train_stats = summary(
+            model=model,
+            input_size=inputs,
+            depth=5,
+            col_width=25,
+            col_names=["kernel_size", "output_size", "num_params"],
+            row_settings=["var_names"],
+            verbose=1,
+            mode='train'
+        )
+
+        with (logdir / 'model.log').open('w') as f:
+            f.write(str(model_stats))
+
+        model_logbook['training_batch_size'] = batch_size
+        model_logbook['input_bytes'] = model_stats.total_input
+        model_logbook['total_params'] = model_stats.total_params
+        model_logbook['trainable_params'] = model_stats.trainable_params
+        model_logbook['param_bytes'] = model_stats.total_param_bytes
+
+        model_logbook['eval_macs'] = model_stats.total_mult_adds
+        model_logbook['training_macs'] = train_stats.total_mult_adds
+
+        model_logbook['forward_pass_bytes'] = model_stats.total_output_bytes
+        model_logbook['forward_backward_pass_bytes'] = train_stats.total_output_bytes
+
+        model_logbook['eval_model_bytes'] = model_logbook['param_bytes'] \
+            + model_logbook['forward_pass_bytes']
+        model_logbook['training_model_bytes'] = model_logbook['param_bytes'] \
+            + model_logbook['forward_backward_pass_bytes']
+
+        model_logbook['eval_bytes'] = model_logbook['input_bytes'] + \
+            model_logbook['eval_model_bytes']
+        model_logbook['training_bytes'] = model_logbook['input_bytes'] + \
+            model_logbook['training_model_bytes']
+
+        model_logbook['layers'] = {}
+        for layer in train_stats.summary_list:
+            if layer.is_leaf_layer:
+                model_logbook['layers'][f'{layer.class_name}_{layer.var_name}'] = {
+                    'macs': layer.macs,
+                    'params': max(layer.num_params, 0),
+                    'param_bytes': layer.param_bytes,
+                    'forward_pass_bytes': layer.output_bytes,
+                    'forward_backward_pass_bytes': layer.output_bytes * 2, # x2 for gradients
+                    'output_shape': layer.output_size,
+                }
+
+        with (logdir / 'model_logbook.json').open('w') as f:
+            ujson.dump(
+                model_logbook,
+                f,
+                indent=4,
+                sort_keys=False,
+                ensure_ascii=False,
+                escape_forward_slashes=False
+            )
+
+
+class BestMetricSaver(HookBase):
+    def __init__(self, 
+                 metric_name: str, 
+                 compare_fn: Literal["gt", "lt"] = "lt",
+                 eval_after_validation: bool = True
+    ):
+        self.metric_name = metric_name
+        self.compare_fn = operator.gt if compare_fn == "gt" else operator.lt
+        self.eval_after_validation = eval_after_validation
+
+    def _update_best_metrics(self, val):
+        if math.isnan(val) or math.isinf(val):
+            return False
+        self.trainer.best_metric = val
+        return True
+
+    def update_best_metrics(self, latest_metric_val):
+        if self.compare_fn(latest_metric_val, self.trainer.best_metric):
+            self._update_best_metrics(latest_metric_val)
+
+    def after_validation(self):
+        if self.eval_after_validation:
+            epoch_scalars = self.trainer.event_recorder.get_epoch_scalars()
+            if self.metric_name not in epoch_scalars:
+                raise ValueError(
+                    f"Metric {self.metric_name} not found in epoch logs. "
+                    "Make sure to set `val_metric` in the trainer config."
+                )
+            latest_metric_val, *_ = epoch_scalars[self.metric_name].pop()
+            self.update_best_metrics(latest_metric_val)
+    
+    def after_epoch(self):
+        """
+        Check if the latest metric is the best so far.
+        """
+        if not self.eval_after_validation:
+            epoch_scalars = self.trainer.event_recorder.get_epoch_scalars()
+            if self.metric_name not in epoch_scalars:
+                raise ValueError(
+                    f"Metric {self.metric_name} not found in epoch logs. "
+                    "Make sure to set `val_metric` in the trainer config."
+                )
+            latest_metric_val, *_ = epoch_scalars[self.metric_name].pop()
+            self.update_best_metrics(latest_metric_val)
 
 # TODO: (-1) Torch Profiler Hook (almost done)
 #       (0) Early Stop Hook

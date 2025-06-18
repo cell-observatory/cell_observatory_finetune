@@ -28,10 +28,6 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Literal, Optional, Tuple, Dict, List
 
-import atexit
-import concurrent.futures
-from typing import Protocol
-
 import wandb
 import pandas as pd
 
@@ -258,12 +254,7 @@ class EventWriter:
             )
 
         return step_scalars_gathered, epoch_scalars_gathered
-        #     # hand off to concrete writer
-        #     self._write_scalar_impl(step_scalars_gathered, scope="step")
-        #     self._write_scalar_impl(epoch_scalars_gathered, scope="epoch")
-        
-        # barrier()
-    
+
     def _reduce_step_scalars(self, 
                              epoch_scalars: Dict[str, List[Tuple[float, int, int]]],
                              step_scalars: Dict[str, List[Tuple[float, int, int]]]

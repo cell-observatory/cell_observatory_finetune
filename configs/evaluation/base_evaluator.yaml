@@ -1,0 +1,15 @@
+defaults:
+  - metrics: metrics
+  - _self_  
+
+val_begin: 0
+val_interval: 1
+
+# TODO: coordinate with ray config in checkpoint.yaml
+val_metric: val_step_loss # needs to be one of the metrics defined in metrics.yaml
+val_mode: lt # mode for the validation metric, can be 'gt' or 'lt'
+
+evaluator:
+  _target_: cell_observatory_finetune.evaluation.base_evaluation.BaseEvaluator
+  training_metrics:
+    - "step_loss": "mean"

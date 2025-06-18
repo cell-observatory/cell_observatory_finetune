@@ -34,3 +34,7 @@ hooks_list:
   epoch_period: 1
   max_runs: 10
   logdir: ${logging.logdir}
+- _target_: cell_observatory_finetune.train.hooks.BestMetricSaver
+  metric_name: ${evaluation.val_metric}
+  compare_fn: ${evaluation.val_mode}
+  eval_after_validation: true
