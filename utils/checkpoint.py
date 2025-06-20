@@ -1,21 +1,29 @@
 import os
 import re
 import sys
-import shlex
-import subprocess
 import logging
 import warnings
+import subprocess
 from pathlib import Path 
 
 from collections import OrderedDict
-from typing import Dict, Optional, Union, Literal
+from typing import Dict, Optional, Union, Literal, List
 
 import torch 
 
 from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
 
 from cell_observatory_platform.data.data_types import TORCH_DTYPES
+from cell_observatory_finetune.models.meta_arch.base_model import BaseModel
 from cell_observatory_finetune.utils.comm import is_main_process, get_world_size, barrier
+
+
+logging.basicConfig(
+    stream=sys.stdout,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
@@ -27,12 +35,15 @@ class CheckpointManager:
                  engine: Literal["deepspeed"] = "deepspeed", 
                  checkpoint_tag: str = "best_model",
                  load_dtype: Optional[Literal["fp16", "bf16"]] = None,
-                 max_keep: Optional[int] = None
+                 max_keep: Optional[int] = None,
+                 state_dict_filter: Optional[List[str]] = None,
+                 freeze_modules: Optional[Union[str, List[str]]] = None,
+                 activation_checkpoint_modules: Optional[Union[str, List[str]]] = None
     ):
         self.model = model
         self.engine = engine
-        self.checkpoint_tag = checkpoint_tag
         self.load_dtype = load_dtype
+        self.checkpoint_tag = checkpoint_tag
 
         assert not (resume_checkpointdir is not None and \
             pretrained_checkpointdir is not None), \
@@ -50,6 +61,11 @@ class CheckpointManager:
             directory does not exist: {self.load_checkpointdir}"
 
         self.max_keep = max_keep
+
+        self.freeze_modules = freeze_modules
+        self.activation_checkpoint_modules = activation_checkpoint_modules
+        self.state_dict_filter = list(state_dict_filter) if state_dict_filter \
+            is not None else None
 
     def save(self, 
              prefix: str, 
@@ -75,7 +91,12 @@ class CheckpointManager:
             ckpt_dir=os.path.join(self.load_checkpointdir, self.checkpoint_tag),
             pattern=r"mp_rank_.+_model_states\.pt$$"
         )
-        
+
+        if self.state_dict_filter is not None and self.engine == "deepspeed":
+            custom_filter_fn = self._state_dict_filter_fn
+        else:
+            custom_filter_fn = None
+
         if num_ckpt_shards > 1 and num_ckpt_shards != world_size:
             if self.engine == "deepspeed":
                 if is_main_process():
@@ -96,7 +117,7 @@ class CheckpointManager:
                 ckpt_path, client_state = self.model.load_checkpoint(
                     load_dir=self.load_checkpointdir,
                     tag=f"{self.checkpoint_tag}_universal",
-                    # custom_load_fn=state_dict_filter_fn
+                    custom_load_fn=custom_filter_fn
                 )
             else:
                 raise NotImplementedError("Loading checkpoints for " \
@@ -106,7 +127,7 @@ class CheckpointManager:
                 ckpt_path, client_state = self.model.load_checkpoint(
                     load_dir=self.load_checkpointdir,
                     tag=self.checkpoint_tag,
-                    # custom_load_fn=state_dict_filter_fn,
+                    custom_load_fn=custom_filter_fn,
                 )
             else:
                 raise NotImplementedError("Loading checkpoints for " \
@@ -117,8 +138,39 @@ class CheckpointManager:
             module = getattr(self.model, "module", self.model)
             module.to(TORCH_DTYPES[self.load_dtype].value)
 
+        # unwrap DDP .module naming if necessary
+        base = getattr(self.model, "module", self.model)
+
+        assert isinstance(base, BaseModel), \
+            "Model must be an instance of BaseModel or its subclass."
+
+        if self.activation_checkpoint_modules:
+            base.activation_checkpoint(base, self.activation_checkpoint_modules)
+
+        if self.freeze_modules:
+            base.freeze(self.freeze_modules)
+
         return ckpt_path, client_state
     
+    # custom_load_fn from DeepSpeed accepts 
+    # a state_dict src and loads it into dst
+    def _state_dict_filter_fn(self,
+                              src: Dict[str, torch.Tensor],
+                              dst: torch.nn.Module) -> None:
+        if self.state_dict_filter is None:
+            dst.load_state_dict(src, strict=False)
+            return
+
+        filtered = {k: v for k, v in src.items()
+                    if any(k.startswith(p) for p in self.state_dict_filter)}
+
+        missing, unexpected = dst.load_state_dict(filtered, strict=False)
+
+        if missing:
+            logger.warning(f"[CheckpointManager] missing keys after filter: {missing}")
+        if unexpected:
+            logger.warning(f"[CheckpointManager] unexpected keys after filter: {unexpected}")
+
     def _infer_ckpt_shards_num(self, 
                                ckpt_dir: Union[str, Path], 
                                pattern: str = r"mp_rank_.+_model_states\.pt$$",

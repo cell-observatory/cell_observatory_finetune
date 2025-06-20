@@ -351,7 +351,7 @@ class EpochBasedTrainer(BaseTrainer):
 
         # initialize evaluator
         self.evaluator = instantiate(cfg.evaluation.evaluator)
-    
+                
     def run(self):
         """
         Launch training.

@@ -43,9 +43,7 @@ from ray.train import Checkpoint, report
 
 from cell_observatory_finetune.utils.logging import EventWriter
 from cell_observatory_finetune.utils.comm import (is_main_process, 
-                                                  gather_and_reduce,
-                                                  get_world_size,
-                                                  in_torch_dist,
+                                                  gather_and_reduce
                                                   )
 
 

@@ -4,7 +4,6 @@ defaults:
 # for resuming training from previous checkpoint
 resume_run: true # whether to resume from a previous run
 checkpoint_tag: latest_model
-# state_dict_filter_fn: null
 
 # used by Ray Report
 ray_checkpoint_config:
@@ -23,3 +22,8 @@ checkpoint_manager:
   checkpoint_tag: latest_model
   engine: ${engine} # engine to use for training
   max_keep: 3 # maximum number of checkpoints to keep
+  # provide list of dotted module paths
+  # to freeze/activation checkpoint/load selectively
+  freeze_modules: null
+  state_dict_filter: ["encoder"]
+  activation_checkpoint_modules: null
