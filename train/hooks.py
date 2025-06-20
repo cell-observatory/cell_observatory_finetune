@@ -39,8 +39,14 @@ from torchinfo import summary
 from torch.profiler import ProfilerActivity
 from fvcore.common.timer import Timer
 
+from ray.train import Checkpoint, report
+
 from cell_observatory_finetune.utils.logging import EventWriter
-from cell_observatory_finetune.utils.comm import is_main_process, process_rank
+from cell_observatory_finetune.utils.comm import (is_main_process, 
+                                                  gather_and_reduce,
+                                                  get_world_size,
+                                                  in_torch_dist,
+                                                  )
 
 
 logging.basicConfig(
@@ -173,6 +179,7 @@ class HookBase:
 class AnomalyDetector(HookBase):
     """Wrap each epoch in torch.autograd.detect_anomaly."""
     def __init__(self):
+        super().__init__()
         self._anom_ctx = torch.autograd.set_detect_anomaly(True, check_nan=False)
         self.loss_nans = 0
 
@@ -455,6 +462,7 @@ class PeriodicWriter(HookBase):
                 to write events to.
             period (int): the period of writing events, in epochs.
         """
+        super().__init__()
         self._period = period
         self._writers = writers
         
@@ -488,6 +496,7 @@ class PeriodicCheckpointer(HookBase):
     Checkpointing, executed every ``period`` epoch and after the last epoch.
     """
     def __init__(self, period=1, file_prefix="latest_model"):
+        super().__init__()
         self.period = period
         self.file_prefix = file_prefix
 
@@ -498,10 +507,8 @@ class PeriodicCheckpointer(HookBase):
         if (self.trainer._epoch + 1) % self.period == 0:
             self.trainer.checkpoint_manager.save(prefix=self.file_prefix, 
                                                  epoch=self.trainer._epoch + 1,
-                                                best_loss=self.trainer.best_metric,
-                                                iter=self.trainer._iter
-                                                #  best_loss=self.trainer._best_loss
-                                                 )
+                                                 best_loss=self.trainer.best_metric,
+                                                 iter=self.trainer._iter)
         
     def after_train(self):
         """
@@ -511,9 +518,21 @@ class PeriodicCheckpointer(HookBase):
             self.trainer.checkpoint_manager.save(prefix=self.file_prefix, 
                                                  epoch=self.trainer._epoch + 1,
                                                  best_loss=self.trainer.best_metric,
-                                                 iter=self.trainer._iter
-                                                #  best_loss=self.trainer._best_loss
-                                                )
+                                                 iter=self.trainer._iter)
+
+
+class BestCheckpointer(HookBase):
+    def __init__(self, checkpointdir: Union[str, Path]):
+        super().__init__()
+        self.checkpoint_dir = Path(checkpointdir)
+    
+    def after_validation(self):
+        checkpoint = Checkpoint.from_directory(self.checkpoint_dir)  \
+            if is_main_process() else None
+        report(metrics={"best_loss": self.trainer.best_metric, 
+                        "iter": self.trainer._iter, 
+                        "epoch": self.trainer._epoch + 1}, 
+                        checkpoint=checkpoint)
 
 
 class TorchMemoryStats(HookBase):
@@ -532,6 +551,7 @@ class TorchMemoryStats(HookBase):
             period (int): Output stats each 'period' iterations
             max_runs (int): Stop the logging after 'max_runs'
         """
+        super().__init__()
         self._step_period = step_period
         self._epoch_period = epoch_period
 
@@ -619,6 +639,7 @@ class ModelSummaryHook(HookBase):
                  input_shape: tuple[int], 
                  batch_size: int
     ):
+        super().__init__()
         self._logdir = Path(logdir)
         assert self._logdir.is_dir(), f"Log directory does \
             not exist: {self._logdir}"
@@ -718,6 +739,7 @@ class BestMetricSaver(HookBase):
                  eval_after_validation: bool = True, 
                  period: int = 1
     ):
+        super().__init__()
         self.metric_name = metric_name
         self.compare_fn = operator.gt if compare_fn == "gt" else operator.lt
         
@@ -742,7 +764,8 @@ class BestMetricSaver(HookBase):
                     f"Metric {self.metric_name} not found in epoch logs. "
                     "Make sure to set `val_metric` in the trainer config."
                 )
-            latest_metric_val, *_ = epoch_scalars[self.metric_name].pop()
+            latest_metric_val_per_rank, *_ = epoch_scalars[self.metric_name][-1]
+            latest_metric_val = gather_and_reduce(torch.tensor(latest_metric_val_per_rank, device="cuda")).item()
             self.update_best_metrics(latest_metric_val)
     
     def after_epoch(self):
@@ -758,7 +781,8 @@ class BestMetricSaver(HookBase):
                         f"Metric {self.metric_name} not found in epoch logs. "
                         "Make sure to set `val_metric` in the trainer config."
                     )
-                latest_metric_val, *_ = epoch_scalars[self.metric_name].pop()
+                latest_metric_val_per_rank, *_ = epoch_scalars[self.metric_name][-1]
+                latest_metric_val = gather_and_reduce(torch.tensor(latest_metric_val_per_rank, device="cuda")).item()
                 self.update_best_metrics(latest_metric_val)
 
     def after_test(self):
@@ -767,10 +791,160 @@ class BestMetricSaver(HookBase):
             raise ValueError(
                 f"Metric {self.metric_name} not found in test logs. "
             )
-        test_metric_val, *_ = test_scalars[self.metric_name].pop()
+        test_metric_val_per_rank, *_ = test_scalars[self.metric_name][-1]
+        test_metric_val = gather_and_reduce(torch.tensor(test_metric_val_per_rank, device="cuda")).item()
         self._update_best_metrics(test_metric_val)
 
-# TODO: (-1) Torch Profiler Hook (almost done)
-#       (0) Early Stop Hook
-#       (1) save inference result hook (viz. segmentations, detections, etc.)
-#       (2) activations, weights, gradients histogram hook (for train debug)
+
+# TODO: support for saving trace to
+#       wandb/tensorboard
+class TorchProfiler(HookBase):
+    """
+    A hook which runs `torch.profiler.profile`.
+
+    The above example will run the profiler for iteration 10~20 and dump
+    results to ``OUTPUT_DIR``. We do not profile the first few iterations
+    because they are typically slower than the rest.
+    
+    The result files can be loaded in the ``chrome://tracing`` page in chrome browser,
+    and the tensorboard visualizations can be visualized using
+    ``tensorboard --logdir OUTPUT_DIR/log``
+    """
+
+    TorchProfilerActivities = {
+        "CPU": torch.profiler.ProfilerActivity.CPU, 
+        "CUDA": torch.profiler.ProfilerActivity.CUDA
+    }
+
+    def __init__(self, 
+                 output_dir,
+                 schedule: dict | None = None,
+                 activities: Sequence[ProfilerActivity | str] | None = None,
+                 save_tensorboard=True
+    ):
+        """
+        Args:
+            output_dir (str): the output directory to dump tracing files.
+            activities (iterable): same as in `torch.profiler.profile`.
+            save_tensorboard (bool): whether to save tensorboard visualizations at output_dir/log/
+        """
+        super().__init__()
+        self._activities = tuple(
+            a if isinstance(a, ProfilerActivity)
+            else self.TorchProfilerActivities[a.upper()]
+            for a in (activities or (ProfilerActivity.CPU,
+                                     ProfilerActivity.CUDA))
+        )
+
+        self._wait, self._warmup = schedule.get("wait"), \
+                                        schedule.get("warmup") 
+        self._active, self._repeat = schedule.get("active"), \
+                                        schedule.get("repeat") 
+
+        self._output_dir = output_dir
+        self.profile_times = (self._wait + self._warmup + self._active) * self._repeat
+        self._profiler, self._closed = None, False
+
+        os.makedirs(os.path.join(output_dir, "log"), exist_ok=True)
+        self._on_trace_ready = (
+            torch.profiler.tensorboard_trace_handler(os.path.join(output_dir, "log"))
+            if save_tensorboard else None
+        )
+
+    def before_train(self):        
+        self._profiler = torch.profiler.profile(
+            activities=self._activities,
+            schedule=torch.profiler.schedule(
+                wait=self._wait, warmup=self._warmup,
+                active=self._active, repeat=self._repeat),
+            on_trace_ready=self._on_trace_ready,
+            record_shapes=True, profile_memory=True,
+            with_stack=False, with_flops=True, with_modules=True,
+        )
+        self._profiler.__enter__()
+
+    def after_step(self, *args, **kwargs):
+        if self._closed:
+            return
+        elif self.trainer._iter == self.profile_times - 1:
+            self._profiler.stop()
+            self._closed, self._profiler = True, None
+        else:
+            self._profiler.step()
+
+    def after_epoch(self):
+        if not self._closed:
+            self._profiler.stop()
+            self._closed, self._profiler = True, None
+
+
+class EarlyStopHook(HookBase):
+    """
+    A hook that stops training early if the validation metric does not improve
+    for a certain number of epochs.
+    """
+
+    def __init__(self, 
+                patience, 
+                stopping_threshold,
+                mode: Literal["lt", "gt"],
+                metric_name: Optional[str] = None,
+    ):
+        super().__init__()
+
+        self.metric_name = metric_name
+        if mode == "lt":
+            self.compare_fn = operator.lt
+        elif mode == "gt":
+            self.compare_fn = operator.gt
+        else:
+            raise ValueError(f"Invalid mode: {mode}. Use 'lt' or 'gt'.")
+
+        self.wait_count = 0
+        self.patience = patience
+        self.stopping_threshold = stopping_threshold
+
+        self.latest_metric_val = math.inf
+
+    def after_validation(self):
+        """
+        Check if the validation metric has improved.
+        If not, increment the wait count.
+        If the wait count exceeds the patience, stop training.
+        """
+        epoch_scalars = self.trainer.event_recorder.get_epoch_scalars()
+        if self.metric_name not in epoch_scalars:
+            raise ValueError(
+                f"Metric {self.metric_name} not found in epoch logs. "
+                "Make sure to set `val_metric` in the trainer config."
+            )
+        
+        latest_metric_val_per_rank, *_ = epoch_scalars[self.metric_name][-1]
+        latest_metric_val = gather_and_reduce(torch.tensor(latest_metric_val_per_rank, device="cuda")).item()
+
+        if math.isnan(latest_metric_val) or math.isinf(latest_metric_val):
+            raise ValueError(
+                f"Validation metric {self.metric_name} is NaN or Inf. "
+            )
+        
+        metric_diff = abs(latest_metric_val - self.latest_metric_val)
+        
+        if self.compare_fn(metric_diff, self.stopping_threshold):
+            self.wait_count += 1
+            logger.info(f"Validation metric {self.metric_name} did not improve. "
+                        f"Wait count: {self.wait_count}/{self.patience}.")
+            if self.wait_count >= self.patience:
+                logger.info("Early stopping triggered.")
+                # setting stop_training to True
+                # will stop the training loop
+                # before the next epoch starts 
+                # see run in EpochBasedTrainer
+                self.trainer.stop_training = True
+        else:
+            logger.info(f"Validation metric {self.metric_name} improved to {latest_metric_val}.")
+            self.wait_count = 0
+        
+        self.latest_metric_val = latest_metric_val
+        
+
+# TODO: activations, weights, gradients histogram hook (for train debug)

@@ -151,3 +151,4 @@ dmypy.json
 dataset/
 archive/
 pretrained_models/
+configs/env

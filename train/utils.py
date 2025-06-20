@@ -195,11 +195,6 @@ def resume_run(trainer, config: DictConfig):
         )
 
     else:
-        assert config.checkpoint.checkpoint_manager.save_checkpointdir is None, \
-            "Checkpoint directory must be None when starting a new training run."
-        assert config.logging.logdir is None, \
-            "Checkpoint directory must be None when starting a new training run."
-        
         epoch, iter, best_loss = 0, 0, np.inf
 
         Path(config.logging.logdir).mkdir(exist_ok=True, parents=True)

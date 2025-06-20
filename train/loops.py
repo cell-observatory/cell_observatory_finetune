@@ -23,6 +23,7 @@ limitations under the License.
 import logging
 import weakref
 from pathlib import Path
+from dotenv import load_dotenv
 from typing import List, Optional, Sequence
 
 from omegaconf import DictConfig, OmegaConf
@@ -41,7 +42,7 @@ from cell_observatory_finetune.train.utils import (
 )
 from cell_observatory_finetune.train.hooks import HookBase
 from cell_observatory_finetune.utils.logging import EventRecorder
-from cell_observatory_finetune.utils.comm import inference_context
+from cell_observatory_finetune.utils.comm import inference_context, barrier
 from cell_observatory_finetune.data.dataloaders import get_dataloader
 from cell_observatory_finetune.train.registry import build_dependency_graph_and_instantiate
 
@@ -55,9 +56,11 @@ logging.getLogger("ray.train._internal.checkpoint_manager").setLevel(logging.INF
 
 
 # Ray train wrapper entry point
-def train_loop_per_worker(config):
+def train_loop_per_worker(config):    
+    load_dotenv(config.env.env_path)
     trainer_cls = get_class(config.trainer)
     trainer_per_worker = trainer_cls(config)
+
     if config.job_type == "train":
         trainer_per_worker.run()
     elif config.job_type == "test":
@@ -65,6 +68,7 @@ def train_loop_per_worker(config):
     else:
         raise ValueError(f"Unknown job type: {config.job_type}. "
                          f"Expected 'train' or 'test', got '{config.job_type}'.")
+    
     return {"best_metric": trainer_per_worker.best_metric}
 
 
@@ -81,7 +85,10 @@ class BaseTrainer:
 
         # initialize event_writers
         event_writers = self._build_event_writers(
-            config.logging.event_writers, self.event_recorder, self.visualizer
+            config.logging.event_writers, 
+            self.event_recorder, 
+            self.visualizer, 
+            config
         )
         self.event_writers_list = instantiate(
             config.logging.event_writers_list,
@@ -94,15 +101,21 @@ class BaseTrainer:
         self.register_hooks(hooks)
 
     @staticmethod
-    def _build_event_writers(w_cfgs, recorder, visualizer):
+    def _build_event_writers(w_cfgs, recorder, visualizer, config):
         writers = []
         for writer in w_cfgs:
             # TODO: is there a better way to do this?
-            if writer._target_ == "cell_observatory_finetune.utils.logging.LocalEventWriter":
+            if writer._target_.endswith(".LocalEventWriter"):
                 writer = instantiate(
                     writer,
                     event_recorder=recorder,
                     visualizer=visualizer,
+                )
+            elif writer._target_.endswith(".WandBEventWriter"):
+                writer = instantiate(
+                    writer,
+                    event_recorder=recorder,
+                    run_config=OmegaConf.to_yaml(config, resolve=True),
                 )
             else:
                 writer = instantiate(writer, event_recorder=recorder)
@@ -115,7 +128,7 @@ class BaseTrainer:
         for hc in h_cfgs:
             # inject writers into PeriodicWriter-like hooks
             # TODO: is there a better way to do this?
-            if hc._target_ == "cell_observatory_finetune.train.hooks.PeriodicWriter":
+            if hc._target_.endswith(".PeriodicWriter"):
                 hook = instantiate(hc, writers=event_writers)
             else:
                 hook = instantiate(hc)

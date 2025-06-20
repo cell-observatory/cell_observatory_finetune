@@ -17,6 +17,7 @@ defaults:
   - checkpoint: checkpoint # Loads configs/checkpoint/checkpoint.yaml
   - deepspeed: deepspeed # Loads configs/deepspeed/deepspeed.yaml
   - clusters: local # Loads configs/clusters/slurm_multinode.yaml
+  - env: env # Loads configs/env/env.yaml
   - _self_  # self reference last to allow for overrides
 
 # overrides
@@ -142,7 +143,7 @@ datasets:
 
 checkpoint:
   # for resuming training from previous checkpoint
-  resume_run: true # whether to resume from a previous run
+  resume_run: false # whether to resume from a previous run
   checkpoint_tag: latest_model
   # state_dict_filter_fn: null
 
@@ -178,6 +179,12 @@ logging:
   logdir: ${outdir}/logs
 
 # ----------------
+
+# experiment name (used for logging)
+experiment_name: experiment_channel_split_masked_predictor_mae_2025_06_19
+
+# task
+task: channel_split
 
 # Model type
 network: mae

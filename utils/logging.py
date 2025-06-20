@@ -22,6 +22,7 @@ limitations under the License.
 import os
 import math
 import json
+import itertools
 from enum import Enum
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -32,9 +33,6 @@ import wandb
 import pandas as pd
 
 import torch
-from torch.utils.tensorboard import SummaryWriter
-
-from ray.train import Checkpoint, report
 
 from cell_observatory_finetune.utils.comm import (is_main_process, 
                                  in_torch_dist, 
@@ -53,8 +51,7 @@ class EventRecorder:
 
         self._tensors, self._histograms, self._traces = [], [], []
         
-        self._reduce_methods_rank: dict[str, str | None] = {}
-        self._reduce_methods_step: dict[str, str | None] = {}
+        self._reduce_methods: dict[str, str | None] = {}
 
     def put_tensor(self, tensor_name, tensor, tensor_metadata):
         self._tensors.append((tensor_name, tensor, tensor_metadata, self._iter, self._epoch))
@@ -63,16 +60,13 @@ class EventRecorder:
                     name, 
                     value, 
                     scope: Literal["step", "epoch"] = "step", 
-                    reduce_rank: str | None = "mean",
-                    reduce_step: str | None = "mean"
+                    reduce_method: str | None = "mean"
     ):
         # we need to reduce per rank and per step to get epoch averages
         # either we set this dynamically or we have a config with 
         # the reduce methods for each scalar 
-        if name not in self._reduce_methods_step or \
-            name not in self._reduce_methods_rank:
-            self._reduce_methods_step[name] = reduce_step
-            self._reduce_methods_rank[name] = reduce_rank
+        if name not in self._reduce_methods:
+            self._reduce_methods[name] = reduce_method
         if scope == "step":
             self._step_scalars[name].append((value, self._iter, self._epoch))
         elif scope == "epoch":
@@ -80,8 +74,7 @@ class EventRecorder:
 
     def put_scalars(self, 
                     scope="step", 
-                    reduce_rank="mean", 
-                    reduce_step="mean", 
+                    reduce_method="mean", 
                     prefix=None, 
                     **kwargs
     ):
@@ -91,8 +84,7 @@ class EventRecorder:
             if not math.isfinite(v):
                 raise ValueError(f"Scalar value for key '{k}' is not finite: {v}")
             k = f"{prefix}{k}" if prefix else k
-            self.put_scalar(k, v, scope=scope, 
-                    reduce_rank=reduce_rank, reduce_step=reduce_step)
+            self.put_scalar(k, v, scope=scope, reduce_method=reduce_method)
 
     def put_histogram(self, hist_name, hist_tensor):
         self._histograms.append((hist_name, hist_tensor, self._iter, self._epoch))
@@ -181,14 +173,8 @@ class EventRecorder:
         self.clear_scalars()
         self.clear_traces()
 
-    def get_reduce_op(self, name, scope: Literal["step", "rank"]):
-        if scope == "step":
-            return self._reduce_methods_step.get(name)
-        elif scope == "rank":
-            return self._reduce_methods_rank.get(name)
-        else:
-            raise ValueError(f"Unknown scope: {scope!r}. "
-                             f"Supported scopes: 'step', 'rank'.")
+    def get_reduce_op(self, name):
+            return self._reduce_methods.get(name)
     
     def resume(self, iter: int, epoch: int):
         """
@@ -208,85 +194,46 @@ class EventWriter:
     """
     Base class for writers that obtain events from :class:`EventRecorder` and process them.
     """
-
-    @abstractmethod
-    def write_tensor(self):
-        pass
     
+    # helper methods for writing scalars
+
     # writer_scalars handles the writing of scalars to 
     # the desired backend (e.g., TensorBoard, W&B, etc.)
     # since each worker process has its own EventRecorder,
     # with its own sclars, we need to gather all scalars
     # from all workers and then write them in a single place
-    # otherwise the workers end up overwriting each other's 
-    # data, if we want to record data from all workers
-    # we rename the scalars to include the rank
-    # e.g. "rank0_loss", "rank1_loss", etc.
-    # NOTE: Ray.Report reports metrics from the rank 0
-    #       worker so for multi worker training
-    #       we use distributed primitives to gather
-    #       scalars from all workers and then write them
-    #       to the desired backend. See:
-    # https://docs.ray.io/en/latest/train/user-guides/monitoring-logging.html
     def reduce_scalars(self):
         distributed = in_torch_dist()
         world = get_world_size()
         rank = process_rank()
 
-        step_scalars_gathered = self._gather_scalars(
+        step_scalars_per_epoch, step_scalars = self._gather_scalars(
             scalars=self.event_recorder.get_step_scalars(),
             rank=rank, 
             world=world, 
-            distributed=distributed
+            distributed=distributed,
+            keep_steps_data=True
         )
-        epoch_scalars_gathered = self._gather_scalars(
+        epoch_scalars, _ = self._gather_scalars(
             scalars=self.event_recorder.get_epoch_scalars(),
             rank=rank, 
             world=world, 
-            distributed=distributed
+            distributed=distributed,
+            keep_steps_data=False
         )
 
         if rank == 0:
             # reduce step scalars and add to epoch scalars
-            epoch_scalars_gathered = self._reduce_step_scalars(
-                epoch_scalars = epoch_scalars_gathered,
-                step_scalars = step_scalars_gathered
-            )
+            epoch_scalars.update(step_scalars_per_epoch)  
 
-        return step_scalars_gathered, epoch_scalars_gathered
-
-    def _reduce_step_scalars(self, 
-                             epoch_scalars: Dict[str, List[Tuple[float, int, int]]],
-                             step_scalars: Dict[str, List[Tuple[float, int, int]]]
-    ) -> Dict[str, List[Tuple[float, int, int]]]:
-        for metric, records in step_scalars.items():
-            if metric not in epoch_scalars:
-                epoch_scalars[metric] = []
-                reduce_method = self.event_recorder.get_reduce_op(metric, scope="step")
-                vals   = [v for v, *_ in records]
-                # all records have the same epoch
-                # since this function is called
-                # after each epoch to reduce all
-                # step scalars for this epoch
-                epoch = records[0][2]
-                if reduce_method == "mean":
-                    val = sum(vals) / len(vals)
-                elif reduce_method == "sum":
-                    val = sum(vals)
-                elif reduce_method == "max":
-                    val = max(vals)
-                elif reduce_method == "min":
-                    val = min(vals)
-                else:
-                    raise ValueError(f"Unknown reduce method: {reduce_method!r} \
-                            for metric {metric!r}")
-                epoch_scalars[metric].append((val, -1, epoch))
-        return epoch_scalars
+        return step_scalars, epoch_scalars
 
     def _gather_scalars(self, 
                         scalars: Dict[str, List[Tuple[float, int, int]]], 
-                        rank: int, world: int, 
-                        distributed: bool = True
+                        rank: int, 
+                        world: int, 
+                        distributed: bool = True,
+                        keep_steps_data: bool = False
     ):
         if distributed and world > 1:
             gathered = [None] * world
@@ -301,74 +248,30 @@ class EventWriter:
             # {metric: {(it, ep): [val_rank0, ...]}}
             for rank, dict in enumerate(gathered):
                 for name, records in dict.items():
-                    reduce_op = self.event_recorder.get_reduce_op(name, scope="rank")
                     for val, it, ep in records:
-                        if reduce_op is None:
-                            step_reduce_op = self.event_recorder.get_reduce_op(name, scope="step")
-                            self.event_recorder._reduce_methods_step.setdefault(f"rank{rank}_{name}", step_reduce_op)
-                            buckets[f"rank{rank}_{name}"][(it, ep)].append(val)
-                        else:
-                            buckets[name][(it, ep)].append(val)
+                        buckets[name][(it, ep)].append(val)
 
             # apply reductions
-            merged = defaultdict(list)
+            merged, merged_per_step = defaultdict(list), defaultdict(list)
             for metric, rows in buckets.items():
-                for (it, ep), vals in rows.items():
-                    if metric.startswith("rank"):
-                        v = vals[0]
-                    else:
-                        red = self.event_recorder.get_reduce_op(metric, scope="rank")
-                        if red == "sum":
-                            v = sum(vals)
-                        elif red == "mean":
-                            v = sum(vals) / len(vals)
-                        elif red == "max":
-                            v = max(vals)
-                        elif red == "min":
-                            v = min(vals)
-                        else:
-                            raise ValueError(f"Unknown reduce {red!r}")
+                reduce_op = self.event_recorder.get_reduce_op(metric)
+                # vals_per_rank = [[val_rank0_iter0, ...], [val_rank0_iter1, ...] ...]
+                vals_per_rank = [v for _, v in rows.items()]
+                vals = list(itertools.chain.from_iterable(vals_per_rank))
+                v = self._reduce(reduce_op, vals)
+                merged[metric].append((v, it, ep))
+                
+                if keep_steps_data:
+                    vals_per_step = [self._reduce(reduce_op, vals_rank) for vals_rank in vals_per_rank]
+                    merged_per_step[metric] = [
+                        (val, it, ep) for val, (it, ep) in zip(vals_per_step, rows.keys())
+                    ]
 
-                    if math.isfinite(v) and not math.isnan(v):
-                        merged[metric].append((v, it, ep))
-                    else:
-                        raise ValueError(f"Invalid {metric}: {v} @ iter={it}, epoch={ep}")
-            return merged
+            return merged, merged_per_step
         else:
             # other ranks return empty dict
-            return {}
-
-    def _write_scalar_impl(self, 
-                            scalar_dict: Dict[str, List[Tuple[float, int, int]]], 
-                            scope: Literal["step", "epoch"] = "step"
-    ):
-        """
-        Override in concrete writer (TB, W&B, Local, ...).
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def write_histograms(self):
-        pass
-
-    @abstractmethod
-    def write_traces(self):
-        pass
-
-    def write(self):
-        """
-        Write all events to the writer.
-        This method should be called at the end of each iteration or epoch.
-        """
-        self.write_tensor()
-        self.write_scalars()
-        self.write_histograms()
-        self.write_traces()
-    
-    @abstractmethod
-    def close(self):
-        pass
-
+            return {}, {}
+        
     def _make_step_table(self, scalar_dict):
         rows = {}
         for metric, data in scalar_dict.items():
@@ -402,6 +305,44 @@ class EventWriter:
             .reset_index(drop=True)
         )
         return df
+        
+    def _reduce(self, reduce_method: str, values: List[float]) -> float:
+        """
+        Reduce values based on the specified method.
+        """
+        if reduce_method == "sum":
+            return sum(values)
+        elif reduce_method == "mean":
+            return sum(values) / len(values)
+        elif reduce_method == "max":
+            return max(values)
+        elif reduce_method == "min":
+            return min(values)
+        else:
+            raise ValueError(f"Unknown reduce method: {reduce_method!r}")
+
+    @abstractmethod
+    def _write_scalar_impl(self, 
+                            scalar_dict: Dict[str, List[Tuple[float, int, int]]], 
+                            scope: Literal["step", "epoch"] = "step"
+    ):
+        pass
+
+    @abstractmethod
+    def _write_tensor_impl(self):
+        pass
+
+    @abstractmethod
+    def _write_histograms_impl(self):
+        pass
+
+    @abstractmethod
+    def _write_traces_impl(self):
+        pass
+
+    @abstractmethod
+    def close(self):
+        pass
 
 
 class LocalEventWriter(EventWriter):
@@ -442,21 +383,6 @@ class LocalEventWriter(EventWriter):
         os.makedirs(self.tensors_save_dir, exist_ok=True)
         os.makedirs(os.path.join(save_dir, "scalars"), exist_ok=True)
 
-    def write_tensor(self):
-        assert self.visualizer is not None, \
-            "Visualizer is not set. Cannot write tensors without a visualizer."
-        if process_rank() == 0:
-            for name, tensor, metadata, itr, epoch in self.event_recorder.get_tensors():
-                dir_path = os.path.join(self.tensors_save_dir, self.tensors_prefix, name)
-                os.makedirs(dir_path, exist_ok=True)
-                file_path = os.path.join(dir_path, f"epoch_{epoch}.{self.tensors_save_format}")
-                self.visualizer.visualize(task=name,
-                                        tensor=tensor,
-                                        metadata=metadata,
-                                        save_path=file_path)
-        
-        barrier()
-
     def _write_scalar_impl(self, scalar_dict, scope: Literal["step", "epoch"] = "step"):
         if process_rank() == 0:
             if not scalar_dict:
@@ -482,68 +408,93 @@ class LocalEventWriter(EventWriter):
 
         barrier()
 
+    def _write_tensor_impl(self):
+        pass
+
+    def _write_histograms_impl(self):
+        pass
+    
+    def _write_traces_impl(self):
+        pass
+
     def close(self):
-        """
-        Close the event writer, if necessary.
-        """
-        pass
-    
-    def write_histograms(self):
-        pass
-    
-    def write_traces(self):
         pass
 
 
-class RayEventWriter(EventWriter):
-    """
-    A Ray event writer that writes events using Ray.train.report.
-    """
+class WandBEventWriter(EventWriter):
     def __init__(self, 
-                 checkpointdir: str | Path, 
-                 event_recorder: EventRecorder,
+                 event_recorder: EventRecorder, 
+                 run_config: dict,
+                 project: str,
+                 dir: str | Path,
+                 scalar_keys: List[str],
+                 entity: str | None = None,
+                 name: str | None = None,
+                 tags: List[str] | None = None,
+                 resume_from: str | None = None,
+                 id: str | None = None,  
+                 notes: str | None = None, 
+                 force: bool = True
     ):
-        self.checkpoint_dir = Path(checkpointdir)
+        wandb.login()
+
         self.event_recorder = event_recorder
-    
-    # TODO: investigate if Ray can handle logging to W&B and TensorBoard
-    #       meaning we don't have to implement these writers ourselves
-    #       there is some utility to the local writes since it allows
-    #       us to log multiple times for different scenarios without
-    #       having to figure out how to fit it all into a single
-    #       Ray.train.report call
+        self.run = wandb.init(project=project,
+                                entity=entity,
+                                # config=run_config,
+                                dir=dir,
+                                name=name,
+                                tags=tags,
+                                resume=resume_from,
+                                id=id,
+                                notes=notes,
+                                force=force)
+        
+        self.scalar_keys = scalar_keys
+        self.step_table = wandb.Table(columns=["iter", "epoch", *scalar_keys],  log_mode="INCREMENTAL")
+        self.epoch_table = wandb.Table(columns=["iter", *scalar_keys], log_mode="INCREMENTAL")
+        self.run.log({"step_logbook":  self.step_table,
+                      "epoch_logbook": self.epoch_table})
+        
     def _write_scalar_impl(self, 
                            scalar_dict, 
                            scope: Literal["step", "epoch"] = "step"
     ):
-        # NOTE: from Ray docs:
-        # in order to ensure consistency, train.report() 
-        # acts as a barrier and must be called on each worker
-        # however only rank 0 report is used 
-        # thus we call report on each worker but only the 
-        # gathered scalars from rank 0 are used and only 
-        # for rank 0 do we pass in the real path to the checkpoint
-        # for other ranks we pass in None
-        checkpoint = Checkpoint.from_directory(self.checkpoint_dir)  \
-            if is_main_process() else None
-        if scope == "epoch":
-            report(metrics=scalar_dict, checkpoint=checkpoint)
+        if process_rank() == 0:
+            if not scalar_dict:
+                raise ValueError("No scalars to write. "
+                                "Please ensure scalars are recorded before writing.")
+            if scope == "step":
+                df = self._make_step_table(scalar_dict)                    
+                
+                for rec in df.to_dict(orient="records"):
+                    vals = [rec["iter"], rec["epoch"]] + [rec[k] for k in self.scalar_keys]
+                    self.step_table.add_data(*vals)
+                    self.run.log(rec, step=rec["iter"], commit=False)
+                
+                self.run.log({}, commit=True)  # commits the batch of logs
+                self.run.log({"step_logbook": self.step_table})
 
-    def write_tensor(self):
+            elif scope == "epoch":
+                df = self._make_epoch_table(scalar_dict)            
+                for rec in df.to_dict(orient="records"):
+                    vals = [rec["epoch"]] + [rec[k] for k in self.scalar_keys]
+                    self.epoch_table.add_data(*vals)
+                
+                self.run.log({"epoch_logbook": self.epoch_table})
+
+    def _write_histograms_impl(self):
         pass
 
-    def write_histograms(self):
+    def write_traces_impl(self):
         pass
 
-    def write_traces(self):
+    def _write_tensor_impl(self):
         pass
 
     def close(self):
-        """
-        Close the Ray event writer.
-        """
-        # No specific close operation for RayEventWriter
-        pass
+        if self.run is not None:
+            self.run.finish()
 
 
 class EventWriterList(EventWriter):
@@ -556,18 +507,18 @@ class EventWriterList(EventWriter):
             "All writers must share the same EventRecorder instance."
 
     def write(self):
-        # write scalars
+        self.write_scalars()
+        self.write_tensor()
+        self.write_histograms()
+        self.write_traces()
+
+    def write_scalars(self):
         step_scalars_gathered, epoch_scalars_gathered = self.reduce_scalars()
         for writer in self.writers:
             writer._write_scalar_impl(step_scalars_gathered, scope="step")
             writer._write_scalar_impl(epoch_scalars_gathered, scope="epoch")
 
-        # TODO: write tensors, histograms, traces...
-
     def write_tensor(self):
-        pass
-
-    def write_scalars(self):
         pass
 
     def write_histograms(self):

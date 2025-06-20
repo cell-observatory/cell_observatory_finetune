@@ -34,6 +34,12 @@ logger.setLevel(logging.DEBUG)
 def main(cfg: DictConfig):
     # print full configuration (for debugging)
     logger.info("\n" + OmegaConf.to_yaml(cfg)) 
+
+    # if not cfg.checkpoint.resume_run:
+    #     assert not Path(cfg.checkpoint.checkpoint_manager.save_checkpointdir).exists(), \
+    #         "Checkpoint directory must be None when starting a new training run."
+    #     assert not Path(cfg.logging.logdir).exists(), \
+    #         "Log directory must be None when starting a new training run."
     
     scaling_config = ScalingConfig(
         num_workers=cfg.clusters.scaling_config.num_workers,

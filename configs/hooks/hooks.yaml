@@ -12,6 +12,8 @@ hooks_list:
 - _target_: cell_observatory_finetune.train.hooks.PeriodicCheckpointer
   period: 1
   file_prefix: latest_model
+- _target_: cell_observatory_finetune.train.hooks.BestCheckpointer
+  checkpointdir: ${checkpoint.checkpoint_manager.save_checkpointdir}
 # - _target_: cell_observatory_finetune.train.hooks.TorchProfiler
 #   output_dir: ${logging.logdir}/profiler
 #   schedule:
@@ -33,3 +35,8 @@ hooks_list:
   metric_name: ${evaluation.val_metric}
   compare_fn: ${evaluation.val_mode}
   eval_after_validation: true
+- _target_: cell_observatory_finetune.train.hooks.EarlyStopHook
+  patience: 10
+  stopping_threshold: 0.01
+  mode: ${evaluation.val_mode}
+  metric_name: ${evaluation.val_metric}

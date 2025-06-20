@@ -18,8 +18,47 @@ event_writers:
       tensors_prefix: predictions
       scalars_save_format: csv
       tensors_save_format: tiff
-    - _target_: cell_observatory_finetune.utils.logging.RayEventWriter
-      checkpointdir: ${checkpoint.checkpoint_manager.save_checkpointdir}
+    - _target_: cell_observatory_finetune.utils.logging.WandBEventWriter
+      project: cell_observatory_test
+      # entity: cell-observatory
+      # save directory for W&B logs
+      # will automatically append wandb folder
+      # to the logdir
+      dir: ${logging.logdir}
+      name: ${experiment_name}
+      tags: 
+        - finetune
+        - ${network}
+        - ${job_type}
+        - ${trainer}
+        - ${engine}
+        - ${quantization}
+        - ${task}
+      # step to resume from if resuming a run 
+      # (if id is set to an existing run)
+      resume_from: null
+      # unique ID used for resuming a run
+      # if not set, a new run will be created
+      # if set, the run will be resumed
+      # if the id does not exist, a new run will 
+      # be created
+      id: null
+      notes: "First test run for finetune logging"
+      # force=True implies user must be logged in to W&B
+      # otherwise if force=False, W&B will log
+      # locally and not upload to W&B
+      force: true
+      scalar_keys:
+        - step_time
+        - val_step_time
+        - step_loss
+        - lr
+        - step_time
+        - max_reserved_mem
+        - reserved_mem
+        - max_allocated_mem
+        - allocated_mem
+        - eta
 
 event_recorder:
   _target_: cell_observatory_finetune.utils.logging.EventRecorder

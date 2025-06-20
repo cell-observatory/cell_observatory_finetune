@@ -19,11 +19,24 @@ limitations under the License.
 """
 
 
+from enum import Enum
 from typing import Literal, Optional
 
 from ray.train import get_context
 from contextlib import contextmanager
+
+import torch
 from torch import distributed as dist 
+
+
+class OpMap(Enum):
+    """
+    Map of supported reduce operations.
+    """
+    SUM = dist.ReduceOp.SUM
+    MAX = dist.ReduceOp.MAX
+    MIN = dist.ReduceOp.MIN
+    MEAN = dist.ReduceOp.SUM  # Use SUM for mean, divide by world size later
 
 
 def in_torch_dist() -> bool:
@@ -94,6 +107,18 @@ def barrier(device_ids: Optional[int] = None) -> None:
         return
     return
 
+
+def gather_and_reduce(scalars: torch.Tensor, reduce_op: str = 'mean'):
+    if not in_torch_dist():
+        return scalars.clone()
+
+    if reduce_op.upper() not in OpMap.__members__:
+        raise ValueError(f"Unsupported op: {reduce_op}")
+
+    dist.all_reduce(scalars, op=OpMap[reduce_op.upper()].value)
+    if reduce_op == "mean":
+        scalars /= dist.get_world_size()
+    return scalars
 
 @contextmanager
 def inference_context(model):
