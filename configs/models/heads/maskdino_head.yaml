@@ -1,6 +1,0 @@
-defaults:
-  - pixel_decoders: maskdino_pixel_decoder # Loads configs/models/heads/encoders/maskdino_pixel_decoder.yaml
-  - decoders: maskdino_decoder # Loads configs/models/heads/decoders/maskdino_decoder.yaml
-
-_target_: cell_observatory_finetune.models.heads.maskdino_head.MaskDINOHead
-num_classes: ${datasets.num_classes}

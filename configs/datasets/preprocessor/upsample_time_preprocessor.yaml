@@ -1,0 +1,23 @@
+_target_: cell_observatory_finetune.models.meta_arch.preprocessor.FinetunePreprocessor
+
+task: upsample_time
+with_masking: true
+mask_generator: ${datasets.masking.mask_generators.0}
+dtype: ${quantization}
+
+transforms_list: 
+  - _target_: data.transforms.normalize.NormalizeRayWrapper
+    input_layout:
+      _target_: data.data_shapes.MULTICHANNEL_HYPERCUBE
+      value: ${dataset_layout_order}
+
+temporal_patch_size: ${datasets.patch_shape.0}
+lateral_patch_size: ${datasets.patch_shape.1}
+axial_patch_size: ${datasets.patch_shape.2}
+
+input_format: ${dataset_layout_order}
+input_shape: ${eval:"[${clusters.batch_size_per_gpu}] + ${datasets.input_shape}"}
+seed: ${seed}
+ideal_psf_path: "/clusterfs/nvme/segment_4d/psf/amp_0-p0/1.tif"
+na_mask_thresholds: [0.7, 0.8, 0.9]
+resize_na_masks: true

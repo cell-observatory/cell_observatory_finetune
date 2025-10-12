@@ -1,6 +1,3 @@
-defaults:
-  - _self_
-
 opt: lamb
 lr: 5e-3 # initial learning rate
 wd: 5e-4 # initial weight decay

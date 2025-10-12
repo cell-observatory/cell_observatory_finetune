@@ -21,103 +21,128 @@ limitations under the License.
 """
 
 
-from typing import List, Tuple
+from typing import List
 
 import torch
+import torch.nn as nn
 from torch.nn import functional as F
 
 
-# ------------------------------------------------------------ WINDOW PARTITIONING ------------------------------------------------------------
+def pack_time(x: torch.Tensor, input_format: str, output_format: str = "TCZYX"):
+    if input_format == "TZYXC":
+        B, T, Z, Y, X, C = x.shape
+        if output_format == "TCZYX":
+            x = x.permute(0, 1, 5, 2, 3, 4).reshape(B*T, C, Z, Y, X)
+            return x, B, T
+        else:
+            raise ValueError(f"Unsupported output_format {output_format}")
+    elif input_format == "TCZYX":
+        # x: [B, T, C, Z, Y, X] -> [B*T, C, Z, Y, X]
+        B, T, C, Z, Y, X = x.shape
+        if output_format == "TCZYX":
+            x = x.reshape(B*T, C, Z, Y, X)
+            return x, B, T
+        else:
+            raise ValueError(f"Unsupported output_format {output_format}")
+    else:
+        raise ValueError(f"Unsupported input_format {input_format}")
 
 
-def undo_windowing(
-    x: torch.Tensor, shape: List[int], mu_shape: List[int]
-) -> torch.Tensor:
-    """
-    Restore spatial organization by undoing windowed organization of mask units.
-
-    Args:
-        x: organized by mask units windows, e.g. in 2d [B, #MUy*#MUx, MUy, MUx, C]
-        shape: current spatial shape, if it were not organized into mask unit
-            windows, e.g. in 2d [B, #MUy*MUy, #MUx*MUx, C].
-        mu_shape: current mask unit shape, e.g. in 2d [MUy, MUx]
-    Returns:
-        x: e.g. in 2d, [B, #MUy*MUy, #MUx*MUx, C]
-    """
-    D = len(shape)
-    B, C = x.shape[0], x.shape[-1]
-    # [B, #MUy*#MUx, MUy, MUx, C] -> [B, #MUy, #MUx, MUy, MUx, C]
-    num_MUs = [s // mu for s, mu in zip(shape, mu_shape)]
-    x = x.view(B, *num_MUs, *mu_shape, C)
-
-    # [B, #MUy, #MUx, MUy, MUx, C] -> [B, #MUy*MUy, #MUx*MUx, C]
-    permute = (
-        [0]
-        + sum(
-            [list(p) for p in zip(range(1, 1 + D), range(1 + D, 1 + 2 * D))],
-            [],
-        )
-        + [len(x.shape) - 1]
-    )
-    x = x.permute(permute).reshape(B, *shape, C)
-
-    return x
+def unpack_time(x: torch.Tensor, B: int, T: int, input_format: str, output_format: str):
+    if input_format == "TZYXC":
+        _, Z, Y, X, C = x.shape
+        if output_format == "TZYXC":
+            return x.reshape(B, T, Z, Y, X, C)
+        elif output_format == "CT":
+            return x.reshape((B, T, Z, Y, X, C)).permute(0, 2, 3, 4, 5, 1).reshape(B*Z*Y*X, C, T)
+        elif output_format == "TCZYX":
+            return x.reshape((B, T, Z, Y, X, C)).permute(0, 1, 5, 2, 3, 4)
+        elif output_format == "ZYXCT":
+            return x.reshape((B, T, Z, Y, X, C)).permute(0, 2, 3, 4, 5, 1)
+        else:
+            raise ValueError(f"Unsupported output_format {output_format}")
+    elif input_format == "TCZYX":
+        _, C, Z, Y, X = x.shape
+        if output_format == "TZYXC":
+            return x.reshape(B, T, C, Z, Y, X).permute(0, 1, 3, 4, 5, 2)
+        elif output_format == "CT":
+            return x.reshape((B, T, C, Z, Y, X)).permute(0, 3, 4, 5, 2, 1).reshape(B*Z*Y*X, C, T)
+        elif output_format == "TCZYX":
+            return x.reshape((B, T, C, Z, Y, X))
+        elif output_format == "ZYXCT":
+            return x.reshape((B, T, C, Z, Y, X)).permute(0, 3, 4, 5, 2, 1)
+        else:
+            raise ValueError(f"Unsupported output_format {output_format}")
+    else:
+        raise ValueError(f"Unsupported input_format {input_format}")
 
 
-def window_partition(x: torch.Tensor, window_size: int):
-    """
-    Partition input tensor into non-overlapping windows, with padding if needed.
-
-    Args:
-        x (tensor): input tokens with [B, D, H, W, C].
-        window_size (int): window size.
-
-    Returns:
-        windows: windows after partition with [B * num_windows, window_size, window_size, window_size, C].
-        (Dp, Hp, Wp): padded depth, height, and width before partition
-    """
-    # TODO: support nD
-    B, D, H, W, C = x.shape
-
-    pad_d = (window_size - D % window_size) % window_size
-    pad_h = (window_size - H % window_size) % window_size
-    pad_w = (window_size - W % window_size) % window_size
-    if pad_d or pad_h > 0 or pad_w > 0:
-        x = F.pad(x, (0, 0, 0, pad_d, 0, pad_w, 0, pad_h))
-    Dp, Hp, Wp = D + pad_d, H + pad_h, W + pad_w
-
-    x = x.view(B, Dp // window_size, window_size, Hp // window_size, window_size, Wp // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 5, 2, 4, 6, 7).contiguous().view(-1, window_size, window_size, window_size, C)
-    return windows, (Dp, Hp, Wp)
+def pack_spatial(x: torch.Tensor, input_format: str, output_format: str = "CT"):
+    if input_format == "TZYXC":
+        B, T, Z, Y, X, C = x.shape
+        if output_format == "CT":
+            return x.permute(0, 2, 3, 4, 5, 1).reshape(B*Z*Y*X, C, T)
+        else:
+            raise ValueError(f"Unsupported output_format {output_format}")
+    elif input_format == "TCZYX":
+        B, T, C, Z, Y, X = x.shape
+        if output_format == "CT":
+            return x.permute(0, 3, 4, 5, 2, 1).reshape(B*Z*Y*X, C, T)
+        else:
+            raise ValueError(f"Unsupported output_format {output_format}")
+    else:
+        raise ValueError(f"Unsupported input_format {input_format}")
 
 
-def window_unpartition(windows: torch.Tensor, window_size: int, pad_dhw: Tuple[int, int, int], dhw: Tuple[int, int, int]):
-    """
-    Window unpartition into original sequences and removing padding.
-
-    Args:
-        windows (tensor): input tokens with [B * num_windows, window_size, window_size, window_size, C].
-        window_size (int): window size.
-        pad_dhw (Tuple): padded depth, height and width (Dp, Hp, Wp).
-        dhw (Tuple): original depth, height and width (D, H, W) before padding.
-
-    Returns:
-        x: unpartitioned sequences with [B, D, H, W, C].
-    """
-    # TODO: support nD
-    Dp, Hp, Wp = pad_dhw
-    D, H, W = dhw
+def unpack_spatial(x: torch.Tensor, B: int, input_format: str, input_shape: List[int], output_format: str):
+    _, C, T = x.shape
+    if input_format == "TZYXC":
+        T, Z, Y, X, C = input_shape
+    elif input_format == "TCZYX":
+        T, C, Z, Y, X = input_shape
+    else:
+        raise ValueError(f"Unsupported input_format {input_format}")
     
-    B = windows.shape[0] // (Dp * Hp * Wp // window_size // window_size // window_size)
-    x = windows.view(B, Dp // window_size, Hp // window_size, Wp // window_size, window_size, window_size, window_size, -1)
-    x = x.permute(0, 1, 4, 2, 5, 3, 6, 7).contiguous().view(B, Dp, Hp, Wp, -1)
+    if output_format == "TZYXC":
+        if input_format == "TZYXC" or input_format == "TCZYX":
+            return x.reshape(B, Z, Y, X, C, T).permute(0, 5, 1, 2, 3, 4)
+        # in case we want to support 2D+T in future
+        else:
+            raise ValueError(f"Unsupported input_format {input_format}")
+    elif output_format == "TCZYX":
+        if input_format == "TZYXC" or input_format == "TCZYX":
+            return x.reshape(B, Z, Y, X, C, T).permute(0, 5, 4, 1, 2, 3)
+    elif output_format == "CTZYX":
+        if input_format == "TZYXC" or input_format == "TCZYX":
+            return x.reshape(B, Z, Y, X, C, T).permute(0, 4, 5, 1, 2, 3)
+    else:
+        raise ValueError(f"Unsupported output_format {output_format}")
 
-    if Dp > D or Hp > H or Wp > W:
-        x = x[:, :D, :H, :W, :].contiguous()
-    return x
 
-
-# ------------------------------------------------------------ GRID SAMPLE ------------------------------------------------------------
+def get_reference_points(shapes, valid_ratios, device):
+    reference_points_list = []
+    for lvl, (D_, H_, W_) in enumerate(shapes):
+        # create grid [0.5, 1.5, ..., size_dim - 0.5]
+        ref_z, ref_y, ref_x = torch.meshgrid(
+                                            torch.linspace(0.5, D_ - 0.5, D_, dtype=torch.float32, device=device),
+                                            torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
+                                            torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device),
+                                            indexing='ij'
+                                            ) 
+        
+        # scaling by valid_ratios adjusts the normalized reference grid so that it
+        # only spans the unpadded region, i.e. [1, D*H*W] / (valid_ratio_d * D), 
+        # i.e. scale grid to [0, 1] adjusted by valid ratio
+        ref_z = ref_z.reshape(-1)[None] / (valid_ratios[:, None, lvl, 2] * D_) 
+        ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)
+        ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_)
+        
+        ref = torch.stack((ref_x, ref_y, ref_z), -1) # [B, D*H*W, 3]
+        reference_points_list.append(ref)
+    
+    reference_points = torch.cat(reference_points_list, 1)
+    reference_points = reference_points[:, :, None] * valid_ratios[:, None]
+    return reference_points
 
 
 def point_sample(input, point_coords, **kwargs):
@@ -214,7 +239,7 @@ def get_uncertain_point_coords_with_randomness(
     )
     
     if num_random_points > 0:
-        point_coords = cat(
+        point_coords = torch.cat(
             [
                 point_coords,
                 torch.rand(num_boxes, num_random_points, 3, device=coarse_logits.device),
@@ -225,34 +250,13 @@ def get_uncertain_point_coords_with_randomness(
     return point_coords
 
 
-# ------------------------------------------------------------ HELPERS ------------------------------------------------------------
-
-
-def cat(tensors: List[torch.Tensor], dim: int = 0):
-    """
-    Efficient version of torch.cat that avoids a copy if there is only a single element in a list
-    """
-    assert isinstance(tensors, (list, tuple))
-    if len(tensors) == 1:
-        return tensors[0]
-    return torch.cat(tensors, dim)
-
-
-def _assert_strides_are_log2_contiguous(strides):
-    """
-    Assert that each stride is 2x times its preceding stride, i.e. "contiguous in log2".
-    """
-    for i, stride in enumerate(strides[1:], 1):
-        assert stride == 2 * strides[i - 1], "Strides {} {} are not log2 contiguous".format(
-            stride, strides[i - 1]
-        )
-
 def _max_by_axis(img_list):
     maxes = img_list[0]
     for sublist in img_list[1:]:
         for index, item in enumerate(sublist):
             maxes[index] = max(maxes[index], item)
     return maxes
+
 
 def batch_tensors(tensor_list: List[torch.Tensor]) -> torch.Tensor:
     max_size = _max_by_axis([list(img.shape) for img in tensor_list])
@@ -265,6 +269,7 @@ def batch_tensors(tensor_list: List[torch.Tensor]) -> torch.Tensor:
         img_pad[: img.shape[0], : img.shape[1], : img.shape[2], : img.shape[3]].copy_(img)
         mask[: img.shape[1], : img.shape[2], : img.shape[3]] = False
     return tensors, masks
+
 
 def compute_unmasked_ratio(mask):
         _, D, H, W = mask.shape
@@ -281,4 +286,9 @@ def compute_unmasked_ratio(mask):
         return valid_ratio
 
 
-# ------------------------------------------------------------  ------------------------------------------------------------
+def c2_xavier_fill(module: nn.Module) -> None:
+        # Caffe2 implementation of XavierFill in fact
+        # corresponds to kaiming_uniform_ in PyTorch
+        nn.init.kaiming_uniform_(module.weight, a=1)
+        if module.bias is not None:
+            nn.init.constant_(module.bias, 0)

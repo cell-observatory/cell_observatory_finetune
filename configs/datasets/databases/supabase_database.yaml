@@ -1,53 +1,24 @@
 defaults:
   - _self_
 
-_target_: cell_observatory_finetune.data.databases.supabase_database.SupabaseDatabase
+_target_: data.databases.supabase_database.SupabaseDatabase
+dbname: 'staging'
 
-dotenv_path: /clusterfs/nvme/hph/git_managed/env/credentials.env
+num_timepoints: ${datasets.input_shape.0} # number of timepoints for each hypercube
 
-db_readpath: /clusterfs/nvme/segment_4d/testing2/db_tables_test19/metadata_table.feather
-db_savepath: /clusterfs/nvme/segment_4d/testing2/db_tables_test19/metadata_table.feather
+max_rois: ${datasets.max_rois} # maximum number of ROIs (each ROI can have dozens of tiles)
+max_tiles: ${datasets.max_tiles} # maximum number of tiles (each tile can have thousands of hypercubes)
+max_hypercubes: ${datasets.max_hypercubes} # maximum number of hypercubes to return
 
-db_read_method: "feather"
-db_save_method: "feather"
+hpf_list: ${datasets.hpf_list} # list of specific HPFs (hours-post-fertilization in hours) to filter
+roi_list: ${datasets.roi_list} # list of specific ROIs to filter
+tile_list: ${datasets.tile_list} # list of specific tiles to filter
 
-load_cached_db: false
-force_create_db: false
+occupancy_threshold: ${datasets.occupancy_threshold} # to filter our hypercubes with less than this occupancy ratio (0.0-1.0)
 
-data_cubes_table: "prepared_cubes"
-label_cubes_table: null
-
-# NOTE: the base specs should purposefully be kept 
-# minimal to allow for easy overrides in other configs
-# since dataclass classes are more tricky to override
-# in Hydra configs
-
-table_specs:
-  _target_: cell_observatory_finetune.data.databases.schema.TableSchemaList
-  schemas:
-    - _target_: cell_observatory_finetune.data.databases.schema.DB_TableSchema
-      table: "prepared_tiles_view"
-      attributes:
-        prepared_id: null
-        tile_name: null
-        server_folder: null
-        output_folder: null
-        time_size: null
-        channel_size: null
-        z_start: null
-        y_start: null
-        x_start: null
-        cube_size: null
-  # NOTE: does not exist yet 
-  # - _target_: cell_observatory_finetune.data.databases.schema.DB_LabelSchema
-  #   table: "prepared_labels"
-  #   label_metadata:
-  #     id: null
-  #     server_folder: null
-  #     output_folder: null
-  #     z_start: null
-  #     z_end: null
-  #     y_start: null
-  #     y_end: null
-  #     x_start: null
-  #     x_end: null
+verbose: true # to print debug messages
+hypercubes_dataframe_path: ${datasets.hypercubes_dataframe_path}
+use_cached_hypercubes_dataframe: ${datasets.use_cached_hypercubes_dataframe} # if True, will use the cached hypercubes dataframe from the given path
+fetch_hypercubes_dataframe: true
+protocol: cursor # protocol used to fetch data from source (default is 'binary', can also be 'csv' or 'cursor')
+server_folder_path: ${paths.server_folder_path}

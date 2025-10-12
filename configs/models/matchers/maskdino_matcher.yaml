@@ -1,8 +1,0 @@
-_target_: cell_observatory_finetune.models.utils.matchers.HungarianMatcher
-
-cost_classification: 4.0
-cost_mask: 5.0
-cost_mask_dice: 4.0
-num_points: 12544
-cost_box: 5.0
-cost_box_giou: 2.0

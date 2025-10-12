@@ -1,8 +1,0 @@
-defaults:
-  - _self_
-
-_target_: cell_observatory_finetune.models.meta_arch.encoder_decoder.EncoderDecoder
-
-masking: false
-
-losses: ${losses}

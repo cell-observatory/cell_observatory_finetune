@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: /clusterfs/nvme/hph/env_images/develop_torch_cuda_12_8.sif
+From: /clusterfs/nvme/thayer/apptainer_images/develop_torch_25_08.sif
 Stage: base
 
 %environment
@@ -9,7 +9,7 @@ export CC=/usr/bin/gcc
 export CXX=/usr/bin/g++
 
 %files
-ops3d          /workspace/ops3d
+/clusterfs/nvme/hph/git_managed/cuda/ops3d  /workspace/ops3d
 
 %post
 set -eux
@@ -21,15 +21,7 @@ python3.12-dev \
 libpython3.12-dev \
 python3-dev \
 cmake \
-ninja-build \
-&& rm -rf /var/lib/apt/lists/*
-
-# needs to have
-# sudo mount --bind ~/.cache/pip /tmp/pip
-# to allow cache dir to be used
-
-pip install --no-cache-dir \
-    -r /workspace/ops3d/requirements.txt
+ninja-build
 
 # optionally, add flags for NVCC
 # export NVCC_FLAGS="-O3 -Xfatbin=-compress-all"

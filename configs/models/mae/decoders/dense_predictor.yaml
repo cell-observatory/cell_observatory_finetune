@@ -1,0 +1,11 @@
+__target__: cell_observatory_finetune.models.decoders.DPTHead
+
+input_format: ${dataset_layout_order}
+input_shape: ${eval:"[${clusters.batch_size_per_gpu}] + ${datasets.input_shape}"}
+temporal_patch_size: ${datasets.patch_shape.0}
+lateral_patch_size: ${datasets.patch_shape.1}
+axial_patch_size: ${datasets.patch_shape.2}
+
+features: 256
+use_bn: False
+out_channels: [256, 512, 1024, 1024]

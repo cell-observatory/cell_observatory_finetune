@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.nn.init import xavier_uniform_, constant_
 
-from cell_observatory_finetune.data.ops.flash_deform_attn_func import FlashDeformAttnFunction
+from cell_observatory_finetune.models.ops.flash_deform_attn_func import FlashDeformAttnFunction
 
 
 def _is_power_of_2(n):

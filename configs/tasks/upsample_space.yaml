@@ -1,0 +1,2 @@
+task: upsample_space
+output_channels: ${datasets.input_shape.4}
