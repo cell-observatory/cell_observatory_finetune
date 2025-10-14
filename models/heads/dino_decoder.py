@@ -104,7 +104,8 @@ class DeformableTransformerDecoderLayer(nn.Module):
                 raise NotImplementedError("Unknown key_aware_type: {}".format(self.key_aware_type))
 
         # pos encoding q -> deformable cross attention -> res + dropout -> norm
-        target_cross_attn = self.cross_attention(self.with_pos_embeddings(target, target_query_pos_embeddings).transpose(0, 1), # (bs, num_queries, embed_dim)
+        target_cross_attn = self.cross_attention(self.with_pos_embeddings(target, \
+                                                                          target_query_pos_embeddings).transpose(0, 1), # (bs, num_queries, embed_dim)
                                target_reference_points.transpose(0, 1).contiguous(), # (bs, num_queries, 3/6)
                                memory.transpose(0, 1),  # (bs, num_tokens, embed_dim)
                                memory_shapes, # (bs, num_levels, 3)

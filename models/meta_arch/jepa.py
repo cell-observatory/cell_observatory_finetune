@@ -1,8 +1,25 @@
 import sys
 import logging
-from typing import Literal, Union
+from copy import deepcopy
+from typing import Literal, Union, Optional
 
+import torch
 import torch.nn as nn
+
+from deepspeed.runtime.zero import GatheredParameters
+from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
+
+from cell_observatory_finetune.cell_observatory_platform.models.mlp import get_mlp
+from cell_observatory_finetune.cell_observatory_platform.models.norm import get_norm
+from cell_observatory_finetune.cell_observatory_platform.training.helpers import init_weights
+from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
+from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
+
+from cell_observatory_finetune.cell_observatory_platform.models.maskedencoder import MaskedEncoder
+from cell_observatory_finetune.cell_observatory_platform.models.maskedpredictor import MaskedPredictor
+
+from cell_observatory_finetune.models.heads.linear_head import LinearHead
+from cell_observatory_finetune.models.heads.dense_predictor_head import DPTHead
 
 logging.basicConfig(
 	stream=sys.stdout,
@@ -110,11 +127,16 @@ CONFIGS = {
 }
 
 
-class FinetuneJEPA(JEPA):
+class FinetuneJEPA(nn.Module):
     def __init__(
         self,
-        task: Literal['channel_split', 'upsample'],
-        output_channels: int = None,
+        decoder_args: dict,
+        decoder: Literal['vit', 'linear', 'dense_predictor'],
+        task: Literal['channel_split', 
+                      'upsample_time', 
+                      'upsample_space', 
+                      'upsample_spacetime'],
+        output_channels: Optional[int],
         model_template: Literal[
             'jepa', # custom use `embed_dim`, `predictor_embed_dim`, `depth`, `num_heads` and `mlp_ratio` to config model
             'jepa-tiny',
@@ -131,11 +153,8 @@ class FinetuneJEPA(JEPA):
         axial_patch_size=1,
         temporal_patch_size=1,
         embed_dim=768,
-        predictor_embed_dim=256,
         depth=12,
-        predictor_depth=8,
         num_heads=12,
-        predictor_num_heads=8,
         mlp_ratio=4.0,
         proj_drop_rate=0.0,
         att_drop_rate=0.0,
@@ -152,54 +171,221 @@ class FinetuneJEPA(JEPA):
         rope_theta: float = 10.0,
         weight_init_type: str = 'vjepa2',
         mlp_wide_silu: bool = False,
-        loss_fn: str = 'l1_masked',
-        **kwargs,
+        loss_fn: str = 'l1_masked'
     ):
-        super().__init__(model_template=model_template,
-                         input_fmt=input_fmt,
-                         input_shape=input_shape,
-                         lateral_patch_size=lateral_patch_size,
-                         axial_patch_size=axial_patch_size,
-                        temporal_patch_size=temporal_patch_size,
-                        embed_dim=embed_dim,
-                        predictor_embed_dim=predictor_embed_dim,
-                        depth=depth,
-                        predictor_depth=predictor_depth,
-                        num_heads=num_heads,
-                        predictor_num_heads=predictor_num_heads,
-                        mlp_ratio=mlp_ratio,
-                        proj_drop_rate=proj_drop_rate,
-                        att_drop_rate=att_drop_rate,
-                        drop_path_rate=drop_path_rate,
-                        init_std=init_std,
-                        fixed_dropout_depth=fixed_dropout_depth,
-                        norm_layer=norm_layer,
-                        act_layer=act_layer,
-                        mlp_layer=mlp_layer,
-                        abs_sincos_enc=abs_sincos_enc,
-                        rope_pos_enc=rope_pos_enc,
-                        rope_random_rotation_per_head=rope_random_rotation_per_head,
-                        rope_mixed=rope_mixed,
-                        rope_theta=rope_theta,
-                        weight_init_type=weight_init_type,
-                        mlp_wide_silu=mlp_wide_silu,
-                            **kwargs)
+        super().__init__()
         
+        if model_template in CONFIGS.keys():
+            config = CONFIGS[model_template]
+            self.depth = config['depth']
+            self.embed_dim = config['embed_dim']
+            self.num_heads = config['num_heads']
+            self.mlp_ratio = config['mlp_ratio']
+        else:
+            self.depth = depth
+            self.embed_dim = embed_dim
+            self.num_heads = num_heads
+            self.mlp_ratio = mlp_ratio
+
+        self.input_fmt = input_fmt
+        self.input_shape = input_shape
+        axis_to_value = dict(zip(input_fmt, input_shape[1:]))
+        self.in_chans = axis_to_value['C']
+        self.num_frames = axis_to_value['T']
+
+        self.output_channels = output_channels
+
+        self.axial_patch_size = axial_patch_size
+        self.lateral_patch_size = lateral_patch_size
+        self.temporal_patch_size = temporal_patch_size
+
+        self.proj_drop_rate = proj_drop_rate
+        self.att_drop_rate = att_drop_rate
+        self.drop_path_rate = drop_path_rate
+        self.fixed_dropout_depth = fixed_dropout_depth
+        
+        self.init_std = init_std
+
+        self.norm_layer = get_norm(norm_layer)
+        self.act_layer = get_activation(act_layer)
+        self.mlp_layer = get_mlp(mlp_layer)
+
+        # positional encoding parameters
+        self.abs_sincos_enc = abs_sincos_enc
+        self.rope_pos_enc = rope_pos_enc
+        self.rope_mixed = rope_mixed
+        self.rope_theta = rope_theta
+        self.mlp_wide_silu = mlp_wide_silu
+        self.rope_random_rotation_per_head = rope_random_rotation_per_head
+
+        self.input_encoder = MaskedEncoder(
+            input_fmt=self.input_fmt,
+            input_shape=self.input_shape,
+            lateral_patch_size=self.lateral_patch_size,
+            axial_patch_size=self.axial_patch_size,
+            temporal_patch_size=self.temporal_patch_size,
+            channels=self.in_chans,
+            embed_dim=self.embed_dim,
+            depth=self.depth,
+            num_heads=self.num_heads,
+            mlp_ratio=self.mlp_ratio,
+            proj_drop_rate=self.proj_drop_rate,
+            att_drop_rate=self.att_drop_rate,
+            drop_path_rate=self.drop_path_rate,
+            fixed_dropout_depth=self.fixed_dropout_depth,
+            norm_layer=self.norm_layer,
+            act_layer=self.act_layer,
+            mlp_layer=self.mlp_layer,
+            init_std=self.init_std,
+            abs_sincos_enc=self.abs_sincos_enc,
+            rope_pos_enc=self.rope_pos_enc,
+            rope_random_rotation_per_head=self.rope_random_rotation_per_head,
+            rope_mixed=self.rope_mixed,
+            rope_theta=self.rope_theta,
+            mlp_wide_silu=mlp_wide_silu
+        )
+
+        self.task = task
+        self.decoder = decoder
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            assert self.decoder == "vit", "For upsample_time and upsample_spacetime tasks " \
+                "only 'vit' decoder is supported currently."
+    
+        if self.decoder == "vit":
+            if model_template in CONFIGS.keys():
+                self.decoder_embed_dim = CONFIGS[model_template]["decoder_embed_dim"]
+                self.decoder_depth = CONFIGS[model_template]["decoder_depth"]
+                self.decoder_num_heads = CONFIGS[model_template]["decoder_num_heads"]
+            else:
+                self.decoder_embed_dim = decoder_args["decoder_embed_dim"]
+                self.decoder_depth = decoder_args["decoder_depth"]
+                self.decoder_num_heads = decoder_args["decoder_num_heads"]
+
+            self.target_predictor = MaskedPredictor(
+                input_fmt=self.input_fmt,
+                input_shape=self.input_shape,
+                lateral_patch_size=self.lateral_patch_size,
+                axial_patch_size=self.axial_patch_size,
+                temporal_patch_size=self.temporal_patch_size,
+                channels=self.in_chans,
+                input_embed_dim=self.embed_dim,
+                output_embed_dim=self.input_encoder.patch_embedding.pixels_per_patch * self.output_channels \
+                    if self.task == "channel_split" else self.input_encoder.patch_embedding.pixels_per_patch,
+                embed_dim=self.decoder_embed_dim,
+                depth=self.decoder_depth,
+                num_heads=self.decoder_num_heads,
+                mlp_ratio=self.mlp_ratio,
+                proj_drop_rate=self.proj_drop_rate,
+                att_drop_rate=self.att_drop_rate,
+                drop_path_rate=self.drop_path_rate,
+                fixed_dropout_depth=self.fixed_dropout_depth,
+                norm_layer=self.norm_layer,
+                act_layer=self.act_layer,
+                mlp_layer=self.mlp_layer,
+                init_std=self.init_std,
+                abs_sincos_enc=self.abs_sincos_enc,
+                rope_pos_enc=self.rope_pos_enc,
+                rope_random_rotation_per_head=self.rope_random_rotation_per_head,
+                rope_mixed=self.rope_mixed,
+                rope_theta=self.rope_theta,
+                mlp_wide_silu=mlp_wide_silu
+            )
+        
+        elif self.decoder == "linear":
+            self.decoder_with_bn = decoder_args["decoder_with_bn"]
+            self.decoder_num_layers = decoder_args["decoder_num_layers"]
+            self.decoder_hidden_dim = decoder_args["decoder_hidden_dim"]
+            self.decoder_bottleneck_dim = decoder_args["decoder_bottleneck_dim"]
+            self.decoder_mlp_bias = decoder_args["decoder_mlp_bias"]
+
+            self.target_predictor = LinearHead(
+                in_dim=self.embed_dim,
+                output_dim=self.input_encoder.patch_embedding.pixels_per_patch * self.output_channels \
+                    if self.task == "channel_split" else self.input_encoder.patch_embedding.pixels_per_patch,
+                use_bn=self.decoder_with_bn,
+                nlayers=self.decoder_num_layers,
+                hidden_dim=self.decoder_hidden_dim,
+                bottleneck_dim=self.decoder_bottleneck_dim,
+                mlp_bias=self.decoder_mlp_bias,
+            )
+        
+        elif self.decoder == "dense_predictor":
+            assert decoder_args["encoder_out_layers"] is not None, \
+                "For dense_predictor decoder, please specify the encoder out_layers to use."
+            self.decoder_use_bn = decoder_args["decoder_use_bn"]
+            self.decoder_feature_map_channels = decoder_args["decoder_feature_map_channels"]
+            self.decoder_strategy = decoder_args["decoder_strategy"]
+            self.decoder_embed_dim = decoder_args["decoder_embed_dim"]
+
+            self.target_predictor = DPTHead(
+                input_format=self.input_fmt,
+                input_shape=self.input_shape,
+                lateral_patch_size=self.lateral_patch_size,
+                axial_patch_size=self.axial_patch_size,
+                temporal_patch_size=self.temporal_patch_size,
+                input_channels=self.embed_dim,
+                output_channels=self.output_channels,
+                features=self.decoder_embed_dim,
+                use_bn=self.decoder_use_bn,
+                feature_map_channels=self.decoder_feature_map_channels,
+                strategy=self.decoder_strategy
+            )
+        
+        # TODO: add support for segmentation decoders
+        else:
+            raise ValueError(f"Unknown decoder type: {self.decoder}")
+        
+        self.weight_init_type = weight_init_type
+        init_weights(self, weight_init_type=weight_init_type)
+
+        # NOTE: do deepcopy after weight init
+        self.target_encoder = deepcopy(self.input_encoder)
+        for param in self.target_encoder.parameters():
+            param.requires_grad = False
+
         self.loss_fn = get_loss_fn(loss_fn)
         
-        self.task = task
-        if self.task == "channel_split":
-            self.output_channels = output_channels
-            self.output_dim = self.input_encoder.patch_embedding.pixels_per_patch * output_channels
-            self.prediction_head = nn.Linear(self.target_predictor.output_embed_dim, self.output_dim)
-        elif self.task == "upsample_space" \
-            or self.task == "upsample_spacetime" \
-                or self.task == "upsample_time":
-            self.output_channels = output_channels
-            self.output_dim = self.input_encoder.patch_embedding.pixels_per_patch
-            self.prediction_head = nn.Linear(self.target_predictor.output_embed_dim, self.output_dim)
+    # see training/hooks.py for usage
+    def ema_update(self, beta=0.99):
+        def collect_params(params):
+            return [
+                p for p in params
+                if hasattr(p, 'ds_id') and p.ds_status == ZeroParamStatus.NOT_AVAILABLE
+            ]
+
+        with torch.no_grad():
+            for iparam, tparam in zip(self.input_encoder.parameters(), self.target_encoder.parameters()):
+                fetch = collect_params([iparam, tparam])
+                # fetches parameters from other ranks if needed
+                with GatheredParameters(fetch, enabled=len(fetch) > 0):
+                    # input_encoder*B + (target_encoder - input_encoder)*(1-B) = target_encoder*B + input_encoder*(1-B)
+                    tparam.data.copy_(torch.lerp(iparam.data, tparam.data, beta))
+
+    @torch.jit.ignore
+    def get_input_encoder(self):
+        return self.input_encoder
+
+    @torch.jit.ignore
+    def get_target_encoder(self):
+        return self.target_encoder
+
+    @torch.jit.ignore
+    def get_predictor(self):
+        return self.target_predictor
+
+    @torch.jit.ignore
+    def get_num_patches(self):
+        if self.abs_sincos_enc:
+            return self.input_encoder.pos_embedding.num_patches
         else:
-            raise ValueError(f"Unknown task: {self.task}")
+            num_patches, _ = calc_num_patches(
+                input_fmt=self.input_fmt,
+                input_shape=self.input_shape,
+                lateral_patch_size=self.lateral_patch_size,
+                axial_patch_size=self.axial_patch_size,
+                temporal_patch_size=self.temporal_patch_size,
+            )
+            return num_patches
 
     def forward(self, data_sample: dict):
         inputs, meta= data_sample['data_tensor'], data_sample['metainfo']
@@ -208,25 +394,28 @@ class FinetuneJEPA(JEPA):
         target_masks, original_patch_indices = meta.get('target_masks', [None])[0], \
             meta.get('original_patch_indices', [None])[0]
         
-        embedding, patches = self.input_encoder(inputs, masks=context_masks)
-        predictions = self.target_predictor(
-            embedding,
-            original_patch_indices=original_patch_indices,
-            target_masks=target_masks
-        )
+        # x: List[B, N, C] or [B, N, C]
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            x, patches = self.input_encoder(inputs, masks=context_masks)
+        else:
+            x, patches = self.input_encoder(inputs)
         
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            x = self.target_predictor(x, original_patch_indices=original_patch_indices, target_masks=target_masks)
+        else:
+            x = self.target_predictor(x)
+
         if self.task == "channel_split":
-            predictions = self.prediction_head(predictions)
+            predictions = x
             loss = self.loss_fn(predictions, targets, num_patches=self.get_num_patches())
         elif self.task == "upsample_time":
-                # only supervise the masked timepoints
-                predictions = self.prediction_head(predictions)
-                targets = apply_masks(patches, masks=target_masks)
-                predictions = apply_masks(predictions, masks=target_masks)
-                loss = self.loss_fn(predictions, targets, num_patches=masks.sum())
+            # only supervise the masked timepoints
+            targets = apply_masks(patches, masks=target_masks)
+            predictions = apply_masks(x, masks=target_masks)
+            loss = self.loss_fn(predictions, targets, num_patches=masks.sum())
         elif self.task == "upsample_space" or self.task == "upsample_spacetime":
-                predictions = self.prediction_head(predictions)
-                loss = self.loss_fn(predictions, targets, num_patches=self.get_num_patches())
+            predictions = x
+            loss = self.loss_fn(x, targets, num_patches=self.get_num_patches())
         else:
             raise ValueError(f"Unknown task: {self.task}")
 

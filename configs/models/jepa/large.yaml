@@ -6,11 +6,11 @@ lateral_patch_size: ${datasets.patch_shape.1}
 axial_patch_size: ${datasets.patch_shape.2}
 
 embed_dim: 1024
-predictor_embed_dim: 512
+# predictor_embed_dim: 512
 depth: 24
-predictor_depth: 8
+# predictor_depth: 8
 num_heads: 16
-predictor_num_heads: 8
+# predictor_num_heads: 8
 mlp_ratio: 4.0
 
 proj_drop_rate: 0.0
@@ -18,13 +18,13 @@ att_drop_rate: 0.0
 drop_path_rate: 0.1
 init_std: 0.02
 fixed_dropout_depth: false
-use_conv_proj: false
+# use_conv_proj: false
 norm_layer: RmsNorm
 act_layer: SiLU
 mlp_layer: SwiGLU
 
-mask_ratio: 0.75
-window_mask_shape: null
+# mask_ratio: 0.75
+# window_mask_shape: null
 
 abs_sincos_enc: true
 rope_pos_enc: false

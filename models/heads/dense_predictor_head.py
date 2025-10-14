@@ -12,6 +12,7 @@ from cell_observatory_finetune.models.layers.utils import (pack_time,
                                                            unpack_time, 
                                                            pack_spatial, 
                                                            unpack_spatial)
+from cell_observatory_finetune.models.layers.layers import patchify
 
 
 class ResidualConvUnit(nn.Module):
@@ -380,7 +381,7 @@ class DPTHead(nn.Module):
         lateral_patch_size,
         features=256, 
         use_bn=False,
-        out_channels=[256, 512, 1024, 1024],
+        feature_map_channels=[256, 512, 1024, 1024],
         strategy="axial"
     ):
         super(DPTHead, self).__init__()
@@ -422,30 +423,30 @@ class DPTHead(nn.Module):
             self.spatial_projects = nn.ModuleList([
                 nn.Conv3d(
                     in_channels=self.input_channels,
-                    out_channels=out_channel,
+                    out_channels=feature_map_channel,
                     kernel_size=1,
                     stride=1,
                     padding=0,
-                ) for out_channel in out_channels
+                ) for feature_map_channel in feature_map_channels
             ])
 
             self.spatial_resize_layers = nn.ModuleList([
                 nn.ConvTranspose3d(
-                    in_channels=out_channels[0],
-                    out_channels=out_channels[0],
+                    in_channels=feature_map_channels[0],
+                    out_channels=feature_map_channels[0],
                     kernel_size=4,
                     stride=4,
                     padding=0),
                 nn.ConvTranspose3d(
-                    in_channels=out_channels[1],
-                    out_channels=out_channels[1],
+                    in_channels=feature_map_channels[1],
+                    out_channels=feature_map_channels[1],
                     kernel_size=2,
                     stride=2,
                     padding=0),
                 nn.Identity(),
                 nn.Conv3d(
-                    in_channels=out_channels[3],
-                    out_channels=out_channels[3],
+                    in_channels=feature_map_channels[3],
+                    out_channels=feature_map_channels[3],
                     kernel_size=3,
                     stride=2,
                     padding=1)
@@ -460,26 +461,26 @@ class DPTHead(nn.Module):
                         kernel_size=1,
                         stride=1,
                         padding=0,
-                    ) for out_channel in out_channels
+                    ) for out_channel in feature_map_channels
                 ])
                 self.temporal_resize_layers = nn.ModuleList(
                     [
                         nn.ConvTranspose1d(
-                            in_channels=out_channels[0],
-                            out_channels=out_channels[0],
+                            in_channels=feature_map_channels[0],
+                            out_channels=feature_map_channels[0],
                             kernel_size=4,
                             stride=4,
                             padding=0),
                         nn.ConvTranspose1d(
-                            in_channels=out_channels[1],
-                            out_channels=out_channels[1],
+                            in_channels=feature_map_channels[1],
+                            out_channels=feature_map_channels[1],
                             kernel_size=2,
                             stride=2,
                             padding=0),
                         nn.Identity(),
                         nn.Conv1d(
-                            in_channels=out_channels[3],
-                            out_channels=out_channels[3],
+                            in_channels=feature_map_channels[3],
+                            out_channels=feature_map_channels[3],
                             kernel_size=3,
                             stride=2,
                             padding=1)
@@ -492,7 +493,7 @@ class DPTHead(nn.Module):
         if (self.dim == 4 or self.dim == 3) and self.strategy == "axial":
             # FPN adapter and RefineNet
             self.FPNAdapter = _get_FPNAdapter(
-                out_channels,
+                feature_map_channels,
                 features,
                 groups=1,
                 expand=False,
@@ -611,9 +612,9 @@ class DPTHead(nn.Module):
                 x = unpack_time(x_bt, B0, T0, "TCZYX", "TZYXC")
 
                 xs_shape = list(x.shape[1:])
-                xs_shape[0] = int(xs_shape[0] * self.temporal_downsize_factors[i])
                 xs = pack_spatial(x, "TZYXC")
                 xs = self.temporal_resize_layers[i](xs)
+                xs_shape[0] = xs.shape[2]
                 x = unpack_spatial(xs, B, "TZYXC", tuple(xs_shape), "TZYXC")
 
                 out.append(x)
@@ -743,5 +744,14 @@ class DPTHead(nn.Module):
 
         else:
             raise NotImplementedError("Only Dim=3 or Dim=4 with axial strategy is supported.")
+        
+        out = patchify(
+            out, 
+            input_fmt=self.input_format,
+            axial_patch_size=self.axial_patch_size,
+            lateral_patch_size=self.lateral_patch_size,
+            temporal_patch_size=self.temporal_patch_size,
+            channels=self.output_channels
+        )
 
-        return out                
+        return out

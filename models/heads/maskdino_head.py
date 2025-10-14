@@ -1,6 +1,6 @@
 """
 Adapted from:
-https://github.com/IDEA-Research/MaskDINO/blob/3831d8514a3728535ace8d4ecc7d28044c42dd14/maskdino/modeling/meta_arch/maskdino_head.py#L4
+https://github.com/IDEA-Research/MaskDINO/maskdino/modeling/meta_arch/maskdino_head.py#L4
 """
 
 import torch
@@ -35,7 +35,7 @@ class MaskDINOHead(nn.Module):
         mask_features, transformer_encoder_features, \
             multi_scale_features = self.pixel_decoder.forward_features(features, mask)
         predictions = self.decoder(multi_scale_features, mask_features, mask, targets = targets)
-        return predictions 
+        return predictions
 
 
 class MaskDINO(nn.Module):

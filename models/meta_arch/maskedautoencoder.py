@@ -1,5 +1,6 @@
-from typing import Union, Literal
+from typing import Union, Literal, Optional
 
+import torch
 import torch.nn as nn
 
 from cell_observatory_finetune.cell_observatory_platform.models.mlp import get_mlp
@@ -8,10 +9,10 @@ from cell_observatory_finetune.cell_observatory_platform.training.helpers import
 from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
 from cell_observatory_finetune.cell_observatory_platform.models.maskedencoder import MaskedEncoder
 from cell_observatory_finetune.cell_observatory_platform.models.maskedpredictor import MaskedPredictor
+from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
 
 from cell_observatory_finetune.training.losses import get_loss_fn
 from cell_observatory_platform.data.masking.mask_generator import apply_masks
-from cell_observatory_platform.models.maskedautoencoder import MaskedAutoEncoder
 
 from cell_observatory_finetune.models.heads.linear_head import LinearHead
 from cell_observatory_finetune.models.heads.dense_predictor_head import DPTHead
@@ -111,14 +112,16 @@ CONFIGS = {
 }
 
 
-class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
+class FinetuneMaskedAutoEncoder(nn.Module):
     def __init__(
         self,
+        decoder_args: dict,
         decoder: Literal['vit', 'linear', 'dense_predictor'],
         task: Literal['channel_split', 
                       'upsample_time', 
                       'upsample_space', 
                       'upsample_spacetime'],
+        output_channels: Optional[int],
         model_template: Literal[
             'mae', # custom use `embed_dim`, `decoder_embed_dim`, `depth`, `num_heads` and `mlp_ratio` to config model
             'mae-tiny',
@@ -153,22 +156,9 @@ class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
         rope_theta: float = 10.0,
         weight_init_type: str = 'mae',
         mlp_wide_silu: bool = False,
-        loss_fn: str = 'l2_masked',
-        # vit decoder specific
-        decoder_num_heads=8,
-        decoder_depth=8,
-        decoder_embed_dim=256,
-        # linear head specific
-        decoder_with_bn=False,
-        decoder_num_layers=3,
-        decoder_hidden_dim=2048,
-        decoder_bottleneck_dim=256,
-        decoder_mlp_bias=True,
-        # dense predictor specific
-        decoder_num_layers_dense=3,
-        decoder_hidden_dim_dense=512,
-        decoder_mlp_bias_dense=True,
+        loss_fn: str = 'l2_masked'
     ):
+        super().__init__()
         if model_template in CONFIGS.keys():
             config = CONFIGS[model_template]
             self.depth = config['depth']
@@ -187,6 +177,8 @@ class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
         axis_to_value = dict(zip(input_fmt, input_shape[1:]))
         self.in_chans = axis_to_value['C']
         self.num_frames = axis_to_value['T']
+
+        self.output_channels = output_channels
 
         self.axial_patch_size = axial_patch_size
         self.lateral_patch_size = lateral_patch_size
@@ -235,22 +227,27 @@ class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
             rope_random_rotation_per_head=self.rope_random_rotation_per_head,
             rope_mixed=self.rope_mixed,
             rope_theta=self.rope_theta,
-            mlp_wide_silu=mlp_wide_silu
+            mlp_wide_silu=mlp_wide_silu,
+            out_layers=decoder_args.get("encoder_out_layers", None)
         )
 
         self.task = task
         self.decoder = decoder
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            assert self.decoder == "vit", "For upsample_time and upsample_spacetime tasks " \
+                "only 'vit' decoder is supported currently."
+
         self.loss_fn = get_loss_fn(loss_fn)
 
         if self.decoder == "vit":
             if model_template in CONFIGS.keys():
-                self.decoder_embed_dim = CONFIGS[model_template].get("decoder_embed_dim", self.decoder_embed_dim)
-                self.decoder_depth = CONFIGS[model_template].get("decoder_depth", self.decoder_depth)
-                self.decoder_num_heads = CONFIGS[model_template].get("decoder_num_heads", self.decoder_num_heads)
+                self.decoder_embed_dim = CONFIGS[model_template]["decoder_embed_dim"]
+                self.decoder_depth = CONFIGS[model_template]["decoder_depth"]
+                self.decoder_num_heads = CONFIGS[model_template]["decoder_num_heads"]
             else:
-                self.decoder_embed_dim = decoder_embed_dim
-                self.decoder_depth = decoder_depth
-                self.decoder_num_heads = decoder_num_heads
+                self.decoder_embed_dim = decoder_args["decoder_embed_dim"]
+                self.decoder_depth = decoder_args["decoder_depth"]
+                self.decoder_num_heads = decoder_args["decoder_num_heads"]
 
             self.masked_decoder = MaskedPredictor(
                 input_fmt=self.input_fmt,
@@ -283,11 +280,11 @@ class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
             )
         
         elif self.decoder == "linear":
-            self.decoder_with_bn = decoder_with_bn
-            self.decoder_num_layers = decoder_num_layers
-            self.decoder_hidden_dim = decoder_hidden_dim
-            self.decoder_bottleneck_dim = decoder_bottleneck_dim
-            self.decoder_mlp_bias = decoder_mlp_bias
+            self.decoder_with_bn = decoder_args["decoder_with_bn"]
+            self.decoder_num_layers = decoder_args["decoder_num_layers"]
+            self.decoder_hidden_dim = decoder_args["decoder_hidden_dim"]
+            self.decoder_bottleneck_dim = decoder_args["decoder_bottleneck_dim"]
+            self.decoder_mlp_bias = decoder_args["decoder_mlp_bias"]
 
             self.masked_decoder = LinearHead(
                 in_dim=self.embed_dim,
@@ -301,30 +298,55 @@ class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
             )
         
         elif self.decoder == "dense_predictor":
-            self.decoder_num_layers = decoder_num_layers_dense
-            self.decoder_hidden_dim = decoder_hidden_dim_dense
-            self.decoder_mlp_bias = decoder_mlp_bias_dense
+            assert decoder_args["encoder_out_layers"] is not None, \
+                "For dense_predictor decoder, please specify the encoder out_layers to use."
+            self.decoder_use_bn = decoder_args["decoder_use_bn"]
+            self.decoder_feature_map_channels = decoder_args["decoder_feature_map_channels"]
+            self.decoder_strategy = decoder_args["decoder_strategy"]
+            self.decoder_embed_dim = decoder_args["decoder_embed_dim"]
 
             self.masked_decoder = DPTHead(
-                input_fmt=self.input_fmt,
+                input_format=self.input_fmt,
                 input_shape=self.input_shape,
                 lateral_patch_size=self.lateral_patch_size,
                 axial_patch_size=self.axial_patch_size,
                 temporal_patch_size=self.temporal_patch_size,
-                channels=self.in_chans,
-                input_embed_dim=self.embed_dim,
-                output_embed_dim=self.masked_encoder.patch_embedding.pixels_per_patch * self.output_channels \
-                    if self.task == "channel_split" else self.masked_encoder.patch_embedding.pixels_per_patch,
-                hidden_dim=self.decoder_hidden_dim,
-                num_layers=self.decoder_num_layers,
-                mlp_bias=self.decoder_mlp_bias,
+                input_channels=self.embed_dim,
+                output_channels=self.output_channels,
+                features=self.decoder_embed_dim,
+                use_bn=self.decoder_use_bn,
+                feature_map_channels=self.decoder_feature_map_channels,
+                strategy=self.decoder_strategy
             )
         
+        # TODO: add support for segmentation decoders
         else:
             raise ValueError(f"Unknown decoder type: {self.decoder}")
 
         self.weight_init_type = weight_init_type
         init_weights(self, weight_init_type=weight_init_type)
+
+    @torch.jit.ignore
+    def get_encoder(self):
+        return self.masked_encoder
+
+    @torch.jit.ignore
+    def get_decoder(self):
+        return self.masked_decoder
+
+    @torch.jit.ignore
+    def get_num_patches(self):
+        if self.abs_sincos_enc:
+            return self.masked_encoder.pos_embedding.num_patches
+        else:
+            num_patches, _ = calc_num_patches(
+                input_fmt=self.input_fmt,
+                input_shape=self.input_shape,
+                lateral_patch_size=self.lateral_patch_size,
+                axial_patch_size=self.axial_patch_size,
+                temporal_patch_size=self.temporal_patch_size,
+            )
+            return num_patches
 
     def forward(self, data_sample: dict):
         inputs, meta= data_sample['data_tensor'], data_sample['metainfo']
@@ -335,17 +357,17 @@ class FinetuneMaskedAutoEncoder(MaskedAutoEncoder):
 
         # x: List[B, N, C] or [B, N, C]
         if self.task == "upsample_time" or self.task == "upsample_spacetime":
-            x, patches = self.encoder(inputs, masks=context_masks)
+            x, patches = self.masked_encoder(inputs, masks=context_masks)
         else:
-            x, patches = self.encoder(inputs)
+            x, patches = self.masked_encoder(inputs)
 
         if self.task == "upsample_time" or self.task == "upsample_spacetime":
-            x = self.decoder(x, original_patch_indices=original_patch_indices, target_masks=target_masks)
+            x = self.masked_decoder(x, original_patch_indices=original_patch_indices, target_masks=target_masks)
         else:
-            x = self.decoder(x)
+            x = self.masked_decoder(x)
 
         if self.task == "channel_split":
-            # predictions = self.prediction_head(x)
+            predictions = x
             loss = self.loss_fn(predictions, targets, num_patches=self.get_num_patches())
         elif self.task == "upsample_time":
             # only supervise the masked timepoints

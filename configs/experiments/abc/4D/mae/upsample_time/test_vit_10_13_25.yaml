@@ -6,8 +6,9 @@ defaults:
   - /clusters/local                          # configs/clusters/local.yaml
   - /datasets/pretrain_dataset_ray           # configs/datasets/pretrain_dataset.yaml
   - /datasets/preprocessor/upsample_time_preprocessor  # configs/datasets/preprocessor/upsample_time_preprocessor.yaml
-  - /datasets/masking/mask_generator_blocked_patterned  # configs/datasets/masking/mask_generator_blocked_patterned.yaml
+  - /datasets/masking/mask_generator_blocked_patterned # configs/datasets/masking/mask_generator.yaml  
   - /models/mae/large                        # configs/models/mae/large.yaml
+  - /models/decoders/vit
   - /hooks/hooks                             # configs/hooks/hooks.yaml
   - /checkpoint/checkpoint                   # configs/checkpoint/checkpoint.yaml
   - /loggers/loggers                         # configs/loggers/loggers.yaml
@@ -20,8 +21,8 @@ defaults:
   - _self_
 
 # experiment name (used for logging)
-experiment_name: test_upsample_time
-wandb_project: test_finetune
+experiment_name: test_upsample_time_vit
+wandb_project: test_finetune_v2
 
 # task
 task: pretrain_mae
@@ -62,6 +63,7 @@ seed: 42
 
 # overrides
 # --------------------------------------------------------------------------------
+
 
 # clusters
 clusters:
@@ -110,7 +112,7 @@ datasets:
 
 # schedulers
 schedulers:
-  epochs: 2
+  epochs: 1
 
 # hooks
 hooks:

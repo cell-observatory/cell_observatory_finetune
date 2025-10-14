@@ -1,28 +1,15 @@
 """
-https://github.com/IDEA-Research/MaskDINO/blob/3831d8514a3728535ace8d4ecc7d28044c42dd14/maskdino/utils/utils.py#L36
-https://github.com/facebookresearch/detectron2/blob/9604f5995cc628619f0e4fd913453b4d7d61db3f/detectron2/layers/wrappers.py#L103
-
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Adapted from:
+https://github.com/IDEA-Research/MaskDINO/maskdino/utils/utils.py#L36
+https://github.com/facebookresearch/detectron2/detectron2/layers/wrappers.py#L103
 """
 
 
 import torch
 from torch import nn
 import torch.nn.functional as F
+
+from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
 
 
 class MLP(nn.Module):
@@ -63,3 +50,114 @@ class Conv3d(torch.nn.Conv3d):
         if self.activation is not None:
             x = self.activation(x)
         return x
+
+
+def compute_num_pixels_per_patch(channels, temporal_patch_size, axial_patch_size, lateral_patch_size, input_fmt):
+    pixels_per_patch = channels
+    pixels_per_patch *= temporal_patch_size if temporal_patch_size is not None else 1
+    pixels_per_patch *= axial_patch_size if axial_patch_size is not None else 1
+    pixels_per_patch *= lateral_patch_size ** 2 if input_fmt is not "XC" else lateral_patch_size
+    return pixels_per_patch
+
+
+def patchify(inputs, 
+             input_fmt, 
+             temporal_patch_size, 
+             axial_patch_size, 
+             lateral_patch_size,
+             channels,
+             reshape=True
+):
+
+    num_patches, token_shape = calc_num_patches(
+        input_fmt=input_fmt,
+        input_shape=inputs.shape,
+        lateral_patch_size=lateral_patch_size,
+        axial_patch_size=axial_patch_size,
+        temporal_patch_size=temporal_patch_size,
+    )
+    pixels_per_patch = compute_num_pixels_per_patch(channels, 
+                                                    temporal_patch_size, 
+                                                    axial_patch_size, 
+                                                    lateral_patch_size, 
+                                                    input_fmt)
+    
+    b = inputs.shape[0]
+    t, z, y, x, c = token_shape
+
+    if input_fmt == "TZYXC":
+        if reshape:
+            patches = inputs.reshape(shape=(
+                b,
+                t, temporal_patch_size,
+                z, axial_patch_size,
+                y, lateral_patch_size,
+                x, lateral_patch_size,
+                channels,
+            ))
+            patches = torch.einsum("btizjykxvc->btzyxijkvc", patches)
+        else:
+            patches = inputs.unfold(1, temporal_patch_size, temporal_patch_size) \
+                .unfold(2, axial_patch_size, axial_patch_size) \
+                .unfold(3, lateral_patch_size, lateral_patch_size) \
+                .unfold(4, lateral_patch_size, lateral_patch_size) \
+
+    elif input_fmt == "ZYXC":
+        if reshape:
+            patches = inputs.reshape(shape=(
+                b,
+                z, axial_patch_size,
+                y, lateral_patch_size,
+                x, lateral_patch_size,
+                channels,
+            ))
+            patches = torch.einsum("bzjykxvc->bzyxjkvc", patches)
+        else:
+            patches = inputs.unfold(1, axial_patch_size, axial_patch_size) \
+                .unfold(2, lateral_patch_size, lateral_patch_size) \
+                .unfold(3, lateral_patch_size, lateral_patch_size)
+
+    elif input_fmt == "TYXC":
+        if reshape:
+            patches = inputs.reshape(shape=(
+                b,
+                t, temporal_patch_size,
+                y, lateral_patch_size,
+                x, lateral_patch_size,
+                channels,
+            ))
+            patches = torch.einsum("btiykxvc->btyxikvc", patches)
+        else:
+            patches = inputs.unfold(1, temporal_patch_size, temporal_patch_size) \
+                .unfold(2, lateral_patch_size, lateral_patch_size) \
+                .unfold(3, lateral_patch_size, lateral_patch_size)
+
+    elif input_fmt == "YXC":
+        if reshape:
+            patches = inputs.reshape(shape=(
+                b,
+                y, lateral_patch_size,
+                x, lateral_patch_size,
+                channels,
+            ))
+            patches = torch.einsum("bykxvc->byxkvc", patches)
+        else:
+            patches = inputs.unfold(1, lateral_patch_size, lateral_patch_size) \
+                .unfold(2, lateral_patch_size, lateral_patch_size)
+
+    elif input_fmt == "XC":
+        if reshape:
+            patches = inputs.reshape(shape=(
+                b,
+                x, lateral_patch_size,
+                channels,
+            ))
+        else:
+            patches = inputs.unfold(1, lateral_patch_size, lateral_patch_size)
+    else:
+        raise NotImplementedError
+
+    # NOTE: if tensor is already in the specified memory format, 
+    #       contiguous returns the tensor
+    patches = patches.contiguous().view(b, num_patches, pixels_per_patch)
+    return patches

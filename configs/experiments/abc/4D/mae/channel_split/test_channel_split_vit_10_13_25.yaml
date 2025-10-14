@@ -8,6 +8,7 @@ defaults:
   - /datasets/preprocessor/channel_split_preprocessor  # configs/datasets/preprocessor/channel_split_preprocessor.yaml
   - /datasets/masking/mask_generator         # configs/datasets/masking/mask_generator.yaml  
   - /models/mae/large                        # configs/models/mae/large.yaml
+  - /models/decoders/vit
   - /hooks/hooks                             # configs/hooks/hooks.yaml
   - /checkpoint/checkpoint                   # configs/checkpoint/checkpoint.yaml
   - /loggers/loggers                         # configs/loggers/loggers.yaml
@@ -20,8 +21,8 @@ defaults:
   - _self_
 
 # experiment name (used for logging)
-experiment_name: test_channel_split
-wandb_project: test_finetune
+experiment_name: test_channel_split_vit
+wandb_project: test_finetune_v2
 
 # task
 task: pretrain_mae
@@ -55,7 +56,7 @@ dataset_dtype: float16 # data type for loading data, options: float32, float16
 storage_dtype: uint16
 
 # dataset layout in the zarr files
-dataset_layout_order: ZYXC
+dataset_layout_order: TZYXC
 
 # seed
 seed: 42
@@ -97,8 +98,8 @@ paths:
 datasets:
   # mainly used by other configs but determined here for ease of access
   batch_size: ${clusters.batch_size_per_gpu} # batch size = (total_batch_size * total_gpus)
-  input_shape: [128, 128, 128, 2] # NOTE: important that this matches database hypercube shape
-  patch_shape: [16, 16, 16]
+  input_shape: [16, 128, 128, 128, 2] # NOTE: important that this matches database hypercube shape
+  patch_shape: [4, 16, 16, 16]
 
   databases:
     max_rois: null # maximum number of ROIs (each ROI can have dozens of tiles)
@@ -111,7 +112,7 @@ datasets:
 
 # schedulers
 schedulers:
-  epochs: 1
+  epochs: 2
 
 # hooks
 hooks:

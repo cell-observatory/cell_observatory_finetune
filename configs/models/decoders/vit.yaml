@@ -1,0 +1,4 @@
+name: vit
+decoder_embed_dim: 1024
+decoder_depth: 8
+decoder_num_heads: 8

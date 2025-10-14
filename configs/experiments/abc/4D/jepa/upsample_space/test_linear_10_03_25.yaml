@@ -1,17 +1,18 @@
 # @package _global_
 defaults:
-  - /tasks/channel_split
+  - /tasks/upsample_space
   - /paths/abc                               # configs/paths/abc.yaml
   - /hydra/overrides                         # configs/hydra/overrides.yaml (not working)
   - /clusters/local                          # configs/clusters/local.yaml
   - /datasets/pretrain_dataset_ray           # configs/datasets/pretrain_dataset.yaml
-  - /datasets/preprocessor/channel_split_preprocessor  # configs/datasets/preprocessor/channel_split_preprocessor.yaml
+  - /datasets/preprocessor/upsample_space_preprocessor  # configs/datasets/preprocessor/upsample_space_preprocessor.yaml
   - /datasets/masking/mask_generator         # configs/datasets/masking/mask_generator.yaml  
   - /models/jepa/large                        # configs/models/jepa/large.yaml
+  - /models/decoders/linear                   # configs/models/decoders/linear.yaml
   - /hooks/hooks                             # configs/hooks/hooks.yaml
   - /checkpoint/checkpoint                   # configs/checkpoint/checkpoint.yaml
   - /loggers/loggers                         # configs/loggers/loggers.yaml
-  - /evaluation/base_evaluator_test               # configs/evaluation/base_evaluator.yaml
+  - /evaluation/base_evaluator               # configs/evaluation/base_evaluator.yaml
   - /deepspeed/zero2                         # configs/deepspeed/zero2.yaml
   - /optimizers/lamb                         # configs/optimizers/lamb.yaml
   - /schedulers/test_warmup_cosine_decay     # configs/schedulers/test_warmup_cosine_decay.yaml
@@ -20,8 +21,8 @@ defaults:
   - _self_
 
 # experiment name (used for logging)
-experiment_name: channel_split_jepa
-wandb_project: test_finetune_evals
+experiment_name: test_upsample_space_linear_jepa
+wandb_project: test_finetune
 
 # task
 task: pretrain_jepa
@@ -39,10 +40,10 @@ distributed_framework: ray
 run_type: single_run # single_run, multi_run, or tune
 
 # job type
-job_type: test # train or test
+job_type: train # train or test
 
 # trainer type
-trainer: training.loops.TestTrainer
+trainer: training.loops.EpochBasedTrainer
 
 # loop per worker script
 loop_per_worker_script: training.loops.train_loop_per_worker

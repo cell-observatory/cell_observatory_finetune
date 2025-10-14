@@ -12,7 +12,7 @@ from cell_observatory_finetune.models.layers.utils import batch_tensors
 from cell_observatory_finetune.data.structures import boxes
 
 from cell_observatory_finetune.data.structures.masks import project_masks_on_boxes
-from cell_observatory_finetune.cell_observatory_platform.utils.context import get_world_size, in_torch_dist
+from cell_observatory_finetune.cell_observatory_platform.utils.context import get_world_size, is_torch_dist_initialized
 from cell_observatory_finetune.models.layers.utils import point_sample, get_uncertain_point_coords_with_randomness
 
 
@@ -453,7 +453,7 @@ class DETR_Set_Loss(nn.Module):
             [total_num_masks], dtype=torch.float, device=next(iter(outputs.values())).device
         )
         # TODO: perform dist init and available check with Ray instead?
-        if in_torch_dist():
+        if is_torch_dist_initialized():
             torch.distributed.all_reduce(total_num_masks)
         average_num_masks_per_node = torch.clamp(total_num_masks / get_world_size(), min=1).item()
 
@@ -546,14 +546,14 @@ def get_loss_fn(loss_type: str ):
         raise ValueError(f"Unknown loss type: {loss_type}")
     
 
-def L2_masked_loss(targets, predictions, num_patches):
+def L2_masked_loss(predictions, targets, num_patches):
     loss = (targets - predictions) ** 2
     loss = loss.mean(dim=-1)  # mean loss per patch
     loss = loss.sum() / num_patches
     return loss
 
 
-def L1_masked_loss(targets, predictions, num_patches):
+def L1_masked_loss(predictions, targets, num_patches):
     # compute loss over masked patches
     loss = torch.abs(targets - predictions)
     loss = loss.mean(dim=-1)  # mean loss per patch
@@ -562,5 +562,5 @@ def L1_masked_loss(targets, predictions, num_patches):
 
 
 # see: https://github.com/facebookresearch/ijepa/main/src/train.py
-def smooth_L1_masked_loss(targets, predictions, num_patches):
+def smooth_L1_masked_loss(predictions, targets, num_patches):
     return F.smooth_l1_loss(targets, predictions) / num_patches

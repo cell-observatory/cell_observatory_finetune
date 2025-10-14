@@ -1,0 +1,6 @@
+name: linear
+decoder_with_bn: False
+decoder_num_layers: 3
+decoder_hidden_dim: 2048
+decoder_bottleneck_dim: 256
+decoder_mlp_bias: True

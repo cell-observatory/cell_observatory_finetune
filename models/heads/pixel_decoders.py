@@ -389,7 +389,7 @@ class Mask2FormerPixelDecoder(nn.Module):
 
         # determine shapes of input features
         input_shapes = {k: v for k, v in input_shape.items() if k in transformer_in_features}
-        # sort feature shapes from high to low resolution
+        # sort feature shapes from low to high resolution
         input_shapes_sorted = sorted(input_shapes.items(), key=lambda x: -x[1]["stride"])
         
         # define feature maps and determine number of feature levels 
@@ -397,7 +397,7 @@ class Mask2FormerPixelDecoder(nn.Module):
         self.feature_maps, self.feature_maps_strides, feature_maps_in_channels = zip(*data_items)        
         self.num_feature_levels = len(self.feature_maps)
 
-        # note that this is not sorted in high resolution -> low resolution order
+        # note that this is sorted high resolution -> low resolution order. important for FPN upsampling
         input_shape = sorted(input_shape.items(), key = lambda x: x[1]["stride"])
         self.full_feature_map_set, _, self.full_feature_set_channels = zip(*[(k, v["stride"], v["channels"]) \
                                                                              for k, v in input_shape])
@@ -500,7 +500,7 @@ class Mask2FormerPixelDecoder(nn.Module):
 
     def forward_features(self, features):
         features_list, pos_embeddings_list = [], []
-        # reverse feature maps into top-down order (from low to high resolution)
+        # reverse feature maps into top-down order (from high to low resolution)
         for idx, f in enumerate(self.feature_maps[::-1]):
             x = features[f]
             features_list.append(self.channel_align_projection[idx](x))
@@ -530,7 +530,7 @@ class Mask2FormerPixelDecoder(nn.Module):
                        view(transformer_feature.shape[0], -1, shape[0], shape[1], shape[2]))
 
         # append `output_map` with extra FPN levels
-        # reverse feature maps into top-down order (from low to high resolution)
+        # reverse feature maps into top-down order (from low to high resolution from finest K backbone maps)
         for idx, f in enumerate(self.full_feature_map_set[:self.num_fpn_levels][::-1]):
             x = features[f]
             lateral_conv = self.lateral_convs[idx]
@@ -543,4 +543,4 @@ class Mask2FormerPixelDecoder(nn.Module):
             output_map.append(y)
 
         multi_scale_features = list(output_map[:self.total_num_feature_levels])
-        return self.mask_features(output_map[0]), output_map[0], multi_scale_features
+        return self.mask_features(output_map[-1]), output_map[0], multi_scale_features
