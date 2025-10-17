@@ -26,7 +26,7 @@ class FinetunePreprocessor(RayPreprocessor):
                  ideal_psf_path: str | None = None,
                  na_mask_thresholds: list[float] | None = None,
                  resize_na_masks: bool = True,
-    ):  
+    ):
         super().__init__(dtype=dtype,
                          transforms_list=transforms_list,
                          with_masking=with_masking,

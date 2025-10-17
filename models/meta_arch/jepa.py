@@ -191,7 +191,7 @@ class FinetuneJEPA(nn.Module):
         self.input_shape = input_shape
         axis_to_value = dict(zip(input_fmt, input_shape[1:]))
         self.in_chans = axis_to_value['C']
-        self.num_frames = axis_to_value['T']
+        self.num_frames = axis_to_value.get("T", None)
 
         self.output_channels = output_channels
 

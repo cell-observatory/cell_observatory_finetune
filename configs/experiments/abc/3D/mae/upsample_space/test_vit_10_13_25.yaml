@@ -1,18 +1,18 @@
 # @package _global_
 defaults:
-  - /tasks/channel_split
+  - /tasks/upsample_space
   - /paths/abc                               # configs/paths/abc.yaml
   - /hydra/overrides                         # configs/hydra/overrides.yaml (not working)
   - /clusters/local                          # configs/clusters/local.yaml
   - /datasets/pretrain_dataset_ray           # configs/datasets/pretrain_dataset.yaml
-  - /datasets/preprocessor/channel_split_preprocessor  # configs/datasets/preprocessor/channel_split_preprocessor.yaml
-  - /datasets/masking/mask_generator         # configs/datasets/masking/mask_generator.yaml    
+  - /datasets/preprocessor/upsample_space_preprocessor  # configs/datasets/preprocessor/channel_split_preprocessor.yaml
+  - /datasets/masking/mask_generator         # configs/datasets/masking/mask_generator.yaml  
   - /models/mae/large                        # configs/models/mae/large.yaml
-  - /models/decoders/vit                     # configs/models/decoders/vit.yaml
+  - /models/decoders/vit
   - /hooks/hooks                             # configs/hooks/hooks.yaml
   - /checkpoint/checkpoint                   # configs/checkpoint/checkpoint.yaml
   - /loggers/loggers                         # configs/loggers/loggers.yaml
-  - /evaluation/channel_split_evaluator      # configs/evaluation/channel_split_evaluator.yaml
+  - /evaluation/base_evaluator               # configs/evaluation/base_evaluator.yaml
   - /deepspeed/zero2                         # configs/deepspeed/zero2.yaml
   - /optimizers/lamb                         # configs/optimizers/lamb.yaml
   - /schedulers/test_warmup_cosine_decay     # configs/schedulers/test_warmup_cosine_decay.yaml
@@ -21,8 +21,8 @@ defaults:
   - _self_
 
 # experiment name (used for logging)
-experiment_name: test_evals
-wandb_project: test_evals
+experiment_name: test_upsample_space_vit
+wandb_project: test_finetune_3D
 
 # task
 task: pretrain_mae
@@ -40,10 +40,10 @@ distributed_framework: ray
 run_type: single_run # single_run, multi_run, or tune
 
 # job type
-job_type: test # train or test
+job_type: train # train or test
 
 # trainer type
-trainer: training.loops.TestTrainer
+trainer: training.loops.EpochBasedTrainer
 
 # loop per worker script
 loop_per_worker_script: training.loops.train_loop_per_worker
@@ -58,10 +58,10 @@ storage_dtype: uint16
 # dataset layout in the zarr files
 dataset_layout_order: ZYXC
 
+data_dim: 3
+
 # seed
 seed: 42
-
-data_dim: 3
 
 # overrides
 # --------------------------------------------------------------------------------
@@ -93,7 +93,7 @@ paths:
   # base output directory for logs, checkpoints, etc.
   outdir: ${paths.data_path}/pretrained_models/${experiment_name}
   resume_checkpointdir: null 
-  pretrained_checkpointdir: /clusterfs/nvme/segment_4d/pretrained_models/test_channel_split_vit/checkpoints
+  pretrained_checkpointdir: null
 
 # data
 datasets:
@@ -106,7 +106,7 @@ datasets:
     max_rois: null # maximum number of ROIs (each ROI can have dozens of tiles)
     max_tiles: null # maximum number of tiles (each tile can have thousands of hypercubes)
     roi_list: [516, 517, 518, 519]
-    max_hypercubes: 500 # maximum number of hypercubes to return
+    max_hypercubes: 1500 # maximum number of hypercubes to return
     use_cached_hypercubes_dataframe: true # whether to use the cached hypercubes dataframe
     hypercubes_dataframe_path: /clusterfs/nvme/segment_4d/pretrained_models/test_channel_split_linear/database/hypercubes_dataframe.csv
     # server_folder_path: /clusterfs/vast/Data/read_speed_tests/large_test_zarrs
@@ -116,11 +116,6 @@ datasets:
 # schedulers
 schedulers:
   epochs: 1
-
-# deepspeed
-deepspeed:
-  checkpoint:
-    load_universal: true # whether to load a universal checkpoint
 
 # hooks
 hooks:
@@ -136,10 +131,22 @@ hooks:
   # - _target_: training.hooks.NsysProfilerHook
   #   start_iter: 20
   #   end_iter: 25
+  - _target_: training.hooks.WeightDecayScheduleHook
   - _target_: training.hooks.FreeDeviceBufferHook
+  - _target_: training.hooks.AnomalyDetector
+  - _target_: training.hooks.LRScheduler
   - _target_: training.hooks.IterationTimer
   - _target_: training.hooks.PeriodicWriter
+  - _target_: training.hooks.PeriodicCheckpointer
+    period: 1
+    file_prefix: latest_model
+  - _target_: training.hooks.BestCheckpointer
+    checkpointdir: ${checkpoint.checkpoint_manager.save_checkpointdir}
   - _target_: training.hooks.TorchMemoryStats
     step_period: 2
     epoch_period: 1
     logdir: ${loggers.logdir}
+  - _target_: training.hooks.BestMetricSaver
+    metric_name: ${evaluation.val_metric}
+    compare_fn: ${evaluation.val_mode}
+    eval_after_validation: true

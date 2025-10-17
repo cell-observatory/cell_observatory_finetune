@@ -1,2 +1,1 @@
 task: upsample_spacetime
-output_channels: ${datasets.input_shape.4}

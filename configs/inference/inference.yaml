@@ -1,0 +1,26 @@
+_target_: inference.inferencer.InferencerWorker
+
+num_output_channels: 2
+input_format: ${dataset_layout_order} 
+timepoint_list: ${datasets.databases.timepoint_list}
+
+task: ${tasks.task}
+inference_mode: "sliding_window"
+activation: null
+decoder_head_type: ${models.decoders.name}
+
+roi_tile_list: 
+  - [519, "000x_000y_000z.zarr"]
+
+protocol: ${datasets.databases.protocol}
+dotenv_path: null
+dbname: ${datasets.databases.dbname}
+server_folder_path: ${paths.server_folder_path}
+verbose: false
+max_hypercubes: null
+max_partitions: 10
+
+save_dir: ${paths.outdir}/inference
+save_format: "tiff"
+zarr_chunk_shape: null
+zarr_shard_shape: null

@@ -12,17 +12,18 @@ defaults:
   - /hooks/hooks                             # configs/hooks/hooks.yaml
   - /checkpoint/checkpoint                   # configs/checkpoint/checkpoint.yaml
   - /loggers/loggers                         # configs/loggers/loggers.yaml
-  - /evaluation/channel_split_evaluator      # configs/evaluation/channel_split_evaluator.yaml
+  - /evaluation/base_evaluator_test          # configs/evaluation/base_evaluator.yaml
   - /deepspeed/zero2                         # configs/deepspeed/zero2.yaml
   - /optimizers/lamb                         # configs/optimizers/lamb.yaml
   - /schedulers/test_warmup_cosine_decay     # configs/schedulers/test_warmup_cosine_decay.yaml
   - /optimizations/optimizations             # configs/optimizations/optimizations.yaml
   - /profiling/profiling                      # configs/profiling/profiling.yaml
+  - /inference/inference                      # configs/inference/inference.yaml
   - _self_
 
 # experiment name (used for logging)
-experiment_name: test_evals
-wandb_project: test_evals
+experiment_name: test_inference
+wandb_project: test_inference
 
 # task
 task: pretrain_mae
@@ -40,10 +41,10 @@ distributed_framework: ray
 run_type: single_run # single_run, multi_run, or tune
 
 # job type
-job_type: test # train or test
+job_type: predict # train or test
 
 # trainer type
-trainer: training.loops.TestTrainer
+trainer: training.loops.Inferencer
 
 # loop per worker script
 loop_per_worker_script: training.loops.train_loop_per_worker
@@ -61,7 +62,7 @@ dataset_layout_order: ZYXC
 # seed
 seed: 42
 
-data_dim: 3
+num_output_channels: 2
 
 # overrides
 # --------------------------------------------------------------------------------
@@ -101,14 +102,17 @@ datasets:
   batch_size: ${clusters.batch_size_per_gpu} # batch size = (total_batch_size * total_gpus)
   input_shape: [128, 128, 128, 2] # NOTE: important that this matches database hypercube shape
   patch_shape: [null, 16, 16, 16]
+  occupancy_threshold: 0.0
+  split: 0.0
 
   databases:
     max_rois: null # maximum number of ROIs (each ROI can have dozens of tiles)
     max_tiles: null # maximum number of tiles (each tile can have thousands of hypercubes)
-    roi_list: [516, 517, 518, 519]
-    max_hypercubes: 500 # maximum number of hypercubes to return
+    roi_list: [519]
+    tile_list: ["000x_000y_000z.zarr"]
+    timepoint_list: [0]
     use_cached_hypercubes_dataframe: true # whether to use the cached hypercubes dataframe
-    hypercubes_dataframe_path: /clusterfs/nvme/segment_4d/pretrained_models/test_channel_split_linear/database/hypercubes_dataframe.csv
+    # hypercubes_dataframe_path: /clusterfs/nvme/segment_4d/pretrained_models/test_channel_split_linear/database/hypercubes_dataframe.csv
     # server_folder_path: /clusterfs/vast/Data/read_speed_tests/large_test_zarrs
     protocol: cursor # protocol used to fetch data from source (default is 'binary', can also be 'csv' or 'cursor')
     num_timepoints: 1

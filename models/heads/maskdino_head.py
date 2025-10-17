@@ -88,70 +88,59 @@ class MaskDINO(nn.Module):
         self.focus_on_boxes = focus_on_boxes
         self.use_softmax_loss = use_softmax_loss
 
-    def _forward(self, data_sample: dict):
-        """
-        Args:
-            inputs: Tensor, image in (C, D, H, W) format
-            targets: Dict, per-region ground truth instances
-        
-        Returns:
-            list[dict]: Results for one image.        
-        """
+    def forward(self, data_sample: dict):
         last_feature_map, features_dict = self.backbone(data_sample['data_tensor'])
+        outputs, denoise_predictions = self.segmentation_head(features_dict, targets=data_sample['metainfo']['gt_instances'])
 
-        if self.training:
-            outputs, denoise_predictions = self.segmentation_head(features_dict, 
-                                                                  targets=data_sample['metainfo']['gt_instances'])
+        # bipartite matching-based loss
+        losses = self.criterion(outputs, data_sample['metainfo']['gt_instances'], denoise_predictions)
 
-            # bipartite matching-based loss
-            losses = self.criterion(outputs, data_sample['metainfo']['gt_instances'], denoise_predictions)
+        for loss in list(losses.keys()):
+            if loss in self.criterion.loss_weight_dict:
+                losses[loss] *= self.criterion.loss_weight_dict[loss]
+            else:
+                # remove this loss if not specified in loss_weight_dict
+                losses.pop(loss)
 
-            for loss in list(losses.keys()):
-                if loss in self.criterion.loss_weight_dict:
-                    losses[loss] *= self.criterion.loss_weight_dict[loss]
-                else:
-                    # remove this loss if not specified in loss_weight_dict
-                    losses.pop(loss)
+        return losses, outputs
 
-            return losses, outputs
-        
-        else:
-            outputs, _ = self.segmentation_head(features_dict, targets=None)
+    def predict(self, data_sample: dict):
+        last_feature_map, features_dict = self.backbone(data_sample['data_tensor'])
+        outputs, _ = self.segmentation_head(features_dict, targets=None)
+        predicted_labels, predicted_boxes, predicted_masks = [
+            outputs[key] for key in ("pred_logits", "pred_boxes", "pred_masks")
+        ]
 
-            predicted_labels, predicted_boxes, predicted_masks = [
-                outputs[key] for key in ("pred_logits", "pred_boxes", "pred_masks")
+        # upsample masks to original image size
+        predicted_masks = F.interpolate(
+            predicted_masks,
+            size=(data_sample['metainfo']['image_sizes'][0]),
+            mode="trilinear",
+            align_corners=False,
+        )
+
+        del outputs
+
+        predictions = []
+        for predicted_label, predicted_mask, predicted_box, image_size_pad, orig_image_size in zip(
+            predicted_labels, predicted_masks, predicted_boxes, 
+            data_sample['metainfo']['image_sizes'], data_sample['metainfo']['orig_image_sizes']
+        ):
+            # padded size (divisible by 32)
+            depth, height, width = [
+                new_dim/image_dim_pad * orig_dim
+                for new_dim, image_dim_pad, orig_dim in zip(
+                    predicted_mask.shape[-3:],  # (new_d, new_h, new_w)
+                    image_size_pad, # (orig_d, orig_h, orig_w)
+                    orig_image_size # (orig_d, orig_h, orig_w)
+                )
             ]
-
-            # upsample masks to original image size
-            predicted_masks = F.interpolate(
-                predicted_masks,
-                size=(data_sample['metainfo']['image_sizes'][0]),
-                mode="trilinear",
-                align_corners=False,
-            )
-
-            del outputs
-
-            predictions = []
-            for predicted_label, predicted_mask, predicted_box, image_size_pad, orig_image_size in zip(
-                predicted_labels, predicted_masks, predicted_boxes, 
-                data_sample['metainfo']['image_sizes'], data_sample['metainfo']['orig_image_sizes']
-            ):
-                # padded size (divisible by 32)
-                depth, height, width = [
-                    new_dim/image_dim_pad * orig_dim
-                    for new_dim, image_dim_pad, orig_dim in zip(
-                        predicted_mask.shape[-3:],  # (new_d, new_h, new_w)
-                        image_size_pad, # (orig_d, orig_h, orig_w)
-                        orig_image_size # (orig_d, orig_h, orig_w)
-                    )
-                ]
-                predicted_box = self.box_postprocess(predicted_box, depth, height, width)
-                
-                instance_predictions = self.inference(predicted_label, predicted_mask, predicted_box)
-                predictions.append(instance_predictions) 
+            predicted_box = self.box_postprocess(predicted_box, depth, height, width)
             
-            return None, predictions
+            instance_predictions = self.inference(predicted_label, predicted_mask, predicted_box)
+            predictions.append(instance_predictions) 
+        
+        return predictions
 
     def inference(self, predicted_labels, predicted_masks, predicted_boxes):
         # (num_queries, num_classes) -> (num_queries, num_classes)

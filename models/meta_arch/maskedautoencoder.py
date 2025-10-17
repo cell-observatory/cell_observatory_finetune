@@ -176,7 +176,7 @@ class FinetuneMaskedAutoEncoder(nn.Module):
         
         axis_to_value = dict(zip(input_fmt, input_shape[1:]))
         self.in_chans = axis_to_value['C']
-        self.num_frames = axis_to_value['T']
+        self.num_frames = axis_to_value.get("T", None)
 
         self.output_channels = output_channels
 
@@ -384,3 +384,24 @@ class FinetuneMaskedAutoEncoder(nn.Module):
             "step_loss": loss,
         }
         return loss_dict, predictions
+
+    def predict(self, data_sample: dict):
+        inputs, meta= data_sample['data_tensor'], data_sample['metainfo']
+        masks, context_masks, targets = meta.get("masks", [None])[0], \
+            meta.get('context_masks', [None])[0], meta.get('targets', [None])[0]
+        target_masks, original_patch_indices = meta.get('target_masks', [None])[0], \
+            meta.get('original_patch_indices', [None])[0]
+
+        # x: List[B, N, C] or [B, N, C]
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            x, patches = self.masked_encoder(inputs, masks=context_masks)
+        else:
+            x, patches = self.masked_encoder(inputs)
+
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            x = self.masked_decoder(x, original_patch_indices=original_patch_indices, target_masks=target_masks)
+        else:
+            x = self.masked_decoder(x)
+
+        x = self.masked_encoder.patch_embedding.unpatchify(x, out_channels=self.output_channels if self.task == "channel_split" else None)
+        return x

@@ -12,8 +12,8 @@ transforms_list:
       value: ${dataset_layout_order}
 
 temporal_patch_size: ${datasets.patch_shape.0}
-lateral_patch_size: ${datasets.patch_shape.1}
-axial_patch_size: ${datasets.patch_shape.2}
+axial_patch_size: ${datasets.patch_shape.1}
+lateral_patch_size: ${datasets.patch_shape.2}
 
 input_format: ${dataset_layout_order}
 input_shape: ${eval:"[${clusters.batch_size_per_gpu}] + ${datasets.input_shape}"}
