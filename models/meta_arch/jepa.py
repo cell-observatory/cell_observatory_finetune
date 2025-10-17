@@ -423,3 +423,25 @@ class FinetuneJEPA(nn.Module):
             "step_loss": loss,
         }
         return loss_dict, predictions
+    
+
+    def predict(self, data_sample: dict):
+        inputs, meta= data_sample['data_tensor'], data_sample['metainfo']
+        masks, context_masks, targets = meta.get("masks", [None])[0], \
+            meta.get('context_masks', [None])[0], meta.get('targets', [None])[0]
+        target_masks, original_patch_indices = meta.get('target_masks', [None])[0], \
+            meta.get('original_patch_indices', [None])[0]
+        
+        # x: List[B, N, C] or [B, N, C]
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            x, patches = self.input_encoder(inputs, masks=context_masks)
+        else:
+            x, patches = self.input_encoder(inputs)
+        
+        if self.task == "upsample_time" or self.task == "upsample_spacetime":
+            x = self.target_predictor(x, original_patch_indices=original_patch_indices, target_masks=target_masks)
+        else:
+            x = self.target_predictor(x)
+
+        x = self.input_encoder.patch_embedding.unpatchify(x, out_channels=self.output_channels if self.task == "channel_split" else None)
+        return x
