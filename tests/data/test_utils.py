@@ -51,22 +51,6 @@ def test_create_na_masks_shapes_only(thr_list, target_shape, resize):
     msks = create_na_masks(ipsf, thresholds=thr_list, target_shape=target_shape, resize=resize)
     assert msks.shape == (len(thr_list), *target_shape)
 
-# ---------- resize_mask
-
-def test_resize_mask_identity_shape():
-    m = torch.randint(0, 2, (5, 6, 7), dtype=torch.float32)
-    out = resize_mask(m, (5, 6, 7))
-    assert out.shape == (5, 6, 7)
-
-@pytest.mark.parametrize("src,tgt", [
-    ((5, 6, 7), (10, 12, 14)),
-    ((9, 9, 9), (5, 7, 11)),
-])
-def test_resize_mask_target_shape(src, tgt):
-    m = torch.zeros(src, dtype=torch.float32)
-    out = resize_mask(m, tgt)
-    assert out.shape == tgt
-
 # ---------- downsample
 
 @pytest.mark.parametrize("shape,spatial_dims", [

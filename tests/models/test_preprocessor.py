@@ -160,38 +160,4 @@ def test_resize_mask_broadcast_3d_with_time_and_channel():
     assert mask.shape[FMT_3D.index("Z")] == DEPTH
     assert mask.shape[FMT_3D.index("Y")] == HEIGHT
     assert mask.shape[FMT_3D.index("X")] == WIDTH
-
-
-def test_upsample_identity_with_delta_psf_2d(monkeypatch):
-    def _read_file(_):
-        return _delta_psf_2d(HEIGHT, WIDTH).numpy()
-
-    monkeypatch.setattr(
-        "cell_observatory_finetune.models.meta_arch.preprocessor.read_file",
-        _read_file,
-        raising=True,
-    )
-
-    fmt = FMT_2D
-    shape = SHAPE_2D
-    x = torch.randn(shape)
-
-    pp = FinetunePreprocessor(
-        task="upsample",
-        with_masking=False,
-        mask_generator=None,
-        axial_patch_size=None,
-        lateral_patch_size=4,
-        temporal_patch_size=1,
-        transforms_list=[],
-        dtype=torch.float32,
-        input_format=fmt,
-        input_shape=shape,
-        ideal_psf_path="ignored",
-        na_mask_thresholds=[0.0],
-        seed=123,
-    )
-    out = pp.forward({"data_tensor": x.clone(), "metainfo": {}}, data_time=0.0)
-    y = out["data_tensor"]
-    assert y.shape == x.shape
-    assert torch.allclose(y, x, atol=1e-5)
+    

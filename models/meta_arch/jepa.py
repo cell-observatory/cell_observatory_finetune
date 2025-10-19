@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 from cell_observatory_finetune.training.losses import get_loss_fn
 
-from cell_observatory_platform.models.jepa import JEPA
+
 from cell_observatory_platform.data.masking.mask_generator import apply_masks
 
 CONFIGS = {

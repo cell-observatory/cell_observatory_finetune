@@ -10,11 +10,7 @@ try:
 except ImportError:
     MSDEFORM_ATTN_AVAILABLE = False
 
-from cell_observatory_finetune.models.layers.utils import (get_reference_points, 
-                                                           pack_time, 
-                                                           unpack_time,
-                                                           pack_spatial,
-                                                           unpack_spatial)
+from cell_observatory_finetune.models.layers.utils import get_reference_points
 
 from cell_observatory_platform.models.norm import get_norm
 from cell_observatory_platform.data.data_types import TORCH_DTYPES
@@ -58,7 +54,7 @@ class DWConv(nn.Module):
         self.embed_dim = embed_dim
         self.strategy = strategy
 
-        if self.dim in (3,4) and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             self.spatial_conv = nn.Conv3d(
                                 embed_dim, 
                                 embed_dim, 
@@ -73,7 +69,7 @@ class DWConv(nn.Module):
                                         stride=1, 
                                         padding=1) if dim == 4 else nn.Identity()
         else:
-            raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
+            raise ValueError(f"Only Dim=3 is supported, "
                              f"got dim={dim}, strategy={strategy}.")
 
     @staticmethod
@@ -95,19 +91,7 @@ class DWConv(nn.Module):
 
         out = []
         for feature_map, g in zip([x2, x1, x0], query_level_shapes):
-            if self.dim == 4 and self.strategy == 'axial':
-                T,Z,Y,X = g
-                y_bt, B, T = pack_time(feature_map.reshape(B, T, Z, Y, X, C), "TZYXC")
-                y_bt = self.spatial_conv(y_bt)
-                y = unpack_time(y_bt, B, T, "TCZYX", "TZYXC")
-
-                y_shape = tuple(y.shape[1:])
-                ys = pack_spatial(y, "TZYXC")
-                ys = self.temporal_conv(ys)
-                ys = unpack_spatial(ys, B, "TZYXC", y_shape, "TZYXC")
-                y = ys.flatten(1, 4)
-
-            elif self.dim == 3 and self.strategy == 'axial':
+            if self.dim == 3 and self.strategy == 'axial':
                 Z,Y,X = g
                 y = feature_map.transpose(1,2).reshape(B,C,Z,Y,X)
                 y = self.spatial_conv(y).flatten(2).transpose(1,2)
@@ -333,20 +317,6 @@ class Conv3dBNAct(nn.Module):
         x = self.conv(x)
         x = self.bn(x)
         return self.act(x)
-    
-
-class TemporalDW1D(nn.Module):
-    def __init__(self, c, k=3, s=1, bn=True):
-        super().__init__()
-        self.dw = nn.Conv1d(c, c, kernel_size=k, stride=s, padding=k//2, groups=c, bias=not bn)
-        self.bn = nn.BatchNorm1d(c) if bn else nn.Identity()
-        self.act = nn.GELU()
-    
-    def forward(self, x):
-        x = self.dw(x)
-        x = self.bn(x)
-        x = self.act(x)
-        return x
 
 
 class SpatialPriorModule(nn.Module):
@@ -359,14 +329,10 @@ class SpatialPriorModule(nn.Module):
                  strides={"stem1": (2,2,2),
                           "stem2": (1,1,1),
                           "stem3": (1,1,1),
-                          "tmix0": 1,
                           "maxpool": 2,
                           "stage2": (2,2,2),
-                            "tmix1": 1,
                             "stage3": (2,2,2),
-                            "tmix2": 1,
                             "stage4": (2,2,2),
-                            "tmix3": 1
                           }
     ):
         super().__init__()
@@ -376,22 +342,18 @@ class SpatialPriorModule(nn.Module):
 
         self.strides = strides
 
-        if self.dim in (3,4) or self.strategy == 'axial':
+        if self.dim == 3 or self.strategy == 'axial':
             # stem over ZYX
             self.stem1 = Conv3dBNAct(in_ch, inplanes, k=(3,3,3), s=self.strides["stem1"])
             self.stem2 = Conv3dBNAct(inplanes, inplanes, k=(3,3,3), s=self.strides["stem2"])
             self.stem3 = Conv3dBNAct(inplanes, inplanes, k=(3,3,3), s=self.strides["stem3"])
-            self.tmix0 = TemporalDW1D(inplanes, k=3, s=self.strides["tmix0"]) if dim == 4 else nn.Identity()
             self.maxpool = nn.MaxPool3d(kernel_size=3, stride=self.strides["maxpool"], padding=1)
 
             self.stage2 = Conv3dBNAct(inplanes,  2*inplanes, k=(3,3,3), s=self.strides["stage2"])   # /4 in ZYX
-            self.tmix1 = TemporalDW1D(2*inplanes, k=3, s=self.strides["tmix1"]) if dim == 4 else nn.Identity()
 
             self.stage3 = Conv3dBNAct(2*inplanes, 4*inplanes, k=(3,3,3), s=self.strides["stage3"])  # /8 in ZYX
-            self.tmix2 = TemporalDW1D(4*inplanes, k=3, s=self.strides["tmix2"]) if dim == 4 else nn.Identity()
 
             self.stage4 = Conv3dBNAct(4*inplanes, 4*inplanes, k=(3,3,3), s=self.strides["stage4"])  # /16 in ZYX
-            self.tmix3 = TemporalDW1D(4*inplanes, k=3, s=self.strides["tmix3"]) if dim == 4 else nn.Identity()
 
             # 1x1x1 projections to embed_dim
             self.fc1 = nn.Conv3d(inplanes, embed_dim, kernel_size=1, stride=1, padding=0, bias=True)
@@ -405,89 +367,29 @@ class SpatialPriorModule(nn.Module):
 
     def forward(self, x):
         # stem
-        if self.dim == 4 and self.strategy == 'axial':
-            x_bt, B, T = pack_time(x, "TZYXC")
-            c1 = self.stem1(x_bt)
-            c1 = self.stem2(c1)
-            c1 = self.stem3(c1)
-            c1 = self.maxpool(c1)
-            c1 = unpack_time(c1, B, T, "TCZYX", "TZYXC")
-
-            c1_shape = list(c1.shape[1:])
-            c1 = pack_spatial(c1, "TZYXC")
-            c1 = self.tmix0(c1)
-            c1_shape[0] = c1.shape[2]
-            c1 = unpack_spatial(c1, B, "TZYXC", c1_shape, "TZYXC")
-        elif self.dim == 3 and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             c1 = self.stem1(x)
             c1 = self.stem2(c1)
             c1 = self.stem3(c1)
-            c1 = self.tmix0(c1)
             c1 = self.maxpool(c1)
         else:
             raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
                              f"got dim={self.dim}, strategy={self.strategy}.")
 
         # stage2
-        if self.dim == 4 and self.strategy == 'axial':
-            x_bt, B, T = pack_time(c1, "TZYXC")
-            c2 = self.stage2(x_bt)
-            c2 = unpack_time(c2, B, T, "TCZYX", "TZYXC")
-
-            c2_shape = tuple(c2.shape[1:])
-            xs = pack_spatial(c2, "TZYXC")
-            c2 = self.tmix1(xs)
-            c2 = unpack_spatial(c2, B, "TZYXC", c2_shape, "TZYXC")
-        elif self.dim == 3 and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             c2 = self.stage2(c1)
-            c2 = self.tmix1(c2)
 
         # stage3
-        if self.dim == 4 and self.strategy == 'axial':
-            x_bt, B, T = pack_time(c2, "TZYXC")
-            c3 = self.stage3(x_bt)
-            c3 = unpack_time(c3, B, T, "TCZYX", "TZYXC")
-
-            c3_shape = tuple(c3.shape[1:])
-            xs = pack_spatial(c3, "TZYXC")
-            c3 = self.tmix2(xs)
-            c3 = unpack_spatial(c3, B, "TZYXC", c3_shape, "TZYXC")
-        elif self.dim == 3 and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             c3 = self.stage3(c2)
-            c3 = self.tmix2(c3)
 
         # stage4
-        if self.dim == 4 and self.strategy == 'axial':
-            x_bt, B, T = pack_time(c3, "TZYXC")
-            c4 = self.stage4(x_bt)
-            c4 = unpack_time(c4, B, T, "TCZYX", "TZYXC")
-
-            c4_shape = tuple(c4.shape[1:])
-            xs = pack_spatial(c4, "TZYXC")
-            c4 = self.tmix3(xs)
-            c4 = unpack_spatial(c4, B, "TZYXC", c4_shape, "TZYXC")
-        elif self.dim == 3 and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             c4 = self.stage4(c3)
-            c4 = self.tmix3(c4)
 
         # proj. to embed dim
-        if self.dim == 4 and self.strategy == 'axial':
-            bt1, B, T = pack_time(c1, "TZYXC")
-            bt2, _, _ = pack_time(c2, "TZYXC")
-            bt3, _, _ = pack_time(c3, "TZYXC")
-            bt4, _, _ = pack_time(c4, "TZYXC")
-
-            c1 = self.fc1(bt1).reshape(B, T, -1, *bt1.shape[-3:])
-            c2 = self.fc2(bt2).reshape(B, T, -1, *bt2.shape[-3:])
-            c3 = self.fc3(bt3).reshape(B, T, -1, *bt3.shape[-3:])
-            c4 = self.fc4(bt4).reshape(B, T, -1, *bt4.shape[-3:])
-
-            c1 = c1.permute(0,1,3,4,5,2).flatten(1,4)
-            c2 = c2.permute(0,1,3,4,5,2).flatten(1,4)
-            c3 = c3.permute(0,1,3,4,5,2).flatten(1,4)
-            c4 = c4.permute(0,1,3,4,5,2).flatten(1,4)
-
-        elif self.dim == 3 and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             c1 = self.fc1(c1)
             c2 = self.fc2(c2)
             c3 = self.fc3(c3)
@@ -535,14 +437,10 @@ class EncoderAdapter(nn.Module):
             "stem1": (2,2,2),
             "stem2": (1,1,1),
             "stem3": (1,1,1),
-            "tmix0": 2,
             "maxpool": 2,
             "stage2": (2,2,2),
-            "tmix1": 1,
             "stage3": (2,2,2),
-            "tmix2": 1,
             "stage4": (2,2,2),
-            "tmix3": 1
         }
     ):
         super(EncoderAdapter, self).__init__()
@@ -594,13 +492,13 @@ class EncoderAdapter(nn.Module):
         self.spatial_prior_module_strides = spatial_prior_module_strides
         # all modules in the order of forward pass
         self._spm_module_order = [
-            "stem1", "stem2", "stem3", "maxpool", "tmix0",
-            "stage2", "tmix1", 
-            "stage3", "tmix2", 
-            "stage4", "tmix3"
+            "stem1", "stem2", "stem3", "maxpool", 
+            "stage2",
+            "stage3",
+            "stage4",
         ]
         # marks end of a stage
-        self._spm_level_keys = ("tmix0", "tmix1", "tmix2", "tmix3")
+        self._spm_level_keys = ("maxpool", "stage2", "stage3", "stage4")
 
         self.query_level_shapes, self.query_offsets = self._get_query_metadata()
 
@@ -638,10 +536,8 @@ class EncoderAdapter(nn.Module):
             ]
         )
 
-        if self.dim in (3,4) and self.strategy == 'axial':
+        if self.dim == 3 and self.strategy == 'axial':
             self.up_spatial = nn.ConvTranspose3d(self.embed_dim, self.embed_dim, 2, 2)
-            if self.dim == 4:
-                self.up_temporal = nn.ConvTranspose1d(self.embed_dim, self.embed_dim, 2, 2)
         else:
             raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
                              f"got dim={self.dim}, strategy={self.strategy}.")
@@ -655,15 +551,9 @@ class EncoderAdapter(nn.Module):
             self.apply(self._init_deform_weights)
 
 
-    def _is_temporal_stride(self, key: str) -> bool:
-        k = key.lower()
-        return ("tmix" in k) or ("temporal" in k)
-
     def _get_stride(self, key: str, val):
         if isinstance(val, int):
-            if self.dim == 4 and self._is_temporal_stride(key):
-                return (val, 1, 1, 1)
-            else:
+            if self.dim == 3:
                 return (1, val, val, val)
         if isinstance(val, tuple):
             if len(val) == 3:
@@ -685,18 +575,7 @@ class EncoderAdapter(nn.Module):
         return (st, sz, sy, sx)
 
     def _level_shapes_from_strides(self):
-        if self.dim == 4:
-            T, Z, Y, X = self.spatial_shape
-            shapes = []
-            for key in self._spm_level_keys:
-                st, sz, sy, sx = self._get_cum_strides_per_stage(key)
-                t = max(T // st, 1)
-                z = max(Z // sz, 1)
-                y = max(Y // sy, 1)
-                x = max(X // sx, 1)
-                shapes.append((t, z, y, x))
-            return shapes
-        elif self.dim == 3:
+        if self.dim == 3:
             Z, Y, X = self.spatial_shape
             shapes = []
             for key in self._spm_level_keys:
@@ -718,9 +597,7 @@ class EncoderAdapter(nn.Module):
             return p
 
         shapes = self._level_shapes_from_strides()
-        if self.dim == 4:
-            offsets = [_prod((t, z, y, x)) for (t, z, y, x) in shapes]
-        else:
+        if self.dim == 3:
             offsets = [_prod((z, y, x)) for (z, y, x) in shapes]
         return shapes, offsets
 
@@ -762,7 +639,11 @@ class EncoderAdapter(nn.Module):
         c4 = c4 + self.level_embed[2]
         return c2, c3, c4
 
-    def _get_deformable_attention_metadata(self, device, B, feat_level_list):
+    def _get_deformable_attention_metadata(self, 
+                                           device, 
+                                           B, 
+                                           feat_level_list,
+                                           patch_sizes=[(8,8,8), (16,16,16), (32,32,32)]):
         # spatial_shapes (num_levels, 3)
         spatial_shapes = torch.as_tensor(feat_level_list, dtype=torch.long, device=device)
 
@@ -771,7 +652,8 @@ class EncoderAdapter(nn.Module):
             (spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1])
         )
 
-        num_levels = spatial_shapes.shape[0]
+        # NOTE: we are not really using valid ratios here, but need to pass them to MSDeformAttn
+        num_levels = len(patch_sizes)
         valid_ratios = torch.ones((B, num_levels, 3), dtype=torch.float32, device=device)
 
         if self.dim == 3:
@@ -779,7 +661,7 @@ class EncoderAdapter(nn.Module):
             # worth of reference points (by varying patch sizes) for a single feature map
             # only applicable for MSDeformAttn in 3D
             feat_level_list = []
-            for patch_z, patch_y, patch_x in [(8,8,8), (16,16,16), (32,32,32)]:
+            for patch_z, patch_y, patch_x in patch_sizes:
                 feat_level_list.append(self._get_spatial_patchified_shape(
                     self.spatial_shape,
                     patch_z,
@@ -800,11 +682,7 @@ class EncoderAdapter(nn.Module):
             reference_points, spatial_shapes, level_start_index, valid_ratios = \
                 self._get_deformable_attention_metadata(device, B, grids)
             return reference_points, spatial_shapes, level_start_index, valid_ratios
-
-        elif self.dim == 4:
-            reference_points = spatial_shapes = level_start_index = valid_ratios = None
-            return reference_points, spatial_shapes, level_start_index, valid_ratios
-
+        
         else:
             raise ValueError(f"Unsupported dim: {self.dim}")
 
@@ -812,41 +690,6 @@ class EncoderAdapter(nn.Module):
         if tuple(x.shape[-3:]) == tuple(spatial_size):
             return x
         return F.interpolate(x, size=spatial_size, mode="trilinear", align_corners=align_corners)
-
-    def _upsample_spatiotemporal(self,
-                                input_format: str,
-                                x: torch.Tensor,
-                                spatial_size,
-                                temporal_size=None,
-                                align_corners=False):
-        if input_format == "CTZYX":
-            B, C, T, Z, Y, X = x.shape
-
-            # x: [B, C, T, Z, Y, X] -> [B*T, C, Z, Y, X]
-            xt = x.permute(0, 2, 1, 3, 4, 5).reshape(B*T, C, Z, Y, X)
-            # upsample spatially
-            xt = self._upsample_spatial_3d(xt, spatial_size, align_corners=align_corners)
-            # x: [B*T, C, Z, Y, X] -> [B*T, C, Zp, Yp, Xp]
-            Zp, Yp, Xp = xt.shape[-3:]
-            # x: [B*T, C, Zp, Yp, Xp] -> [B, C, T, Zp, Yp, Xp]
-            x = xt.reshape(B, T, C, Zp, Yp, Xp).permute(0, 2, 1, 3, 4, 5)
-
-            if temporal_size is not None and temporal_size != T:
-                # x: [B, C, T, Zp, Yp, Xp] -> [B*Zp*Yp*Xp, C, T]
-                x_ = x.permute(0, 3, 4, 5, 1, 2).contiguous()
-                x_ = x_.reshape(B * Zp * Yp * Xp, C, T)
-                # upsample temporally
-                x_ = F.interpolate(x_, size=temporal_size, mode="linear", align_corners=align_corners)
-                Tp = x_.shape[-1]
-                # x: [B*Zp*Yp*Xp, C, Tp] -> [B, C, Tp, Zp, Yp, Xp]
-                x_ = x_.reshape(B, Zp, Yp, Xp, C, Tp).permute(0, 4, 5, 1, 2, 3)
-                x = x_
-        
-        # TODO: support other input formats for completeness?
-        else:
-            raise ValueError(f"Unsupported input format: {input_format}")
-        
-        return x
     
     def _scale_int(self, val, scale):
         return max(1, int(val * scale))
@@ -876,19 +719,6 @@ class EncoderAdapter(nn.Module):
                 scaled.append(c + o_scaled)
             return tuple(scaled)
 
-        elif dim == 4:
-            # Spatial (3D) then temporal (1D)
-            scaled = []
-            for i, (c, o, tgt_sp) in enumerate(zip(c_list, outs, target_spatial_shapes)):
-                # tgt_T  = self._scale_int(temporal_base_len, temporal_scales[i])
-                o_scaled = self._upsample_spatiotemporal(input_format, 
-                                                         x=o, 
-                                                         spatial_size=tgt_sp[1:], 
-                                                         temporal_size=tgt_sp[0],
-                                                         align_corners=align_corners)
-                scaled.append(c + o_scaled)
-            return tuple(scaled)
-
         else:
             raise ValueError(f"Unsupported dim: {dim}")
 
@@ -897,6 +727,10 @@ class EncoderAdapter(nn.Module):
             level_start_index, valid_ratios = self._get_deformable_and_ffn_metadata(x)
 
         # apply spatial prior module
+        if self.dim == 3:
+            # x: [B, Z, Y, X, C] -> [B, C, Z, Y, X]
+            x = x.permute(0,4,1,2,3)
+
         c1, c2, c3, c4 = self.spatial_prior_module(x)
         c2, c3, c4 = self._add_level_embed(c2, c3, c4)
 
@@ -929,35 +763,12 @@ class EncoderAdapter(nn.Module):
         c3 = c3.transpose(1, 2).view(bs, dim, *self.query_level_shapes[2]).contiguous()
         c4 = c4.transpose(1, 2).view(bs, dim, *self.query_level_shapes[3]).contiguous()
 
-        if self.dim == 4:
-            c1 = c1.reshape(bs, *self.query_level_shapes[0], dim)
-            c1, B, T = pack_time(c1, "TZYXC")
-            c1 = self.up_spatial(c1)
-            c1 = unpack_time(c1, B, T, "TCZYX", "TZYXC")
-
-            c1_shape = list(c1.shape[1:])
-            c1 = pack_spatial(c1, "TZYXC")
-            c1 = self.up_temporal(c1)
-            c1_shape[0] = c1.shape[2]
-            c1 = unpack_spatial(c1, B, "TZYXC", c1_shape, "CTZYX")
-
-        else:
+        if self.dim == 3:
             c1 = c1.transpose(1, 2).view(bs, dim, *self.query_level_shapes[0]).contiguous()
             c1 = self.up_spatial(c1)
 
         if self.add_vit_feature:
-            if self.dim == 4:
-                c1, c2, c3, c4 = self.fuse_pyramid_additions(
-                    (c1, c2, c3, c4),
-                    outs,
-                    dim=4,
-                    # spatial_base_shape=tuple(self.spatial_patchified_shape[1:]),
-                    # temporal_base_len=self.spatial_patchified_shape[0],
-                    align_corners=False,
-                    input_format="CTZYX",
-                )
-
-            elif self.dim == 3:
+            if self.dim == 3:
                 c1, c2, c3, c4 = self.fuse_pyramid_additions(
                     (c1, c2, c3, c4),
                     outs,

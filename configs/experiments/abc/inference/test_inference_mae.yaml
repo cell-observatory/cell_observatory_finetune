@@ -70,9 +70,9 @@ num_output_channels: 2
 # clusters
 clusters:
   ray_queue_memory: 0.2
-  batch_size: 16 # total batch size
+  batch_size: 32 # total batch size
   worker_nodes: 1 # number of worker nodes
-  gpus_per_worker: 1 # number of gpus per worker node
+  gpus_per_worker: 2 # number of gpus per worker node
   cpus_per_gpu: 16 # number of cpu cores per gpu
   mem_per_cpu: 21000 # ram per cpu core
   scaling_config:
@@ -108,7 +108,7 @@ datasets:
   databases:
     max_rois: null # maximum number of ROIs (each ROI can have dozens of tiles)
     max_tiles: null # maximum number of tiles (each tile can have thousands of hypercubes)
-    roi_list: [519]
+    roi_list: [518, 519]
     tile_list: ["000x_000y_000z.zarr"]
     timepoint_list: [0]
     use_cached_hypercubes_dataframe: true # whether to use the cached hypercubes dataframe

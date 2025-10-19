@@ -3,10 +3,13 @@ logger = logging.getLogger(__name__)
 
 import shutil
 import pytest
+
+import numpy as np
+
 import torch
 
 from cell_observatory_finetune.tests.conftest import models_kargs, config
-from cell_observatory_finetune.models.meta_arch.maskedautoencoder import MaskedAutoEncoder
+from cell_observatory_finetune.models.meta_arch.maskedautoencoder import FinetuneMaskedAutoEncoder
 from cell_observatory_finetune.models.meta_arch.preprocessor import FinetunePreprocessor
 
 from cell_observatory_platform.training.helpers import summarize_model
@@ -14,7 +17,7 @@ from cell_observatory_platform.data.masking.mask_generator import MaskGenerator,
 
 
 def _delta_psf_3d(d,h,w):
-    psf = torch.zeros((d,h,w), dtype=torch.float32)
+    psf = np.zeros((d,h,w), dtype=np.float32)
     psf[d//2, h//2, w//2] = 1.0
     return psf
 
@@ -42,8 +45,15 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
 
     if task == "channel_split":
         # input has C=2; preprocessor will mean over C -> model sees C=1
-        model = MaskedAutoEncoder(
+        model = FinetuneMaskedAutoEncoder(
             task="channel_split",
+            decoder_args=dict(
+                name="vit",
+                decoder_embed_dim=1024,
+                decoder_depth=8,
+                decoder_num_heads=8
+            ),
+            decoder="vit",
             output_channels=2,
             model_template="mae",
             input_fmt=fmt_no_batch,
@@ -54,9 +64,10 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             temporal_patch_size=1,
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
-            modes=models_kargs["modes"],
             proj_drop_rate=models_kargs["dropout"],
             fixed_dropout_depth=models_kargs["fixed_dropout_depth"],
+            rope_pos_enc=False,
+            abs_sincos_enc=True,
         ).to("cuda")
 
         preprocessor = FinetunePreprocessor(
@@ -68,13 +79,21 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             axial_patch_size=1,
             temporal_patch_size=1,
             input_format=fmt_no_batch,
-            input_shape=(T, Z, Y, X, C),   # non-batch
+            input_shape=(B, T, Z, Y, X, C),   # non-batch
+            transforms_list=[]
         )
 
     elif task == "upsample_time":
         # Model ingests the same C=2 layout; masking operates in time only via BLOCKED_PATTERNED
-        model = MaskedAutoEncoder(
-            task="upsample",
+        model = FinetuneMaskedAutoEncoder(
+            task="upsample_time",
+            decoder_args=dict(
+                name="vit",
+                decoder_embed_dim=1024,
+                decoder_depth=8,
+                decoder_num_heads=8
+            ),
+            decoder="vit",
             output_channels=None,
             model_template="mae",
             input_fmt=fmt_no_batch,
@@ -85,9 +104,10 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             temporal_patch_size=1,
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
-            modes=models_kargs["modes"],
             proj_drop_rate=models_kargs["dropout"],
             fixed_dropout_depth=models_kargs["fixed_dropout_depth"],
+            rope_pos_enc=False,
+            abs_sincos_enc=True,
         ).to("cuda")
 
         # Pattern "01": keep/drop alternating frames across time
@@ -102,7 +122,7 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             num_blocks=1,
             random_masking_ratio=0.0,
             channels_to_mask=None,
-            time_downsample_pattern=[0, 1],                    # "01"
+            time_downsample_pattern=[0, 1],
             mask_mode=MaskModes.BLOCKED_PATTERNED,
             device="cuda",
         )
@@ -110,22 +130,30 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
         preprocessor = FinetunePreprocessor(
             with_masking=True,
             mask_generator=mask_generator,
-            task="upsample",
+            task="upsample_time",
             dtype=torch.float32,
             lateral_patch_size=models_kargs["patches"],
             axial_patch_size=1,
             temporal_patch_size=1,
             input_format=fmt_no_batch,
-            input_shape=(T, Z, Y, X, C),
+            input_shape=(B, T, Z, Y, X, C),
             ideal_psf_path="ignored",
             na_mask_thresholds=[0.0],
             seed=123,
+            transforms_list=[]
         )
 
     elif task == "upsample_space":
         # Spatial NA masking only; no temporal masking generator
-        model = MaskedAutoEncoder(
-            task="upsample",
+        model = FinetuneMaskedAutoEncoder(
+            task="upsample_space",
+            decoder_args=dict(
+                name="vit",
+                decoder_embed_dim=1024,
+                decoder_depth=8,
+                decoder_num_heads=8
+            ),
+            decoder="vit",
             output_channels=None,
             model_template="mae",
             input_fmt=fmt_no_batch,
@@ -136,29 +164,38 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             temporal_patch_size=1,
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
-            modes=models_kargs["modes"],
             proj_drop_rate=models_kargs["dropout"],
             fixed_dropout_depth=models_kargs["fixed_dropout_depth"],
+            rope_pos_enc=False,
+            abs_sincos_enc=True,
         ).to("cuda")
 
         preprocessor = FinetunePreprocessor(
             with_masking=False,
             mask_generator=None,
-            task="upsample",
+            task="upsample_space",
             lateral_patch_size=models_kargs["patches"],
             axial_patch_size=1,
             temporal_patch_size=1,
             dtype=torch.float32,
             input_format=fmt_no_batch,
-            input_shape=(T, Z, Y, X, C),
+            input_shape=(B, T, Z, Y, X, C),
             ideal_psf_path="ignored",
             na_mask_thresholds=[0.0],
             seed=123,
+            transforms_list=[]
         )
 
     elif task == "upsample_spacetime":
-        model = MaskedAutoEncoder(
-            task="upsample",
+        model = FinetuneMaskedAutoEncoder(
+            task="upsample_spacetime",
+            decoder_args=dict(
+                name="vit",
+                decoder_embed_dim=1024,
+                decoder_depth=8,
+                decoder_num_heads=8
+            ),
+            decoder="vit",
             output_channels=None,
             model_template="mae",
             input_fmt=fmt_no_batch,
@@ -169,9 +206,10 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             temporal_patch_size=1,
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
-            modes=models_kargs["modes"],
             proj_drop_rate=models_kargs["dropout"],
             fixed_dropout_depth=models_kargs["fixed_dropout_depth"],
+            rope_pos_enc=False,
+            abs_sincos_enc=True,
         ).to("cuda")
 
         # Pattern "01": keep/drop alternating frames across time
@@ -194,16 +232,17 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
         preprocessor = FinetunePreprocessor(
             with_masking=True,
             mask_generator=mask_generator,
-            task="upsample",
+            task="upsample_spacetime",
             dtype=torch.float32,
             lateral_patch_size=models_kargs["patches"],
             axial_patch_size=1,
             temporal_patch_size=1,
             input_format=fmt_no_batch,
-            input_shape=(T, Z, Y, X, C),
+            input_shape=(B, T, Z, Y, X, C),
             ideal_psf_path="ignored",
             na_mask_thresholds=[0.0],
             seed=123,
+            transforms_list=[]
         )
 
     else:
@@ -217,6 +256,10 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
 
     assert data_sample["data_tensor"].shape[0] == B
     assert data_sample["data_tensor"].device.type == "cuda"
+
+    # to prevent arg errors in summarize_model
+    if task == "upsample_time":
+        data_sample["metainfo"]["targets"] = torch.zeros_like(data_sample["data_tensor"])
 
     summarize_model(
         model=model,

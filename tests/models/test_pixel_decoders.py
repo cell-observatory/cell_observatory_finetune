@@ -16,7 +16,6 @@ def _tokens_total(shapes):
 
 
 class _ZeroPos(nn.Module):
-    """Simple positional embedding stub that preserves device/dtype."""
     def __init__(self, channels):
         super().__init__()
         self.channels = channels
@@ -81,7 +80,6 @@ def test_encoder_forward_shapes_cuda(B, C, n_heads, shapes):
         enc_num_points=4,
     ).cuda()
 
-    # Build inputs (level order consistent across features / pos / masks)
     features = [torch.randn(B, C, D, H, W, device="cuda") for (D, H, W) in shapes]
     pos_embs = [torch.zeros(B, C, D, H, W, device="cuda") for (D, H, W) in shapes]
     masks = [torch.zeros(B, D, H, W, dtype=torch.bool, device="cuda") for (D, H, W) in shapes]
@@ -104,7 +102,6 @@ def test_encoder_forward_shapes_cuda(B, C, n_heads, shapes):
 
 # MaskDINOEncoder.forward_features
 def _make_input_shape_dict(C0=48, C1=64, C2=96):
-    # strides: bigger stride => lower resolution
     return {
         "res3": {"channels": C0, "stride": 8},
         "res4": {"channels": C1, "stride": 16},
@@ -118,16 +115,15 @@ def test_maskdino_encoder_forward_features_shapes_cuda(add_extra_levels):
         pytest.skip("No GPU available for FlashDeformAttn3D")
 
     B = 2
-    conv_dim = 64     # heads=8 inside encoder -> per-head=8
+    conv_dim = 64
     mask_dim = 16
 
-    input_shape = _make_input_shape_dict(48, 64, 96)  # assumes helper returns dict with channels/stride
+    input_shape = _make_input_shape_dict(48, 64, 96)
     transformer_in_features = ["res3", "res4", "res5"]
 
-    # Choose sizes divisible by 32 (fast path for get_padding_mask)
-    res3 = (32, 32, 32)  # finest
+    res3 = (32, 32, 32)
     res4 = (16, 16, 16)
-    res5 = ( 8,  8,  8)  # coarsest
+    res5 = ( 8,  8,  8)
 
     total_num_feature_levels = len(transformer_in_features) + (1 if add_extra_levels else 0)
 
@@ -152,7 +148,7 @@ def test_maskdino_encoder_forward_features_shapes_cuda(add_extra_levels):
         "res4": torch.randn(B, input_shape["res4"]["channels"], *res4, device="cuda"),
         "res5": torch.randn(B, input_shape["res5"]["channels"], *res5, device="cuda"),
     }
-    masks = None  # synthesize all-false masks
+    masks = None
 
     mask_feats, finest_map, all_maps = enc.forward_features(features, masks)
 
@@ -185,7 +181,7 @@ def test_get_padding_mask_fast_path_all_false():
         dropout=0.0, activation="relu", num_feature_levels=2, enc_num_points=4
     )
 
-    f1 = torch.randn(B, C, 32, 32, 20)  # D and H divisible by 32
+    f1 = torch.randn(B, C, 32, 32, 20)
     f2 = torch.randn(B, C, 64, 64, 10)
     masks = None
     out = enc.get_padding_mask(masks, [f1, f2])
@@ -196,10 +192,10 @@ def test_get_padding_mask_fast_path_all_false():
     assert (out[0] == 0).all() and (out[1] == 0).all()
 
 
-# Token splitting consistency — CUDA (real kernel)
+# Token splitting consistency — CUDA
 @pytest.mark.parametrize("B,C,n_heads,shapes", [
-    (2, 64, 8, [(5,4,3), (4,3,2), (2,2,2)]),   # per-head=8
-    (1, 96, 12, [(3,3,3), (2,2,2), (1,2,3)]),  # per-head=8
+    (2, 64, 8, [(5,4,3), (4,3,2), (2,2,2)]),
+    (1, 96, 12, [(3,3,3), (2,2,2), (1,2,3)]),
 ])
 def test_token_splitting_consistency_cuda(B, C, n_heads, shapes):
     if not torch.cuda.is_available():
@@ -218,7 +214,7 @@ def test_token_splitting_consistency_cuda(B, C, n_heads, shapes):
     ).cuda()
 
     feats = [torch.randn(B, C, *s, device="cuda") for s in shapes]
-    pos   = [torch.zeros(B, C, *s, device="cuda") for s in shapes]
+    pos = [torch.zeros(B, C, *s, device="cuda") for s in shapes]
     masks = [torch.zeros(B, s[0], s[1], s[2], dtype=torch.bool, device="cuda") for s in shapes]
 
     memory, feature_shapes, level_start_index = enc(feats, masks, pos)
@@ -246,14 +242,12 @@ def test_mask2former_pixel_decoder_forward_features_shapes_cuda(add_extra_levels
     conv_dim = 64
     mask_dim = 16
 
-    # input_shape helper returns a dict mapping "res3/4/5" -> {"channels": C, "stride": S}
     input_shape = _make_input_shape_dict(48, 64, 96)
     transformer_in_features = ["res3", "res4", "res5"]
 
-    # 3D resolutions
-    res3 = (32, 32, 32)  # finest
+    res3 = (32, 32, 32)
     res4 = (16, 16, 16)
-    res5 = (8, 8, 8)  # coarsest
+    res5 = (8, 8, 8)
 
     total_num_feature_levels = len(transformer_in_features) + (1 if add_extra_levels else 0)
 

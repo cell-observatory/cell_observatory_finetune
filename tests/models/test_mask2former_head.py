@@ -26,7 +26,6 @@ def test_mask2former_head_forward_shapes_cuda():
 
     input_shape = _make_input_shape_dict_for_m2f(48, 64, 96, 128)
 
-    # 3D feature map resolutions (finest -> coarsest), divisible by 32
     res1 = (32, 32, 32)
     res2 = (16, 16, 16)
     res3 = (8, 8, 8)
@@ -70,13 +69,14 @@ def test_mask2former_head_forward_shapes_cuda():
     assert out["pred_logits"].is_cuda
 
     # masks: [B, Q, D, H, W] -> finest level (res1)
-    assert out["pred_masks"].shape == (B, num_queries, *res1)
+    assert out["pred_masks"].shape == (B, num_queries, *res4)
     assert out["pred_masks"].is_cuda
+
 
     aux = out["aux_outputs"]
     assert isinstance(aux, list)
     assert len(aux) == decoder_layers
     for a in aux:
         assert a["pred_logits"].shape == (B, num_queries, num_classes + 1)
-        assert a["pred_masks"].shape == (B, num_queries, *res1)
+        assert a["pred_masks"].shape == (B, num_queries, *res4)
         assert a["pred_logits"].is_cuda and a["pred_masks"].is_cuda

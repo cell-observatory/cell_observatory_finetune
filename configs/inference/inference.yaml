@@ -11,6 +11,7 @@ decoder_head_type: ${models.decoders.name}
 
 roi_tile_list: 
   - [519, "000x_000y_000z.zarr"]
+  - [518, "000x_000y_000z.zarr"]
 
 protocol: ${datasets.databases.protocol}
 dotenv_path: null
