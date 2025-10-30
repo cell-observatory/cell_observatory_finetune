@@ -2,16 +2,19 @@ import pytest
 import torch
 
 from cell_observatory_finetune.models.heads.linear_head import LinearHead
-from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
+from cell_observatory_platform.models.patch_embeddings import calc_num_patches
 
 
 def _num_patches(input_format, input_shape, axial_patch, lateral_patch, temporal_patch):
+    if "T" not in input_format:
+        patch_shape = (axial_patch, lateral_patch, lateral_patch, None)
+    else: 
+        patch_shape = (temporal_patch, axial_patch, lateral_patch, lateral_patch, None)
+
     num_patches, _ = calc_num_patches(
         input_fmt=input_format,
         input_shape=input_shape,
-        lateral_patch_size=lateral_patch,
-        axial_patch_size=axial_patch,
-        temporal_patch_size=temporal_patch,
+        patch_shape=patch_shape
     )
     return int(num_patches)
 

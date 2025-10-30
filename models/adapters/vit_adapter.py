@@ -15,6 +15,7 @@ from cell_observatory_finetune.models.layers.utils import get_reference_points
 from cell_observatory_platform.models.norm import get_norm
 from cell_observatory_platform.data.data_types import TORCH_DTYPES
 from cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.training.helpers import get_patch_sizes
 
 
 class ConvFFN(nn.Module):
@@ -415,9 +416,7 @@ class EncoderAdapter(nn.Module):
         input_shape,
         input_format,
         dtype="bfloat16",
-        axial_patch_size=16,
-        lateral_patch_size=16,
-        temporal_patch_size=4,
+        patch_shape=(4,16,16,16),
         interaction_indexes=[9, 19, 29, 39],
         add_vit_feature=True,
         # Spatial Prior Module parameters
@@ -459,15 +458,17 @@ class EncoderAdapter(nn.Module):
         if use_deform_attention and not MSDEFORM_ATTN_AVAILABLE:
             raise ImportError("Please install the deformable attention module.")
         
-        self.embed_dim = backbone_embed_dim        
-        self.axial_patch_size = axial_patch_size
-        self.lateral_patch_size = lateral_patch_size
-        self.temporal_patch_size = temporal_patch_size
+        self.embed_dim = backbone_embed_dim
+        self.patch_shape = patch_shape        
+        self.temporal_patch_size, self.axial_patch_size, self.lateral_patch_size = get_patch_sizes(
+            input_format=input_format,
+            patch_shape=self.patch_shape
+        )
 
         self.input_shape = input_shape
         self.input_format = input_format
         
-        axis_to_value = dict(zip(input_format, input_shape[1:]))
+        axis_to_value = dict(zip(input_format, input_shape))
         if axis_to_value.get("T", None) is not None:
             self.spatial_shape = (axis_to_value.get("T", None), 
                                 axis_to_value.get("Z", None),
@@ -607,20 +608,20 @@ class EncoderAdapter(nn.Module):
                                  lateral_patch_size, 
                                  temporal_patch_size, 
                                  input_format):
-        if input_format == "ZYX":
+        if input_format == "ZYXC":
             return (
                 spatial_shape[0] // axial_patch_size,
                 spatial_shape[1] // lateral_patch_size,
                 spatial_shape[2] // lateral_patch_size,
             )
-        elif input_format == "TZYX":
+        elif input_format == "TZYXC":
             return (
                 spatial_shape[0] // temporal_patch_size,
                 spatial_shape[1] // axial_patch_size,
                 spatial_shape[2] // lateral_patch_size,
                 spatial_shape[3] // lateral_patch_size,
             )
-        elif input_format == "TYX":
+        elif input_format == "TYXC":
             return (
                 spatial_shape[0] // temporal_patch_size,
                 spatial_shape[1] // lateral_patch_size,

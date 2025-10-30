@@ -9,7 +9,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
+from cell_observatory_platform.models.patch_embeddings import calc_num_patches
 
 
 class MLP(nn.Module):
@@ -71,7 +71,7 @@ def patchify(inputs,
 
     num_patches, token_shape = calc_num_patches(
         input_fmt=input_fmt,
-        input_shape=inputs.shape,
+        input_shape=inputs.shape[1:],
         lateral_patch_size=lateral_patch_size,
         axial_patch_size=axial_patch_size,
         temporal_patch_size=temporal_patch_size,

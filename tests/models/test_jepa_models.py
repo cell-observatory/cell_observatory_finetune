@@ -22,9 +22,8 @@ def _delta_psf_3d(d,h,w):
     return psf
 
 
-
 @pytest.mark.parametrize("task", ["channel_split", "upsample_time", "upsample_space", "upsample_spacetime"])
-def test_mae_custom(models_kargs, config, task, monkeypatch):
+def test_jepa_custom(models_kargs, config, task, monkeypatch):
     def _read_file(_ignored):
         return _delta_psf_3d(64, 64, 64)
     monkeypatch.setattr(
@@ -58,11 +57,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             output_channels=2,
             model_template="mae",
             input_fmt=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, 1),  # model expects C=1 after split
+            input_shape=(T, Z, Y, X, 1),  # model expects C=1 after split
             embed_dim=models_kargs["hidden_size"],
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
             proj_drop_rate=models_kargs["dropout"],
@@ -77,11 +74,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             mask_generator=None,
             task="channel_split",
             dtype=torch.float32,
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
+            input_shape=(T, Z, Y, X, C),
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             input_format=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),   # non-batch
             transforms_list=[]
         )
 
@@ -99,11 +94,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             decoder="vit",
             model_template="mae",
             input_fmt=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),
+            input_shape=(T, Z, Y, X, C),
             embed_dim=models_kargs["hidden_size"],
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
             proj_drop_rate=models_kargs["dropout"],
@@ -115,7 +108,7 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
         mask_generator = MaskGenerator(
             layout=fmt_no_batch,
             input_shape=(T, Z, Y, X, C),
-            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"]),
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             lateral_mask_scale=(1.0, 1.0),
             axial_mask_scale=(1.0, 1.0),
             temporal_mask_scale=(1.0, 1.0),
@@ -133,11 +126,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             mask_generator=mask_generator,
             task="upsample_time",
             dtype=torch.float32,
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
             input_format=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),
+            input_shape=(T, Z, Y, X, C),
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             ideal_psf_path="ignored",
             na_mask_thresholds=[0.0],
             seed=123,
@@ -158,11 +149,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             decoder="vit",
             model_template="mae",
             input_fmt=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),
+            input_shape=(T, Z, Y, X, C),
             embed_dim=models_kargs["hidden_size"],
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
             proj_drop_rate=models_kargs["dropout"],
@@ -175,12 +164,10 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             with_masking=False,
             mask_generator=None,
             task="upsample_space",
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
             dtype=torch.float32,
+            input_shape=(T, Z, Y, X, C),
             input_format=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             ideal_psf_path="ignored",
             na_mask_thresholds=[0.0],
             seed=123,
@@ -200,11 +187,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             decoder="vit",
             model_template="mae",
             input_fmt=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),
+            input_shape=(T, Z, Y, X, C),
             embed_dim=models_kargs["hidden_size"],
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             num_heads=models_kargs["heads"],
             depth=models_kargs["repeats"],
             proj_drop_rate=models_kargs["dropout"],
@@ -234,11 +219,9 @@ def test_mae_custom(models_kargs, config, task, monkeypatch):
             mask_generator=mask_generator,
             task="upsample_spacetime",
             dtype=torch.float32,
-            lateral_patch_size=models_kargs["patches"],
-            axial_patch_size=1,
-            temporal_patch_size=1,
             input_format=fmt_no_batch,
-            input_shape=(B, T, Z, Y, X, C),
+            input_shape=(T, Z, Y, X, C),
+            patch_shape=(1, 1, models_kargs["patches"], models_kargs["patches"], None),
             ideal_psf_path="ignored",
             na_mask_thresholds=[0.0],
             seed=123,

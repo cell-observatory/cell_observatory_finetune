@@ -167,16 +167,19 @@ def test_feature_fusion_block_3d_with_skip(features):
 def test_dpthead_3d_output_shape_zyxc(B, C_in, Z, Y, X, Zp, YXp, out_channels):
     device = "cpu"
     input_format = "ZYXC"
-    input_shape = (B, Z, Y, X, C_in)
+    input_shape = (Z, Y, X, C_in)
 
     head = DPTHead(
         input_channels=C_in,
         output_channels=2,
         input_shape=input_shape,
         input_format=input_format,
-        temporal_patch_size=1,
-        axial_patch_size=Zp,
-        lateral_patch_size=YXp,
+        patch_shape=(
+            Zp,
+            YXp,
+            YXp,
+            None
+        ),
         features=64,
         use_bn=False,
         feature_map_channels=out_channels,

@@ -9,17 +9,20 @@ import torch.nn as nn
 from deepspeed.runtime.zero import GatheredParameters
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
-from cell_observatory_finetune.cell_observatory_platform.models.mlp import get_mlp
-from cell_observatory_finetune.cell_observatory_platform.models.norm import get_norm
-from cell_observatory_finetune.cell_observatory_platform.training.helpers import init_weights
-from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
-from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
+from cell_observatory_platform.models.mlp import get_mlp
+from cell_observatory_platform.models.norm import get_norm
+from cell_observatory_platform.training.helpers import init_weights
+from cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.models.patch_embeddings import calc_num_patches
+from cell_observatory_platform.data.masking.mask_generator import apply_masks
 
-from cell_observatory_finetune.cell_observatory_platform.models.maskedencoder import MaskedEncoder
-from cell_observatory_finetune.cell_observatory_platform.models.maskedpredictor import MaskedPredictor
+from cell_observatory_platform.models.maskedencoder import MaskedEncoder
+from cell_observatory_platform.models.maskedpredictor import MaskedPredictor
 
 from cell_observatory_finetune.models.heads.linear_head import LinearHead
 from cell_observatory_finetune.models.heads.dense_predictor_head import DPTHead
+
+from cell_observatory_finetune.training.losses import get_loss_fn
 
 logging.basicConfig(
 	stream=sys.stdout,
@@ -28,10 +31,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from cell_observatory_finetune.training.losses import get_loss_fn
-
-
-from cell_observatory_platform.data.masking.mask_generator import apply_masks
 
 CONFIGS = {
     'jepa-tiny': {
@@ -148,8 +147,8 @@ class FinetuneJEPA(nn.Module):
             'jepa-gigantic'
         ] = 'jepa',
         input_fmt='TZYXC',
-        input_shape=(1, 6, 64, 64, 1),
-        lateral_patch_size=16,
+        input_shape=(16, 128, 128, 128, 2),
+        patch_shape=(4, 16, 16, 16),
         axial_patch_size=1,
         temporal_patch_size=1,
         embed_dim=768,
@@ -189,15 +188,13 @@ class FinetuneJEPA(nn.Module):
 
         self.input_fmt = input_fmt
         self.input_shape = input_shape
-        axis_to_value = dict(zip(input_fmt, input_shape[1:]))
+        axis_to_value = dict(zip(input_fmt, input_shape))
         self.in_chans = axis_to_value['C']
         self.num_frames = axis_to_value.get("T", None)
 
         self.output_channels = output_channels
 
-        self.axial_patch_size = axial_patch_size
-        self.lateral_patch_size = lateral_patch_size
-        self.temporal_patch_size = temporal_patch_size
+        self.patch_shape = patch_shape
 
         self.proj_drop_rate = proj_drop_rate
         self.att_drop_rate = att_drop_rate
@@ -221,9 +218,7 @@ class FinetuneJEPA(nn.Module):
         self.input_encoder = MaskedEncoder(
             input_fmt=self.input_fmt,
             input_shape=self.input_shape,
-            lateral_patch_size=self.lateral_patch_size,
-            axial_patch_size=self.axial_patch_size,
-            temporal_patch_size=self.temporal_patch_size,
+            patch_shape=self.patch_shape,
             channels=self.in_chans,
             embed_dim=self.embed_dim,
             depth=self.depth,
@@ -264,9 +259,7 @@ class FinetuneJEPA(nn.Module):
             self.target_predictor = MaskedPredictor(
                 input_fmt=self.input_fmt,
                 input_shape=self.input_shape,
-                lateral_patch_size=self.lateral_patch_size,
-                axial_patch_size=self.axial_patch_size,
-                temporal_patch_size=self.temporal_patch_size,
+                patch_shape=self.patch_shape,
                 channels=self.in_chans,
                 input_embed_dim=self.embed_dim,
                 output_embed_dim=self.input_encoder.patch_embedding.pixels_per_patch * self.output_channels \
@@ -320,9 +313,7 @@ class FinetuneJEPA(nn.Module):
             self.target_predictor = DPTHead(
                 input_format=self.input_fmt,
                 input_shape=self.input_shape,
-                lateral_patch_size=self.lateral_patch_size,
-                axial_patch_size=self.axial_patch_size,
-                temporal_patch_size=self.temporal_patch_size,
+                patch_shape=self.patch_shape,
                 input_channels=self.embed_dim,
                 output_channels=self.output_channels,
                 features=self.decoder_embed_dim,
@@ -381,9 +372,7 @@ class FinetuneJEPA(nn.Module):
             num_patches, _ = calc_num_patches(
                 input_fmt=self.input_fmt,
                 input_shape=self.input_shape,
-                lateral_patch_size=self.lateral_patch_size,
-                axial_patch_size=self.axial_patch_size,
-                temporal_patch_size=self.temporal_patch_size,
+                patch_shape=self.patch_shape,
             )
             return num_patches
 

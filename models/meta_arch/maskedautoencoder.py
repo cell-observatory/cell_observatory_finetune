@@ -3,17 +3,16 @@ from typing import Union, Literal, Optional
 import torch
 import torch.nn as nn
 
-from cell_observatory_finetune.cell_observatory_platform.models.mlp import get_mlp
-from cell_observatory_finetune.cell_observatory_platform.models.norm import get_norm
-from cell_observatory_finetune.cell_observatory_platform.training.helpers import init_weights
-from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
-from cell_observatory_finetune.cell_observatory_platform.models.maskedencoder import MaskedEncoder
-from cell_observatory_finetune.cell_observatory_platform.models.maskedpredictor import MaskedPredictor
-from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import calc_num_patches
-
-from cell_observatory_finetune.training.losses import get_loss_fn
+from cell_observatory_platform.models.mlp import get_mlp
+from cell_observatory_platform.models.norm import get_norm
+from cell_observatory_platform.training.helpers import init_weights
+from cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.models.maskedencoder import MaskedEncoder
+from cell_observatory_platform.models.maskedpredictor import MaskedPredictor
+from cell_observatory_platform.models.patch_embeddings import calc_num_patches
 from cell_observatory_platform.data.masking.mask_generator import apply_masks
 
+from cell_observatory_finetune.training.losses import get_loss_fn
 from cell_observatory_finetune.models.heads.linear_head import LinearHead
 from cell_observatory_finetune.models.heads.dense_predictor_head import DPTHead
 
@@ -133,10 +132,8 @@ class FinetuneMaskedAutoEncoder(nn.Module):
             'mae-gigantic'
         ] = 'mae',
         input_fmt='TZYXC',
-        input_shape=(1, 6, 64, 64, 1),
-        lateral_patch_size=16,
-        axial_patch_size=1,
-        temporal_patch_size=1,
+        input_shape=(16, 128, 128, 128, 2),
+        patch_shape=(4, 16, 16, 16),
         embed_dim=768,
         depth=12,
         num_heads=12,
@@ -173,16 +170,13 @@ class FinetuneMaskedAutoEncoder(nn.Module):
 
         self.input_fmt = input_fmt
         self.input_shape = input_shape
-        
-        axis_to_value = dict(zip(input_fmt, input_shape[1:]))
+        self.patch_shape = patch_shape
+
+        axis_to_value = dict(zip(input_fmt, input_shape))
         self.in_chans = axis_to_value['C']
         self.num_frames = axis_to_value.get("T", None)
 
         self.output_channels = output_channels
-
-        self.axial_patch_size = axial_patch_size
-        self.lateral_patch_size = lateral_patch_size
-        self.temporal_patch_size = temporal_patch_size
 
         self.proj_drop_rate = proj_drop_rate
         self.att_drop_rate = att_drop_rate
@@ -206,9 +200,7 @@ class FinetuneMaskedAutoEncoder(nn.Module):
         self.masked_encoder = MaskedEncoder(
             input_fmt=self.input_fmt,
             input_shape=self.input_shape,
-            lateral_patch_size=self.lateral_patch_size,
-            axial_patch_size=self.axial_patch_size,
-            temporal_patch_size=self.temporal_patch_size,
+            patch_shape=self.patch_shape,
             channels=self.in_chans,
             embed_dim=self.embed_dim,
             depth=self.depth,
@@ -252,9 +244,7 @@ class FinetuneMaskedAutoEncoder(nn.Module):
             self.masked_decoder = MaskedPredictor(
                 input_fmt=self.input_fmt,
                 input_shape=self.input_shape,
-                lateral_patch_size=self.lateral_patch_size,
-                axial_patch_size=self.axial_patch_size,
-                temporal_patch_size=self.temporal_patch_size,
+                patch_shape=self.patch_shape,
                 channels=self.in_chans,
                 input_embed_dim=self.embed_dim,
                 output_embed_dim=self.masked_encoder.patch_embedding.pixels_per_patch * self.output_channels \
@@ -308,9 +298,7 @@ class FinetuneMaskedAutoEncoder(nn.Module):
             self.masked_decoder = DPTHead(
                 input_format=self.input_fmt,
                 input_shape=self.input_shape,
-                lateral_patch_size=self.lateral_patch_size,
-                axial_patch_size=self.axial_patch_size,
-                temporal_patch_size=self.temporal_patch_size,
+                patch_shape=self.patch_shape,
                 input_channels=self.embed_dim,
                 output_channels=self.output_channels,
                 features=self.decoder_embed_dim,
@@ -342,9 +330,7 @@ class FinetuneMaskedAutoEncoder(nn.Module):
             num_patches, _ = calc_num_patches(
                 input_fmt=self.input_fmt,
                 input_shape=self.input_shape,
-                lateral_patch_size=self.lateral_patch_size,
-                axial_patch_size=self.axial_patch_size,
-                temporal_patch_size=self.temporal_patch_size,
+                patch_shape=self.patch_shape,
             )
             return num_patches
 

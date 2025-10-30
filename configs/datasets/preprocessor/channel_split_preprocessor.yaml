@@ -6,18 +6,16 @@ mask_generator: ${datasets.masking.mask_generators.0}
 dtype: ${quantization}
 
 transforms_list: 
-  - _target_: data.transforms.normalize.NormalizeRayWrapper
+  - _target_: cell_observatory_platform.data.transforms.normalize.NormalizeRayWrapper
     input_layout:
-      _target_: data.data_shapes.MULTICHANNEL_HYPERCUBE
+      _target_: cell_observatory_platform.data.data_shapes.MULTICHANNEL_HYPERCUBE
       value: ${dataset_layout_order}
 
-temporal_patch_size: ${datasets.patch_shape.0}
-axial_patch_size: ${datasets.patch_shape.1}
-lateral_patch_size: ${datasets.patch_shape.2}
-
+patch_shape: ${datasets.patch_shape}
 input_format: ${dataset_layout_order}
-input_shape: ${eval:"[${clusters.batch_size_per_gpu}] + ${datasets.input_shape}"}
+input_shape: ${datasets.input_shape}
+
 seed: ${seed}
-ideal_psf_path: "/clusterfs/nvme/segment_4d/psf/amp_0-p0/1.tif"
+ideal_psf_path: "/groups/betzig/betziglab/hph/cell_observatory_project/data/1.tif"
 na_mask_thresholds: [0.7, 0.8, 0.9]
 resize_na_masks: true

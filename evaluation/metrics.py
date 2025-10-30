@@ -3,7 +3,7 @@ from typing import Optional, Literal, List
 import torch
 # from torchmetrics import _ssim_check_inputs, _ssim_update
 
-from cell_observatory_finetune.cell_observatory_platform.evaluation.metrics import Metric
+from cell_observatory_platform.evaluation.metrics import Metric
 
 
 class ReduceBuffer:

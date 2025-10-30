@@ -14,14 +14,14 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf, open_dict
 OmegaConf.register_new_resolver("eval", eval)
 
+load_dotenv(Path(__file__).parent / ".env", verbose=True)
+
 from cell_observatory_platform.utils.profiling import enable_profiling
 from cell_observatory_platform.utils.container import get_container_info
 
 # Update environment variables
 os.environ["HYDRA_FULL_ERROR"] = "1"
 os.environ["RAY_DEDUP_LOGS"] = "0"
-
-load_dotenv(Path(__file__).parent / ".env", verbose=True)
 
 logging.basicConfig(
     stream=sys.stdout,
@@ -213,9 +213,9 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
         cfg.paths.ray_script = cfg.paths.ray_script.replace("ray_local_cluster.sh", "ray_lsf_cluster.sh")
 
     if run_config_name is not None:
-        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {Path(config_name).name} --config-dir={Path(config_name).parent}"
+        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {Path(config_name).name} --config-path={Path(config_name).parent} --config-dir={Path(config_name).parent}"
     else:
-        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {config_name} --config-dir={Path(os.environ['REPO_DIR']) / 'configs'}"
+        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {config_name} --config-path={Path(os.environ['REPO_DIR']) / 'configs'} --config-dir={Path(os.environ['REPO_DIR']) / 'configs'}"
 
     if cfg.clusters.job_name is None:
         cfg.clusters.job_name = config_name

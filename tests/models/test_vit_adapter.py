@@ -279,11 +279,16 @@ def test_spatial_prior_module_3d_simple_shapes(B, in_ch, inplanes, embed_dim, ZY
 
 
 @pytest.mark.parametrize("dim,input_format,input_shape,patch", [
-    (3, "ZYX",   (2, 32, 32, 32, 2), (None, 8, 8, )),   # temporal_patch ignored
-    # (4, "TZYX",  (1, 4, 16, 16, 16, 2), (2, 8, 8)),     # Tp=2, Zp=8, YXp=8
+    (3, "ZYXC",   (2, 32, 32, 32, 2), (None, 8, 8, )),   # temporal_patch ignored
+    # (4, "TZYXC",  (1, 4, 16, 16, 16, 2), (2, 8, 8)),     # Tp=2, Zp=8, YXp=8
 ])
 def test_encoder_adapter_metadata_shapes(dim, input_format, input_shape, patch):
     in_ch = input_shape[-1]
+    if dim == 3:
+        patch_shape = (patch[1], patch[1], patch[1], None)
+    else:
+        raise NotImplementedError("4D not implemented yet.")
+
     adapter = EncoderAdapter(
         dim=dim,
         in_channels=in_ch,
@@ -291,9 +296,7 @@ def test_encoder_adapter_metadata_shapes(dim, input_format, input_shape, patch):
         input_shape=input_shape,
         input_format=input_format,
         dtype="float32",
-        axial_patch_size=patch[-2],
-        lateral_patch_size=patch[-1],
-        temporal_patch_size=patch[0] if dim == 4 else 1,
+        patch_shape=patch_shape,
         use_deform_attention=False,
         deform_num_heads=6,
         strategy="axial",
@@ -361,12 +364,10 @@ def test_encoder_adapter_forward():
          dim=3,
          in_channels=Cin,
          backbone_embed_dim=embed_dim,
-         input_shape=(B, Z, Y, X, Cin),
-         input_format="ZYX",
+         input_shape=(Z, Y, X, Cin),
+         input_format="ZYXC",
          dtype="float32",
-         axial_patch_size=Zp,
-         lateral_patch_size=YXp,
-         temporal_patch_size=Tp,
+         patch_shape=(Zp, YXp, YXp, None),
          use_deform_attention=False,
          deform_num_heads=6,
          strategy="axial",

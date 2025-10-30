@@ -22,9 +22,8 @@ fp16:
 bf16:
   enabled: true
 
-
 checkpoint:
-  load_universal: false # whether to load a universal checkpoint
+  load_universal: true # whether to load a universal checkpoint
 
 tensorboard:
   enabled: true

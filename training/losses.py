@@ -12,8 +12,9 @@ from cell_observatory_finetune.models.layers.utils import batch_tensors
 from cell_observatory_finetune.data.structures import boxes
 
 from cell_observatory_finetune.data.structures.masks import project_masks_on_boxes
-from cell_observatory_finetune.cell_observatory_platform.utils.context import get_world_size, is_torch_dist_initialized
 from cell_observatory_finetune.models.layers.utils import point_sample, get_uncertain_point_coords_with_randomness
+
+from cell_observatory_platform.utils.context import get_world_size, is_torch_dist_initialized
 
 
 def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):

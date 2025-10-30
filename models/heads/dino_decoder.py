@@ -13,8 +13,8 @@ from torch import nn, Tensor
 from cell_observatory_finetune.models.layers.layers import MLP
 from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
 
-from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
-from cell_observatory_finetune.cell_observatory_platform.models.positional_encoding import PosEmbedding
+from cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.models.positional_encoding import PosEmbedding
 
 
 class DeformableTransformerDecoderLayer(nn.Module):

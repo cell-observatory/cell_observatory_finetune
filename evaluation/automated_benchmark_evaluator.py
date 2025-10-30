@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Literal
 
 import torch
 
-from cell_observatory_finetune.cell_observatory_platform.evaluation.evaluator import DatasetEvaluator
+from cell_observatory_platform.evaluation.evaluator import DatasetEvaluator
 
 from cell_observatory_finetune.evaluation.metrics import NRMSEMetric, MAEMetric # SSIMMetric, 
 

@@ -15,7 +15,7 @@ from cell_observatory_finetune.models.layers.layers import Conv3d, MLP, inverse_
 from cell_observatory_finetune.data.structures.boxes import box_xyzxyz_to_cxcyczwhd, masks_to_boxes, masks_to_boxes_v2
 from cell_observatory_finetune.models.heads.dino_decoder import TransformerDecoder, DeformableTransformerDecoderLayer
 
-from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.models.activation import get_activation
 
 
 class MaskDINODecoder(nn.Module):

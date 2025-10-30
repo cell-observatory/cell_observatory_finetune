@@ -22,8 +22,8 @@ from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAt
 from cell_observatory_finetune.models.layers.positional_encodings import PositionalEmbeddingSinCos
 from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio, get_reference_points
 
-from cell_observatory_finetune.cell_observatory_platform.models.norm import get_norm
-from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.models.norm import get_norm
+from cell_observatory_platform.models.activation import get_activation
 
 
 class MSDeformAttnTransformerEncoderLayer(nn.Module):

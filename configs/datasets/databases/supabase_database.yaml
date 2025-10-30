@@ -1,10 +1,11 @@
 defaults:
   - _self_
 
-_target_: data.databases.supabase_database.SupabaseDatabase
-dbname: 'staging'
+_target_: cell_observatory_platform.data.databases.supabase_database.SupabaseDatabase
+dbname: 'prod'
 
-num_timepoints: ${datasets.input_shape.0} # number of timepoints for each hypercube
+input_shape: ${datasets.input_shape} # shape of the input data
+dataset_layout_order: ${dataset_layout_order} # dataset layout in the zarr files (e.g. ZYXC)
 
 max_rois: ${datasets.max_rois} # maximum number of ROIs (each ROI can have dozens of tiles)
 max_tiles: ${datasets.max_tiles} # maximum number of tiles (each tile can have thousands of hypercubes)
@@ -16,6 +17,7 @@ tile_list: ${datasets.tile_list} # list of specific tiles to filter
 timepoint_list: null # list of specific timepoints to filter
 
 occupancy_threshold: ${datasets.occupancy_threshold} # to filter our hypercubes with less than this occupancy ratio (0.0-1.0)
+occupancy_threshold_filter_type: 'min_ch0'
 
 verbose: true # to print debug messages
 hypercubes_dataframe_path: ${datasets.hypercubes_dataframe_path}

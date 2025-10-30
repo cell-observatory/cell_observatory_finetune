@@ -15,7 +15,7 @@ from cell_observatory_finetune.models.layers.layers import Conv3d, MLP
 from cell_observatory_finetune.models.layers.utils import c2_xavier_fill
 from cell_observatory_finetune.models.layers.positional_encodings import PositionalEmbeddingSinCos
 
-from cell_observatory_finetune.cell_observatory_platform.models.activation import get_activation
+from cell_observatory_platform.models.activation import get_activation
 
 
 class SelfAttentionLayer(nn.Module):

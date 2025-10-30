@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from cell_observatory_finetune.models.layers.layers import patchify
 
+from cell_observatory_platform.training.helpers import get_patch_sizes
 
 class ResidualConvUnit(nn.Module):
     def __init__(self, 
@@ -250,9 +251,7 @@ class DPTHead(nn.Module):
         output_channels,
         input_format,
         input_shape,
-        temporal_patch_size,
-        axial_patch_size,
-        lateral_patch_size,
+        patch_shape,
         features=256, 
         use_bn=False,
         feature_map_channels=[256, 512, 1024, 1024],
@@ -267,15 +266,17 @@ class DPTHead(nn.Module):
         self.input_channels = input_channels
         self.output_channels = output_channels
 
-        self.axial_patch_size = axial_patch_size
-        self.lateral_patch_size = lateral_patch_size
-        self.temporal_patch_size = temporal_patch_size
+        self.patch_shape = patch_shape
+        self.temporal_patch_size, self.axial_patch_size, self.lateral_patch_size = get_patch_sizes(
+            input_format=input_format,
+            patch_shape=patch_shape
+        )
 
         self.dim = 4 if 'T' in input_format else 3
         if self.dim != 3:
             raise NotImplementedError("Only Dim=3 with axial strategy is supported.")
 
-        axis_to_value = dict(zip(input_format, input_shape[1:]))
+        axis_to_value = dict(zip(input_format, input_shape))
         if axis_to_value.get("T", None) is not None:
             self.spatial_shape = (axis_to_value.get("T", None), 
                                 axis_to_value.get("Z", None),
@@ -381,29 +382,29 @@ class DPTHead(nn.Module):
 
 
     def _get_spatial_patchified_shape(self, 
-                                 spatial_shape, 
+                                 input_shape, 
                                  axial_patch_size, 
                                  lateral_patch_size, 
                                  temporal_patch_size, 
                                  input_format):
         if input_format == "ZYXC":
             return (
-                spatial_shape[0] // axial_patch_size,
-                spatial_shape[1] // lateral_patch_size,
-                spatial_shape[2] // lateral_patch_size,
+                input_shape[0] // axial_patch_size,
+                input_shape[1] // lateral_patch_size,
+                input_shape[2] // lateral_patch_size,
             )
         elif input_format == "TZYXC":
             return (
-                spatial_shape[0] // temporal_patch_size,
-                spatial_shape[1] // axial_patch_size,
-                spatial_shape[2] // lateral_patch_size,
-                spatial_shape[3] // lateral_patch_size,
+                input_shape[0] // temporal_patch_size,
+                input_shape[1] // axial_patch_size,
+                input_shape[2] // lateral_patch_size,
+                input_shape[3] // lateral_patch_size,
             )
         elif input_format == "TYXC":
             return (
-                spatial_shape[0] // temporal_patch_size,
-                spatial_shape[1] // lateral_patch_size,
-                spatial_shape[2] // lateral_patch_size,
+                input_shape[0] // temporal_patch_size,
+                input_shape[1] // lateral_patch_size,
+                input_shape[2] // lateral_patch_size,
             )
         else:
             raise ValueError(f"Unsupported input format: {input_format}")

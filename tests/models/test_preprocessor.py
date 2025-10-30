@@ -38,9 +38,7 @@ def test_requires_c_last_in_input_format():
     with pytest.raises(AssertionError):
         FinetunePreprocessor(
             task="channel_split",
-            axial_patch_size=2,
-            lateral_patch_size=4,
-            temporal_patch_size=1,
+            patch_shape=(1, 2, 4, 4, 1, None),
             transforms_list=[],
             with_masking=False,
             mask_generator=None,
@@ -55,9 +53,7 @@ def test_requires_xy_axes_present():
         FinetunePreprocessor(
             task="channel_split",
             dtype=torch.float32,
-            axial_patch_size=2,
-            lateral_patch_size=4,
-            temporal_patch_size=1,
+            patch_shape=(1, 2, 4, None),
             transforms_list=[],
             with_masking=False,
             mask_generator=None,
@@ -90,21 +86,24 @@ def test_spatial_dims_and_indices(fmt, full_shape, axial_patch_size):
         else expected_lateral_shape
     )
 
+    if "Z" in fmt:
+        patch_shape = (1, axial_patch_size, 4, 4, None)
+    else:
+        patch_shape = (1, 4, 4, None)
+
     pp = FinetunePreprocessor(
         task="channel_split",
         dtype=torch.float32,
-        axial_patch_size=axial_patch_size,
-        lateral_patch_size=4,
-        temporal_patch_size=1,
+        patch_shape=patch_shape,
         transforms_list=[],
         with_masking=False,
         mask_generator=None,
         input_format=fmt,
-        input_shape=full_shape,
+        input_shape=full_shape[1:],
     )
 
     assert pp.input_format == fmt
-    assert pp.input_shape == full_shape
+    assert pp.input_shape == full_shape[1:]
     assert pp.axis_index == expected_axis_index
     assert pp.spatial_dims == expected_spatial_dims
 
@@ -129,14 +128,12 @@ def test_channel_split_keeps_dim_and_means():
     pp = FinetunePreprocessor(
         task="channel_split",
         dtype=torch.float32,
-        axial_patch_size=None,
-        lateral_patch_size=4,
-        temporal_patch_size=1,
+        patch_shape=(1, 4, 4, None),
         transforms_list=[],
         with_masking=False,
         mask_generator=None,
         input_format=FMT_2D,
-        input_shape=SHAPE_2D,
+        input_shape=SHAPE_2D[1:],
     )
     out = pp.forward({"data_tensor": x, "metainfo": {}}, data_time=0.0)
     y = out["data_tensor"]

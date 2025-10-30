@@ -1,4 +1,4 @@
-_target_: inference.inferencer.InferencerWorker
+_target_: cell_observatory_platform.inference.inferencer.InferencerWorker
 
 num_output_channels: 2
 input_format: ${dataset_layout_order} 

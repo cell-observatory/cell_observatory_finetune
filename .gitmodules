@@ -1,4 +1,0 @@
-[submodule "cell_observatory_platform"]
-	path = cell_observatory_platform
-	url = https://github.com/cell-observatory/cell_observatory_platform.git
-	branch = develop

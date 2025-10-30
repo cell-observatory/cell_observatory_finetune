@@ -1,5 +1,5 @@
 Bootstrap: localimage
-From: /clusterfs/nvme/thayer/apptainer_images/develop_torch_25_08.sif
+From: /groups/betzig/betziglab/thayer/develop_torch_25_08.sif
 Stage: base
 
 %environment
@@ -9,7 +9,7 @@ export CC=/usr/bin/gcc
 export CXX=/usr/bin/g++
 
 %files
-/clusterfs/nvme/hph/git_managed/cuda/ops3d  /workspace/ops3d
+/groups/betzig/home/hamiltonh/git_managed/cuda/ops3d  /workspace/ops3d
 
 %post
 set -eux

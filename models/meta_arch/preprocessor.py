@@ -4,10 +4,10 @@ import torch
 
 from cell_observatory_finetune.data.utils import downsample, create_na_masks, resize_mask
 
-from cell_observatory_finetune.cell_observatory_platform.data.io import read_file
-from cell_observatory_finetune.cell_observatory_platform.data.data_types import TORCH_DTYPES, NUMPY_DTYPES
-from cell_observatory_finetune.cell_observatory_platform.models.preprocessor import RayPreprocessor
-from cell_observatory_finetune.cell_observatory_platform.models.patch_embeddings import PatchEmbedding
+from cell_observatory_platform.data.io import read_file
+from cell_observatory_platform.data.data_types import TORCH_DTYPES, NUMPY_DTYPES
+from cell_observatory_platform.models.preprocessor import RayPreprocessor
+from cell_observatory_platform.models.patch_embeddings import PatchEmbedding
 
 
 class FinetunePreprocessor(RayPreprocessor):
@@ -16,9 +16,7 @@ class FinetunePreprocessor(RayPreprocessor):
                  with_masking: bool,
                  mask_generator,
                  task: str,
-                 lateral_patch_size: int,
-                 axial_patch_size: int,
-                 temporal_patch_size: int,
+                 patch_shape: tuple[int, int, int],
                  dtype: torch.dtype,
                  input_format: str,
                  input_shape: tuple[int, ...],
@@ -50,7 +48,7 @@ class FinetunePreprocessor(RayPreprocessor):
         self.spatial_dims = tuple(
             i for ax, i in self.axis_index.items() if ax in ('Z', 'Y', 'X')
         )
-        axis_to_size = dict(zip(input_format, input_shape[1:])) # skip batch dim
+        axis_to_size = dict(zip(input_format, input_shape)) # skip batch dim
         self.axial_shape = axis_to_size.get('Z', None)
         self.timepoints  = axis_to_size.get('T', None)
         if 'Y' not in axis_to_size or 'X' not in axis_to_size:
@@ -86,15 +84,11 @@ class FinetunePreprocessor(RayPreprocessor):
                 resize=self.resize_na_masks,
             )
 
-        self.axial_patch_size = axial_patch_size
-        self.lateral_patch_size = lateral_patch_size
-        self.temporal_patch_size = temporal_patch_size
+        self.patch_shape = patch_shape
         self.patch_embedding = PatchEmbedding(
             input_fmt=self.input_format,
             input_shape=self.input_shape,
-            lateral_patch_size=self.lateral_patch_size,
-            axial_patch_size=self.axial_patch_size,
-            temporal_patch_size=self.temporal_patch_size,
+            patch_shape=self.patch_shape,
             # dummy value to satisfy init; not used in preprocessor
             embed_dim=1,
             channels=self.channels,
@@ -155,7 +149,7 @@ class FinetunePreprocessor(RayPreprocessor):
             mt0 = time.time()
             B = inputs.shape[0]
             masks, context_masks, target_masks, \
-                original_patch_indices, channels_to_mask = self.mask_generator(B)
+                original_patch_indices, channels_to_mask, patches_used = self.mask_generator(B)
             masking_time = time.time() - mt0
 
             mask_lists={}
