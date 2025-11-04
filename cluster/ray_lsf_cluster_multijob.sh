@@ -56,14 +56,14 @@ export head_node
 export head_node_ip
 export cluster_address
 
-apptainer exec --userns --nv --bind $storage_server --bind $workspace --bind $bind \
+apptainer exec --userns --nv --bind $storage_server --bind $workspace --bind $workspace_platform --bind $bind \
     --bind $outdir:$tmpdir $env /workspace/cell_observatory_finetune/cluster/ray_start_cluster.sh \
     -i $head_node_ip -p $port -d $dashboard_port -c $head_cpus -g $head_gpus -t $tmpdir -q $object_store_memory &
 head_bg_pid=$!
 
 sleep 10
 
-check_headnode="apptainer exec --nv --bind $storage_server --bind $workspace --bind $bind --bind $outdir:$tmpdir $env ray status --address $head_node_ip:$port"
+check_headnode="apptainer exec --nv --bind $storage_server --bind $workspace --bind $workspace_platform --bind $bind --bind $outdir:$tmpdir $env ray status --address $head_node_ip:$port"
 while ! $check_headnode; do
     echo "Waiting for head node..."
     sleep 3
@@ -87,7 +87,7 @@ do
             -gpu "num=$gpus:mode=shared" \
             -o "${outdir}/ray_worker_${i}.log" \
             apptainer exec --userns --nv \
-              --bind $storage_server --bind $workspace --bind $bind --bind $outdir/ray_worker_${i}:$tmpdir \
+              --bind $storage_server --bind $workspace --bind $workspace_platform --bind $bind --bind $outdir/ray_worker_${i}:$tmpdir \
                 $env /workspace/cell_observatory_finetune/cluster/ray_start_worker.sh \
                 -a $cluster_address -c $cpus -g $gpus -t $tmpdir -q $object_store_memory -w $i
     else
@@ -98,7 +98,7 @@ do
             -gpu "num=$gpus:mode=shared" \
             -o "${outdir}/ray_worker_${i}.log" \
             apptainer exec --userns --nv \
-              --bind $storage_server --bind $workspace --bind $bind --bind $outdir/ray_worker_${i}:$tmpdir \
+              --bind $storage_server --bind $workspace --bind $workspace_platform --bind $bind --bind $outdir/ray_worker_${i}:$tmpdir \
                 $env /workspace/cell_observatory_finetune/cluster/ray_start_worker.sh \
                 -a $cluster_address -c $cpus -g $gpus -t $tmpdir -q $object_store_memory -w $i
     fi
@@ -116,14 +116,16 @@ done
 
 ############################# CHECK STATUS
 
-apptainer exec --userns --nv --bind $storage_server --bind $workspace --bind $bind \
+apptainer exec --userns --nv --bind $storage_server --bind $workspace --bind $workspace_platform --bind $bind \
     --bind $outdir:$tmpdir $env /workspace/cell_observatory_finetune/cluster/ray_check_status.sh -a $cluster_address -r $nodes
 
 ############################## RUN WORKLOAD
 
+# FIXME: (IMPORTANT!) we need to add a trap here to ensure cleanup on exit/signals
+
 echo "Running user tasks"
 echo $tasks
-apptainer exec --userns --nv --bind $storage_server --bind $workspace --bind $bind --bind $outdir:$tmpdir $env $tasks
+apptainer exec --userns --nv --bind $storage_server --bind $workspace --bind $workspace_platform --bind $bind --bind $outdir:$tmpdir $env $tasks
 
 ############################## CLEANUP
 

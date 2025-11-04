@@ -21,4 +21,4 @@ checkpoint_manager:
   checkpoint_tag: latest_model
   engine: ${engine} # engine to use for training
   use_custom_state_dict_filter: true
-  load_optimizer: false
+  load_optimizer: null

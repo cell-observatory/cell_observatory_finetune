@@ -1,12 +1,13 @@
 #!/bin/bash
 
-while getopts ":b:c:d:e:g:m:n:o:p:q:s:t:j:x:y:z:" option; do
+while getopts ":b:c:d:e:g:l:m:n:o:p:q:s:t:j:x:y:z:" option; do
     case "${option}" in
     b)  bind=${OPTARG} ;;
     c)  cpus=${OPTARG} ;;
     d)  storage_server=${OPTARG} ;;
     e)  env=${OPTARG} ;;
     g)  gpus=${OPTARG} ;;
+    l)  workspace_platform=${OPTARG} ;;
     m)  mem=${OPTARG} ;;
     n)  nodes=${OPTARG} ;;
     o)  outdir=${OPTARG} ;;

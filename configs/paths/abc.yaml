@@ -4,9 +4,11 @@ apptainer_image: /clusterfs/nvme/hph/env_images/finetune_develop_torch_25_08.sif
 # No need to change anything below
 # --------------------------------------------------------------------------------
 repo_path: ${oc.env:REPO_DIR}
+platform_repo_path: ${oc.env:PLATFORM_REPO_DIR}
 data_path: /clusterfs/nvme/segment_4d
 server_folder_path: /clusterfs/vast/Data/cell_observatory_training_datasets
 workdir: /workspace/${oc.env:REPO_NAME} # mapping your repo path to this path inside the container
+platform_workdir: /workspace/${oc.env:PLATFORM_REPO_NAME} # mapping your platform repo path to this path inside the container
 
 # Relative paths will be updated in manager.py based on the running environment
 ray_script: ${oc.env:REPO_DIR}/cluster/ray_local_cluster.sh

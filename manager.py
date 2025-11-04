@@ -193,6 +193,7 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
     if hasattr(cfg.paths, "data_path") and cfg.paths.data_path is not None:
         bind = f'{cfg.paths.data_path}:{cfg.paths.data_path}'
         workspace = f'{cfg.paths.repo_path}:{cfg.paths.workdir}'
+        workspace_platform = f'{cfg.paths.platform_repo_path}:{cfg.paths.platform_workdir}'
         storage_server = f'{cfg.paths.server_folder_path}:{cfg.paths.server_folder_path}'
 
     assert (cfg.paths.apptainer_image is None) != (cfg.paths.docker_image is None), \
@@ -230,6 +231,7 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
         f"-c {q(cfg.clusters.cpus_per_worker)} "
         f"-e {image} "
         f"-g {q(cfg.clusters.gpus_per_worker)} "
+        f"-l {q(str(workspace_platform))} "
         f"-m {q(cfg.clusters.mem_per_worker)} "
         f"-n {q(cfg.clusters.worker_nodes)} "
         f"-o {q(str(outdir))} "
