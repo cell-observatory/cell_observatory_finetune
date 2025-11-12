@@ -145,7 +145,7 @@ def main(cfg: DictConfig):
             launch_job(run_cfg, run_config_name=run_cfg_path)
 
     elif cfg.run_type == "single_run" or cfg.run_type == "tune":
-        load_dotenv(run_cfg.paths.dotenv_path, verbose=True)
+        load_dotenv(cfg.paths.dotenv_path, verbose=True)
         logger.info("Launching a single training job...")
         launch_job(cfg)
     else:
@@ -423,6 +423,7 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
             os.environ["TMPDIR"] = posixify(OmegaConf.select(cfg, "paths.tmpdir"))
             os.environ["EXP_NAME"] = f"{OmegaConf.select(cfg,'experiment_name')}.yaml"
             os.environ["PYTHONPATH"] = f"{cfg.paths.python_path}"
+            os.environ["NUM_NODES"] = str(cfg.clusters.worker_nodes)
 
             print("Launching interactive job with command:")
             print("bash -lc", shlex.quote(ray_wrap_posix))

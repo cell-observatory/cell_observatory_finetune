@@ -8,9 +8,12 @@ data_path: /workspace/CellObservatoryData/hph
 server_folder_path: /workspace/CellObservatoryData/data/gokul-lab
 workdir: /work/${oc.env:REPO_NAME} # mapping your repo path to this path inside the container
 
+platform_repo_path: ${oc.env:PLATFORM_REPO_DIR}
+platform_workdir: /workspace/${oc.env:PLATFORM_REPO_NAME}
+
 # Relative paths will be updated in manager.py based on the running environment
 ray_script: /work/${oc.env:REPO_NAME}/cluster/ray_local_cluster.sh
-runner_script: /work/${oc.env:REPO_NAME}/training/runner.py
+runner_script: /work/${oc.env:PLATFORM_REPO_NAME}/training/runner.py
 dotenv_path: /workspace/CellObservatoryData/hph/.env_finetune
 
 pvc_data_name: project-cell-observatory-pvc-120t
