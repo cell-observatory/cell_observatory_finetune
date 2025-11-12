@@ -22,7 +22,11 @@ limitations under the License.
 import torch.nn as nn
 from torch.autograd import Function
 
-from ops3d import _C
+try:
+    from ops3d import _C
+except ImportError:
+    print('ops3d is not installed. See https://github.com/cell-observatory/ops3d')
+
 
 
 class RoIAlign3DFunction(Function):

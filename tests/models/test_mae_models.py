@@ -3,6 +3,7 @@ logger = logging.getLogger(__name__)
 
 import shutil
 import pytest
+pytestmark = pytest.mark.skip(reason="This module is temporarily disabled till we add ops3d to the docker image")
 
 import numpy as np
 

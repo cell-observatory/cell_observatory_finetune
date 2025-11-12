@@ -7,8 +7,10 @@ import torch.nn.functional as F
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 
-from ops3d import _C
-
+try:
+    from ops3d import _C
+except ImportError:
+    print('ops3d is not installed. See https://github.com/cell-observatory/ops3d')
 
 def factors(N):
     res = []

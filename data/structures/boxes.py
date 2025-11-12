@@ -28,7 +28,11 @@ import torchvision
 from torch import Tensor
 from torch import device
 
-from ops3d._C import nms_3d
+try:
+    from ops3d._C import nms_3d
+except ImportError:
+    print('ops3d is not installed. See https://github.com/cell-observatory/ops3d')
+    
 from cell_observatory_platform.data.io import record_init
 
 
