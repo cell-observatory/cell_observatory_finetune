@@ -47,6 +47,8 @@ export PYTHONPATH="/clusterfs/nvme/hph/git_managed:/clusterfs/nvme/hph/git_manag
 
 # --- CoreWeave ----
 
+CFG="experiments/coreweave/3D/mae/channel_split/test_channel_split_vit_10_13_25.yaml"
+
 # --- Linux
 
 # USAGE: bash /work/cell_observatory_finetune/scripts/utils/training.sh
