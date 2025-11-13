@@ -1,8 +1,8 @@
 version: "3.8"
 
 services:
-  cell-observatory-platform:
-    image: ghcr.io/cell-observatory/cell_observatory_platform:develop_torch_25_08
+  cell-observatory-finetune:
+    image: ghcr.io/cell-observatory/cell_observatory_finetune:develop_torch_25_08
     container_name: cell_observatory_dev
     user: "1000:1000"
     working_dir: /workspace/cell_observatory_finetune
