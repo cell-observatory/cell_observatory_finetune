@@ -65,10 +65,12 @@ CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/baseline_0
 
 # --- Windows
 
-# USAGE: & "$Env:ProgramFiles\Git\bin\bash.exe" -lc '"/c/Users/HugoPatricHamilton/git_managed/cell-observatory/cell_observatory_finetune/scripts/utils/training.sh"'
+# USAGE: & "$Env:ProgramFiles\Git\bin\bash.exe" -lc '"/c/Users/HugoPatricHamilton/git_managed/cell-observatory/cell_observatory_finetune/scripts/train.sh"'
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
+REPO_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
+
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 MANAGER_PY="$REPO_ROOT/cell_observatory_finetune/manager.py"
 if command -v cygpath >/dev/null 2>&1; then
