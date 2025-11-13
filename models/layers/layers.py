@@ -69,13 +69,18 @@ def patchify(inputs,
              reshape=True
 ):
 
+    if "T" not in input_fmt:
+        patch_shape = (axial_patch_size, lateral_patch_size, lateral_patch_size, None)
+    else: 
+        patch_shape = (temporal_patch_size, axial_patch_size, lateral_patch_size, lateral_patch_size, None)
+
+
     num_patches, token_shape = calc_num_patches(
         input_fmt=input_fmt,
         input_shape=inputs.shape[1:],
-        lateral_patch_size=lateral_patch_size,
-        axial_patch_size=axial_patch_size,
-        temporal_patch_size=temporal_patch_size,
+        patch_shape=patch_shape,
     )
+    
     pixels_per_patch = compute_num_pixels_per_patch(channels, 
                                                     temporal_patch_size, 
                                                     axial_patch_size, 
