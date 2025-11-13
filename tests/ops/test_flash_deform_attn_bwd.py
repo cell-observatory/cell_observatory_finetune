@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+pytestmark = pytest.mark.skip(reason="This module is temporarily disabled till we add ops3d to the docker image")
 
 import torch
 import torch.nn.functional as F

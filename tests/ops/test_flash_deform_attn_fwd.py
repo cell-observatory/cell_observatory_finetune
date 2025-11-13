@@ -1,6 +1,7 @@
 from __future__ import absolute_import, print_function, division
 
 import pytest
+pytestmark = pytest.mark.skip(reason="This module is temporarily disabled till we add ops3d to the docker image")
 
 import torch
 
