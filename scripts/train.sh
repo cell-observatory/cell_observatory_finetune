@@ -51,7 +51,7 @@ CFG="experiments/coreweave/3D/mae/channel_split/test_channel_split_vit_10_13_25.
 
 # --- Linux
 
-# USAGE: bash /work/cell_observatory_finetune/scripts/utils/training.sh
+# USAGE: bash /work/cell_observatory_finetune/scripts/train.sh
 
 export PYTHONPATH="/work:/work/cell_observatory_platform"
 
