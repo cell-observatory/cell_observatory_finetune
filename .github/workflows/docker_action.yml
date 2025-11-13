@@ -527,6 +527,8 @@ jobs:
       REPO_DIR: ${{ github.workspace }}
       DATA_DIR: ${{ github.workspace }}
       STORAGE_SERVER_DIR: /groups/betzig/betziglab/CellObservatoryData
+      WORKSPACE: $(dirname ${{ github.workspace }})
+
     steps:
       - name: List files in the repository
         run: |
@@ -547,13 +549,13 @@ jobs:
       - name: Set APPTAINER_BINDS
         id: apptainer_binds
         run: |
-          echo "APPTAINER_BINDS=--bind ${{ github.workspace }}:/workspace/${{ env.REPO_NAME }} --bind ${{ env.STORAGE_SERVER_DIR }} --bind ~/.cache/ --cwd /workspace/${{ env.REPO_NAME }}" >> "$GITHUB_OUTPUT"
+          echo "APPTAINER_BINDS=--bind ${{ env.WORKSPACE }}:/workspace --bind ${{ env.STORAGE_SERVER_DIR }} --bind ~/.cache/ --cwd /workspace/${{ env.REPO_NAME }}" >> "$GITHUB_OUTPUT"
 
       - name: Set APPTAINER_RUN command
         id: apptainer_run
         run: |
           rm -f test_results/* || true
-          echo "APPTAINER_RUN=apptainer exec --userns --no-home ${{ steps.apptainer_binds.outputs.APPTAINER_BINDS }} --nv ${{ github.workspace }}/${{ needs.sif_path.outputs.SIF_PATH }}_${{ env.TORCH_VERSION }}.sif" >> "$GITHUB_OUTPUT"
+          echo "APPTAINER_RUN=apptainer exec --userns --no-home --env PYTHONPATH=/workspace ${{ steps.apptainer_binds.outputs.APPTAINER_BINDS }} --nv ${{ github.workspace }}/${{ needs.sif_path.outputs.SIF_PATH }}_${{ env.TORCH_VERSION }}.sif" >> "$GITHUB_OUTPUT"
   
       - name: print environment variables
         run: ${{ steps.apptainer_run.outputs.APPTAINER_RUN }} env
