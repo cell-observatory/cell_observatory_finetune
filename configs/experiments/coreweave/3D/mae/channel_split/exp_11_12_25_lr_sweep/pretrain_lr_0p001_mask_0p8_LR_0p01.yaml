@@ -22,7 +22,7 @@ defaults:
 
 # experiment name (used for logging)
 experiment_name: mae_large_128x256x256_100_epoch_pretrain_lr_0p001_mask_0p8_channel_split_lr_0p01
-wandb_project: testing #finetuning_3d
+wandb_project: finetuning_3d
 
 # task
 task: finetune_mae
