@@ -532,7 +532,10 @@ jobs:
       - name: Set WORKSPACE directory
         id: set_workspace
         run: |
-          echo "WORKSPACE=$(dirname ${{ github.workspace }})" >> "$GITHUB_OUTPUT"
+          echo "github.workspace = ${{ github.workspace }}"
+          PARENT_DIR=$(dirname "$(dirname "${{ github.workspace }}")")
+          echo "WORKSPACE = $PARENT_DIR"
+          echo "WORKSPACE=$PARENT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: List files in workspace
         run: |
