@@ -73,11 +73,6 @@ clusters:
   mem_per_cpu: 40000 # ram per cpu core
   ray_queue_memory: 0.1
 
-# checkpoint
-# checkpoint:
-#   checkpoint_manager:
-#     checkpoint_tag: latest_model
-
 #paths:
 paths:
   # base output directory for logs, checkpoints, etc.
@@ -109,13 +104,10 @@ datasets:
   databases:
     occupancy_threshold_filter_type: 'min_ch0'
 
-# schedulers
 schedulers:
   epochs: 100
-
-# schedulers
-schedulers:
-  epochs: 2
+  warmup: 20
+  cooldown: 5
 
 # ROPE axial
 models:
