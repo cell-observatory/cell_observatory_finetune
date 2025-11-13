@@ -20,8 +20,11 @@ limitations under the License.
 
 
 import torch
-from ops3d import _C
 
+try:
+    from ops3d import _C
+except ImportError:
+    print("3D NMS op failed to load. Please compile ops3d if needed.")
 
 def nms_nd(dets: torch.Tensor, iou_threshold: float):
     """

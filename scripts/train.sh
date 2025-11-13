@@ -53,28 +53,30 @@ CFG="experiments/coreweave/3D/mae/channel_split/test_channel_split_vit_10_13_25.
 
 # USAGE: bash /work/cell_observatory_finetune/scripts/utils/training.sh
 
-# python3 /work/cell_observatory_finetune/manager.py --config-name=${CFG}
+export PYTHONPATH="/work:/work/cell_observatory_platform"
+
+python3 /work/cell_observatory_finetune/manager.py --config-name=${CFG}
 
 # --- Windows
 
 # USAGE: & "$Env:ProgramFiles\Git\bin\bash.exe" -lc '"/c/Users/HugoPatricHamilton/git_managed/cell-observatory/cell_observatory_finetune/scripts/utils/training.sh"'
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
+# SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+# REPO_ROOT="$( cd "$SCRIPT_DIR/../../.." && pwd )"
 
-MANAGER_PY="$REPO_ROOT/cell_observatory_finetune/manager.py"
-if command -v cygpath >/dev/null 2>&1; then
-  MANAGER_PY="$(cygpath -u "$MANAGER_PY")"
-fi
+# MANAGER_PY="$REPO_ROOT/cell_observatory_finetune/manager.py"
+# if command -v cygpath >/dev/null 2>&1; then
+#   MANAGER_PY="$(cygpath -u "$MANAGER_PY")"
+# fi
 
-echo "[training.sh] Repo root: $REPO_ROOT"
-echo "[training.sh] Manager:   $MANAGER_PY"
-echo "[training.sh] Config:    $CFG"
+# echo "[training.sh] Repo root: $REPO_ROOT"
+# echo "[training.sh] Manager:   $MANAGER_PY"
+# echo "[training.sh] Config:    $CFG"
 
-if command -v uv >/dev/null 2>&1; then
-  exec uv run python "$MANAGER_PY" --config-name="$CFG"
-elif command -v python3 >/dev/null 2>&1; then
-  exec python3 "$MANAGER_PY" --config-name="$CFG"
-else
-  exec python "$MANAGER_PY" --config-name="$CFG"
-fi
+# if command -v uv >/dev/null 2>&1; then
+#   exec uv run python "$MANAGER_PY" --config-name="$CFG"
+# elif command -v python3 >/dev/null 2>&1; then
+#   exec python3 "$MANAGER_PY" --config-name="$CFG"
+# else
+#   exec python "$MANAGER_PY" --config-name="$CFG"
+# fi

@@ -28,7 +28,11 @@ import torchvision
 from torch import Tensor
 from torch import device
 
-from ops3d._C import nms_3d
+try:
+    from ops3d._C import nms_3d
+except ImportError:
+    print("3D NMS op failed to load. Please compile ops3d if needed.")
+
 from cell_observatory_platform.data.io import record_init
 
 

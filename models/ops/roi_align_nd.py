@@ -22,8 +22,10 @@ limitations under the License.
 import torch.nn as nn
 from torch.autograd import Function
 
-from ops3d import _C
-
+try:
+    from ops3d import _C
+except ImportError:
+    print("3D NMS op failed to load. Please compile ops3d if needed.")
 
 class RoIAlign3DFunction(Function):
     @staticmethod
