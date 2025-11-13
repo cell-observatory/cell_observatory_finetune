@@ -527,9 +527,17 @@ jobs:
       REPO_DIR: ${{ github.workspace }}
       DATA_DIR: ${{ github.workspace }}
       STORAGE_SERVER_DIR: /groups/betzig/betziglab/CellObservatoryData
-      WORKSPACE: $(dirname ${{ github.workspace }})
 
     steps:
+      - name: Set WORKSPACE directory
+        id: set_workspace
+        run: |
+          echo "WORKSPACE=$(dirname ${{ github.workspace }})" >> "$GITHUB_OUTPUT"
+
+      - name: List files in workspace
+        run: |
+          ls -lhXR ${{ steps.set_workspace.outputs.WORKSPACE }}
+
       - name: List files in the repository
         run: |
           ls -lhXR ${{ github.workspace }}
@@ -549,7 +557,7 @@ jobs:
       - name: Set APPTAINER_BINDS
         id: apptainer_binds
         run: |
-          echo "APPTAINER_BINDS=--bind ${{ env.WORKSPACE }}:/workspace --bind ${{ env.STORAGE_SERVER_DIR }} --bind ~/.cache/ --cwd /workspace/${{ env.REPO_NAME }}" >> "$GITHUB_OUTPUT"
+          echo "APPTAINER_BINDS=--bind ${{ steps.set_workspace.outputs.WORKSPACE }}:/workspace --bind ${{ env.STORAGE_SERVER_DIR }} --bind ~/.cache/ --cwd /workspace/${{ env.REPO_NAME }}" >> "$GITHUB_OUTPUT"
 
       - name: Set APPTAINER_RUN command
         id: apptainer_run
