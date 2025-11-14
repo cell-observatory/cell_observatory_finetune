@@ -50,10 +50,12 @@ export PYTHONPATH="/clusterfs/nvme/hph/git_managed:/clusterfs/nvme/hph/git_manag
 # CFG="experiments/coreweave/3D/mae/channel_split/test_channel_split_vit_10_13_25.yaml"
 
 # CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/baseline_0p01.yaml"
-CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/baseline_0p001.yaml"
+# CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/baseline_0p001.yaml"
 
 # CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/pretrain_lr_0p001_mask_0p8_LR_0p01.yaml"
 # CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/pretrain_lr_0p001_mask_0p8_LR_0p001.yaml"
+
+CFG="experiments/coreweave/tests/exp_11_13_25_test_inference.yaml"
 
 # --- Linux
 
