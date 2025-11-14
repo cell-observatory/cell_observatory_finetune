@@ -235,6 +235,7 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
     elif cfg.clusters.launcher_type == "runai":
         cfg.paths.ray_script = cfg.paths.ray_script.replace("ray_local_cluster.sh", "ray_runai_cluster.sh")
 
+    # TODO: test both branches here
     if run_config_name is not None:
         config_path = Path(config_name).parent
         config_path = posixify(config_path if is_remote else config_path.resolve())
@@ -249,7 +250,8 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
         task = (
             f"{cfg.clusters.python_env} {cfg.paths.runner_script} "
             f"--config-name {config_name} "
-            f"--config-dir={config_dir}"
+            f"--config-dir={config_dir} "
+            f"--config-path={config_dir}"
         )
 
     if cfg.clusters.job_name is None:
