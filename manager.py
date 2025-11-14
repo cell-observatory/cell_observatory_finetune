@@ -236,11 +236,21 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
         cfg.paths.ray_script = cfg.paths.ray_script.replace("ray_local_cluster.sh", "ray_runai_cluster.sh")
 
     if run_config_name is not None:
-        config_dir = Path(config_name).parent
-        config_dir = posixify(config_dir if is_remote else config_dir.resolve())
-        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {Path(config_name).name} --config-path={Path(config_name).parent} --config-dir={config_dir}"
+        config_path = Path(config_name).parent
+        config_path = posixify(config_path if is_remote else config_path.resolve())
+        task = (
+            f"{cfg.clusters.python_env} {cfg.paths.runner_script} "
+            f"--config-name {Path(config_name).name} "
+            f"--config-path={config_path}"
+        )
     else:
-        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {config_name} --config-path={Path(os.environ['REPO_DIR']) / 'configs'} --config-dir={Path(os.environ['REPO_DIR']) / 'configs'}"
+        repo_configs = Path(os.environ["REPO_DIR"]) / "configs"
+        config_dir = posixify(repo_configs)
+        task = (
+            f"{cfg.clusters.python_env} {cfg.paths.runner_script} "
+            f"--config-name {config_name} "
+            f"--config-dir={config_dir}"
+        )
 
     if cfg.clusters.job_name is None:
         cfg.clusters.job_name = config_name
