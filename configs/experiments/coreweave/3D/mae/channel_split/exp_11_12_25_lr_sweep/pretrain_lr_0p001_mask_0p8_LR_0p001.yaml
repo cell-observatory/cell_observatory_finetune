@@ -25,7 +25,7 @@ experiment_name: mae_large_128x256x256_100_epoch__pretrain_lr_0p001_mask_0p8_cha
 wandb_project: finetuning_3d
 
 # task
-task: pretrain_mae
+task: finetune_mae
 
 # Model type
 network: mae

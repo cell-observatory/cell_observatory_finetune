@@ -16,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 OmegaConf.register_new_resolver("eval", eval)
 
 load_dotenv(Path(__file__).parent / ".env", verbose=True)
+load_dotenv(Path(__file__).parent / ".env_finetune", verbose=True)
 
 from cell_observatory_platform.utils.profiling import enable_profiling
 from cell_observatory_platform.utils.container import get_container_info
