@@ -4,7 +4,7 @@
 
 # USAGE: bash /clusterfs/nvme/hph/git_managed/cell_observatory_finetune/scripts/train.sh
 
-export PYTHONPATH="/clusterfs/nvme/hph/git_managed:/clusterfs/nvme/hph/git_managed/cell_observatory_finetune/cell_observatory_platform"
+# export PYTHONPATH="/clusterfs/nvme/hph/git_managed:/clusterfs/nvme/hph/git_managed/cell_observatory_finetune/cell_observatory_platform"
 
 # --- 4D ----
 
@@ -53,9 +53,9 @@ export PYTHONPATH="/clusterfs/nvme/hph/git_managed:/clusterfs/nvme/hph/git_manag
 # CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/baseline_0p001.yaml"
 
 # CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/pretrain_lr_0p001_mask_0p8_LR_0p01.yaml"
-# CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/pretrain_lr_0p001_mask_0p8_LR_0p001.yaml"
+CFG="experiments/coreweave/3D/mae/channel_split/exp_11_12_25_lr_sweep/pretrain_lr_0p001_mask_0p8_LR_0p001.yaml"
 
-CFG="experiments/coreweave/tests/exp_11_13_25_test_inference.yaml"
+# CFG="experiments/coreweave/tests/exp_11_13_25_test_inference.yaml"
 
 # --- Linux
 
