@@ -1,5 +1,6 @@
 import os
 import sys
+import uuid
 import shlex
 import logging
 import subprocess
@@ -15,6 +16,7 @@ from omegaconf import DictConfig, OmegaConf, open_dict
 OmegaConf.register_new_resolver("eval", eval)
 
 load_dotenv(Path(__file__).parent / ".env", verbose=True)
+load_dotenv(Path(__file__).parent / ".env_finetune", verbose=True)
 
 from cell_observatory_platform.utils.profiling import enable_profiling
 from cell_observatory_platform.utils.container import get_container_info
@@ -61,6 +63,15 @@ def set_env_from_cfg(cfg: DictConfig) -> None:
         logger.debug("Set %s=%s", env_key, os.environ[env_key])
 
 
+def posixify(s: str) -> str:
+    if s is None:
+        return s
+    s = str(s).replace("\\", "/")
+    if s.startswith("\\"):
+        s = "/" + s.lstrip("\\/")
+    return s
+
+
 # modify Hydra config on cmd line to use different models
 @hydra.main(config_path="configs", config_name="experiments/abc/test_evals.yaml")
 def main(cfg: DictConfig):
@@ -76,6 +87,8 @@ def main(cfg: DictConfig):
             logger.info(f"Launching job with overrides: {run.overrides}")
 
             run_cfg = compose(config_name=run.cfg)
+
+            load_dotenv(run_cfg.paths.dotenv_path, verbose=True)
 
             # first we merge the defaults_overrides with the run config
             defaults_overrides = get_defaults_overrides(run.get("defaults_overrides", None))
@@ -133,6 +146,7 @@ def main(cfg: DictConfig):
             launch_job(run_cfg, run_config_name=run_cfg_path)
 
     elif cfg.run_type == "single_run" or cfg.run_type == "tune":
+        load_dotenv(cfg.paths.dotenv_path, verbose=True)
         logger.info("Launching a single training job...")
         launch_job(cfg)
     else:
@@ -161,8 +175,9 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
     )
 
     if container_info['container_type'] == 'native':
-        for k in ['runner_script']:
-            cfg.paths[k] = cfg.paths[k].replace(cfg.paths.repo_path, cfg.paths.workdir)
+        if cfg.clusters.launcher_type != "runai":
+            for k in ['runner_script']:
+                cfg.paths[k] = cfg.paths[k].replace(cfg.paths.repo_path, cfg.paths.workdir)
 
     else:  # running in a docker/apptainer
         [print(f"\t{k}: {v}") for k, v in container_info['container_details'].items()]
@@ -184,9 +199,14 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
     print("\n" + OmegaConf.to_yaml(cfg))
 
     print(f"Current working directory: {Path.cwd()}")
+    is_remote = cfg.clusters.launcher_type in {"runai", "slurm", "lsf"}
     print(f"Creating output directory: {cfg.paths.outdir}...")
-    outdir = Path(cfg.paths.outdir).resolve()
-    outdir.mkdir(exist_ok=True, parents=True)
+    if is_remote:
+        outdir = posixify(cfg.paths.outdir)
+    else:
+        outdir = Path(cfg.paths.outdir).resolve()
+        outdir.mkdir(exist_ok=True, parents=True)
+        outdir = str(outdir)
     print(f"Output directory for training job: {outdir}")
 
     # bind path is --bind <host_path> : <container_path>
@@ -212,11 +232,27 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
         cfg.paths.ray_script = cfg.paths.ray_script.replace("ray_local_cluster.sh", "ray_slurm_cluster.sh")
     elif cfg.clusters.launcher_type == "lsf":
         cfg.paths.ray_script = cfg.paths.ray_script.replace("ray_local_cluster.sh", "ray_lsf_cluster.sh")
+    elif cfg.clusters.launcher_type == "runai":
+        cfg.paths.ray_script = cfg.paths.ray_script.replace("ray_local_cluster.sh", "ray_runai_cluster.sh")
 
+    # TODO: test both branches here
     if run_config_name is not None:
-        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {Path(config_name).name} --config-path={Path(config_name).parent} --config-dir={Path(config_name).parent}"
+        config_path = Path(config_name).parent
+        config_path = posixify(config_path if is_remote else config_path.resolve())
+        task = (
+            f"{cfg.clusters.python_env} {cfg.paths.runner_script} "
+            f"--config-name {Path(config_name).name} "
+            f"--config-path={config_path}"
+        )
     else:
-        task = f"{cfg.clusters.python_env} {cfg.paths.runner_script} --config-name {config_name} --config-path={Path(os.environ['REPO_DIR']) / 'configs'} --config-dir={Path(os.environ['REPO_DIR']) / 'configs'}"
+        repo_configs = Path(os.environ["REPO_DIR"]) / "configs"
+        config_dir = posixify(repo_configs)
+        task = (
+            f"{cfg.clusters.python_env} {cfg.paths.runner_script} "
+            f"--config-name {config_name} "
+            f"--config-dir={config_dir} "
+            f"--config-path={config_dir}"
+        )
 
     if cfg.clusters.job_name is None:
         cfg.clusters.job_name = config_name
@@ -364,6 +400,92 @@ def launch_job(cfg: DictConfig, run_config_name: str = None):
         cmd = " ".join(sjob_worker_nodes)
         print(cmd)
         subprocess.run(cmd, shell=True, check=True)
+
+    elif cfg.clusters.launcher_type == "runai":
+        '''
+            Currently, we only support requesting and allocating all resources
+            at once with RUNAI scheduler. We assume identical configurations
+            for all worker nodes.
+        '''
+        def quote_posix_list(argv):
+            return " ".join(shlex.quote(str(x)) for x in argv)
+
+        if cfg.clusters.interactive_session_type:
+            ray_args = [
+                "bash", cfg.paths.ray_script,
+                "-c", str(cfg.clusters.cpus_per_worker),
+                "-g", str(cfg.clusters.gpus_per_worker),
+                "-m", str(cfg.clusters.mem_per_worker),
+                "-n", str(cfg.clusters.worker_nodes),
+                "-o", str(outdir),
+                "-q", str(cfg.clusters.object_store_memory),
+                "-t", f"{task}",
+            ]
+
+            if cfg.clusters.head_node_gpus not in (None, "", "None"):
+                ray_args += ["-y", str(cfg.clusters.head_node_gpus)]
+            if cfg.clusters.head_node_cpus not in (None, "", "None"):
+                ray_args += ["-z", str(cfg.clusters.head_node_cpus)]
+
+            ray_wrap_posix = " ".join(shlex.quote(str(x)) for x in ray_args)
+            cmd = ["bash", "-lc", ray_wrap_posix]
+
+            os.environ["JOB_NAME"] = cfg.clusters.job_name
+            os.environ["PROJECT_NAME"] = cfg.clusters.runai_project
+            os.environ["CFG_SAVEDIR"] = posixify(OmegaConf.select(cfg, "paths.outdir"))
+            os.environ["TMPDIR"] = posixify(OmegaConf.select(cfg, "paths.tmpdir"))
+            os.environ["EXP_NAME"] = f"{OmegaConf.select(cfg,'experiment_name')}.yaml"
+            os.environ["PYTHONPATH"] = f"{cfg.paths.python_path}"
+            os.environ["NUM_NODES"] = str(cfg.clusters.worker_nodes)
+
+            print("Launching interactive job with command:")
+            print("bash -lc", shlex.quote(ray_wrap_posix))
+            subprocess.run(cmd, check=True)
+
+        else:
+            ray_args = [
+                "bash", cfg.paths.ray_script,
+                "-c", str(cfg.clusters.cpus_per_worker),
+                "-g", str(cfg.clusters.gpus_per_worker),
+                "-m", str(cfg.clusters.mem_per_worker),
+                "-n", str(cfg.clusters.worker_nodes),
+                "-o", str(outdir),
+                "-q", str(cfg.clusters.object_store_memory),
+                "-t", f"{task}",
+            ]
+
+            if cfg.clusters.head_node_gpus not in (None, "", "None"):
+                ray_args += ["-y", str(cfg.clusters.head_node_gpus)]
+            if cfg.clusters.head_node_cpus not in (None, "", "None"):
+                ray_args += ["-z", str(cfg.clusters.head_node_cpus)]
+
+            ray_wrap_posix = " ".join(shlex.quote(str(x)) for x in ray_args)
+            main_value = f'bash -lc "{ray_wrap_posix}"'
+
+            runai_jobname = f"{str(cfg.job_type).lower().replace('_','-')}-{uuid.uuid4().hex[:8]}"
+
+            args = [
+                "ai","job","submit",
+                "--project", cfg.clusters.runai_project,
+                "--name",    runai_jobname,
+                "--gpus",    str(cfg.clusters.gpus_per_worker),
+                "--pods",    str(cfg.clusters.worker_nodes),
+                "--data",    f"{cfg.paths.pvc_data_name}={cfg.paths.pvc_data_mount_path}",
+                "--base",    image,
+                "--repo",    cfg.clusters.repo_url,
+                "--evar",    f"NUM_NODES={cfg.clusters.worker_nodes}",
+                "--evar",    f"JOB_NAME={runai_jobname}",
+                "--evar",    f"CFG_SAVEDIR={posixify(OmegaConf.select(cfg,'paths.outdir'))}",
+                "--evar",    f"TMPDIR={posixify(OmegaConf.select(cfg,'paths.tmpdir'))}",
+                "--evar",    f"EXP_NAME={OmegaConf.select(cfg,'experiment_name')}.yaml",
+                "--evar",    f"PYTHONPATH={cfg.paths.python_path}",
+                "--init",    cfg.clusters.init_script,
+                "--node-pools", cfg.clusters.node_pool,
+                "--main",    main_value,
+            ]
+            print("Submitting Run:AI job with configuration:")
+            print(quote_posix_list(args))
+            subprocess.run(args, check=True)
 
     else:
         raise ValueError(

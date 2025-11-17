@@ -31,8 +31,8 @@ from torch import device
 try:
     from ops3d._C import nms_3d
 except ImportError:
-    print('ops3d is not installed. See https://github.com/cell-observatory/ops3d')
-    
+    print("3D NMS op failed to load. Please compile ops3d if needed.")
+
 from cell_observatory_platform.data.io import record_init
 
 

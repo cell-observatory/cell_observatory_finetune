@@ -4,6 +4,8 @@ defaults:
 _target_: cell_observatory_platform.data.databases.supabase_database.SupabaseDatabase
 dbname: 'prod'
 
+dotenv_path: ${paths.dotenv_path}
+
 input_shape: ${datasets.input_shape} # shape of the input data
 dataset_layout_order: ${dataset_layout_order} # dataset layout in the zarr files (e.g. ZYXC)
 

@@ -2,6 +2,7 @@
 .DS_Store
 .DS_Store?
 .env
+.env_finetune
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

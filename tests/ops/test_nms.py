@@ -4,11 +4,9 @@ pytestmark = pytest.mark.skip(reason="This module is temporarily disabled till w
 import torch
 
 try:
-    from ops3d import _C
+    import ops3d._C as _C
 except ImportError:
-    print('ops3d is not installed. See https://github.com/cell-observatory/ops3d')
-
-
+    print("3D NMS op failed to load. Please compile ops3d if needed.")
 
 @pytest.fixture(autouse=True)
 def require_cuda():
