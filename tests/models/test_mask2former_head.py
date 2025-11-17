@@ -5,9 +5,6 @@ import torch
 
 from cell_observatory_finetune.models.heads.mask2former_head import Mask2FormerHead
 
-
-
-
 def _make_input_shape_dict_for_m2f(c1, c2, c3, c4):
     return {
         "1": {"channels": c1, "stride": 8},
