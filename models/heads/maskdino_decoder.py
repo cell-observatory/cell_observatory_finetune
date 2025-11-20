@@ -3,16 +3,15 @@ Adapted from:
 https://github.com/IDEA-Research/MaskDINO/maskdino/modeling/transformer_decoder/maskdino_decoder.py
 """
 
-from typing import Optional, List, Literal
+from typing import Optional, Literal
 import fvcore.nn.weight_init as weight_init
 
 import torch
 from torch import nn
 
-from cell_observatory_finetune.data.structures.masks import BitMasks
 from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio
 from cell_observatory_finetune.models.layers.layers import Conv3d, MLP, inverse_sigmoid
-from cell_observatory_finetune.data.structures.boxes import box_xyzxyz_to_cxcyczwhd, masks_to_boxes, masks_to_boxes_v2
+from cell_observatory_finetune.data.structures import box_xyzxyz_to_cxcyczwhd, bitmask_to_boxes, masks_to_boxes_v2
 from cell_observatory_finetune.models.heads.dino_decoder import TransformerDecoder, DeformableTransformerDecoderLayer
 
 from cell_observatory_platform.models.activation import get_activation
@@ -575,7 +574,8 @@ class MaskDINODecoder(nn.Module):
                 
                 if self.initialize_box_type == 'bitmask':  # slower, but more accurate
                     # TODO: implement same safety check as in masks_to_boxes_v2
-                    refpoint_embeddings = BitMasks(flatten_mask > 0).get_bounding_boxes().tensor.to(device)
+                    # refpoint_embeddings = BitMasks(flatten_mask > 0).get_bounding_boxes().tensor.to(device)
+                    refpoint_embeddings = bitmask_to_boxes(flatten_mask > 0).to(device)
                 elif self.initialize_box_type == 'mask2box':  # faster 
                     # returns: (N, 6)
                     refpoint_embeddings = masks_to_boxes_v2(flatten_mask > 0).to(device)

@@ -9,9 +9,8 @@ from torch import nn
 import torch.nn.functional as F
 
 from cell_observatory_finetune.models.layers.utils import batch_tensors
-from cell_observatory_finetune.data.structures import boxes
+from cell_observatory_finetune.data.structures import generalized_box_iou, box_cxcyczwhd_to_xyzxyz
 
-from cell_observatory_finetune.data.structures.masks import project_masks_on_boxes
 from cell_observatory_finetune.models.layers.utils import point_sample, get_uncertain_point_coords_with_randomness
 
 from cell_observatory_platform.utils.context import get_world_size, is_torch_dist_initialized
@@ -312,9 +311,9 @@ class DETR_Set_Loss(nn.Module):
         # 4. compute GIOU = IoU−|C∖(A∪B)||C| where C is the convex hull
         # generalized_box_iou call returns an MxM matrix comparing every source against every target
         # we hence take the diagonal to get the IoU for each matched pair
-        loss_giou = 1 - torch.diag(boxes.generalized_box_iou(
-            boxes.box_cxcyczwhd_to_xyzxyz(source_boxes),
-            boxes.box_cxcyczwhd_to_xyzxyz(target_boxes)))
+        loss_giou = 1 - torch.diag(generalized_box_iou(
+            box_cxcyczwhd_to_xyzxyz(source_boxes),
+            box_cxcyczwhd_to_xyzxyz(target_boxes)))
         losses['loss_giou'] = loss_giou.sum() / num_boxes
 
         return losses

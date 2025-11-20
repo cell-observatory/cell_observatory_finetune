@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from cell_observatory_finetune.data.structures.boxes import box_cxcyczwhd_to_xyzxyz
+from cell_observatory_finetune.data.structures import box_cxcyczwhd_to_xyzxyz
 
 
 class MaskDINOHead(nn.Module):
