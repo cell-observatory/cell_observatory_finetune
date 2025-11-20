@@ -13,7 +13,6 @@ from cell_observatory_finetune.data.structures.boxes import box_cxcyczwhd_to_xyz
 class MaskDINOHead(nn.Module):
     def __init__(
         self,
-        *,
         num_classes: int,
         pixel_decoders: nn.Module,
         decoders: nn.Module,
@@ -34,8 +33,8 @@ class MaskDINOHead(nn.Module):
     def forward(self, features, mask = None, targets = None):
         mask_features, transformer_encoder_features, \
             multi_scale_features = self.pixel_decoder.forward_features(features, mask)
-        predictions = self.decoder(multi_scale_features, mask_features, mask, targets = targets)
-        return predictions
+        predictions, denoise_predictions = self.decoder(multi_scale_features, mask_features, mask, targets = targets)
+        return predictions, denoise_predictions
 
 
 class MaskDINO(nn.Module):
@@ -48,7 +47,6 @@ class MaskDINO(nn.Module):
         heads: nn.Module,
         # training parameters
         num_queries: int,
-        size_divisibility: int,
         # inference
         instance_segmentation_flag: bool,
         topk_per_image: int,
@@ -61,8 +59,6 @@ class MaskDINO(nn.Module):
             segmentation_head: module that performs semantic segmentations using backbone features
             criterion: module that computes the loss
             num_queries: number of queries
-            size_divisibility: Some backbones require the input height and width to be divisible by a
-                specific integer. Used to override such requirements.
             instance_segmentation_flag: bool, whether to output instance segmentation prediction
             topk_per_image: keep topk instances per image for instance segmentation
             use_softmax_loss: transform sigmoid scores into softmax scores to make scores sharper
@@ -76,11 +72,6 @@ class MaskDINO(nn.Module):
         self.segmentation_head = heads
 
         self.num_queries = num_queries
-        
-        if size_divisibility < 0:
-            # use backbone size_divisibility if not set
-            size_divisibility = self.backbone.size_divisibility
-        self.size_divisibility = size_divisibility
 
         self.topk_per_image = topk_per_image
         self.instance_segmentation_flag = instance_segmentation_flag
@@ -89,11 +80,11 @@ class MaskDINO(nn.Module):
         self.use_softmax_loss = use_softmax_loss
 
     def forward(self, data_sample: dict):
-        last_feature_map, features_dict = self.backbone(data_sample['data_tensor'])
-        outputs, denoise_predictions = self.segmentation_head(features_dict, targets=data_sample['metainfo']['gt_instances'])
+        features_dict = self.backbone(data_sample['data_tensor'])
+        outputs, denoise_predictions = self.segmentation_head(features_dict, targets=data_sample['metainfo']['targets'])
 
         # bipartite matching-based loss
-        losses = self.criterion(outputs, data_sample['metainfo']['gt_instances'], denoise_predictions)
+        losses = self.criterion(outputs, data_sample['metainfo']['targets'], denoise_predictions)
 
         for loss in list(losses.keys()):
             if loss in self.criterion.loss_weight_dict:
@@ -105,7 +96,7 @@ class MaskDINO(nn.Module):
         return losses, outputs
 
     def predict(self, data_sample: dict):
-        last_feature_map, features_dict = self.backbone(data_sample['data_tensor'])
+        features_dict = self.backbone(data_sample['data_tensor'])
         outputs, _ = self.segmentation_head(features_dict, targets=None)
         predicted_labels, predicted_boxes, predicted_masks = [
             outputs[key] for key in ("pred_logits", "pred_boxes", "pred_masks")
@@ -135,14 +126,15 @@ class MaskDINO(nn.Module):
                     orig_image_size # (orig_d, orig_h, orig_w)
                 )
             ]
+            # scale postprocess boxes to original image size
             predicted_box = self.box_postprocess(predicted_box, depth, height, width)
-            
-            instance_predictions = self.inference(predicted_label, predicted_mask, predicted_box)
-            predictions.append(instance_predictions) 
-        
+
+            instance_predictions = self._predict(predicted_label, predicted_mask, predicted_box)
+            predictions.append(instance_predictions)
+
         return predictions
 
-    def inference(self, predicted_labels, predicted_masks, predicted_boxes):
+    def _predict(self, predicted_labels, predicted_masks, predicted_boxes):
         # (num_queries, num_classes) -> (num_queries, num_classes)
         predicted_labels = predicted_labels.sigmoid()
         

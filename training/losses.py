@@ -74,17 +74,13 @@ def dice_loss(
     inputs = inputs.sigmoid()
     # masks: (N, D, H, W) -> (N, D*H*W)
     inputs = inputs.flatten(1)
+    targets = targets.flatten(1)
     # (N,D*H*W)x(N,D*H*W)->(N,D*H*W)->(N,) 
     numerator = 2 * (inputs * targets).sum(-1)
     # (N,) + (N,) -> (N,)
     denominator = inputs.sum(-1) + targets.sum(-1)
     loss = 1 - (numerator + 1) / (denominator + 1)
     return loss.sum() / num_masks
-
-
-dice_loss_jit = torch.jit.script(
-    dice_loss
-)  # type: torch.jit.ScriptModule
 
 
 def sigmoid_ce_loss(
@@ -109,11 +105,6 @@ def sigmoid_ce_loss(
     return loss.mean(1).sum() / num_masks
 
 
-sigmoid_ce_loss_jit = torch.jit.script(
-    sigmoid_ce_loss
-)  # type: torch.jit.ScriptModule
-
-
 def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
     """
     Args:
@@ -131,11 +122,6 @@ def batch_dice_loss(inputs: torch.Tensor, targets: torch.Tensor):
     return loss
 
 
-batch_dice_loss_jit = torch.jit.script(
-    batch_dice_loss
-)  # type: torch.jit.ScriptModule
-
-
 def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
     """
     Args:
@@ -148,7 +134,16 @@ def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
     Returns:
         Loss tensor
     """
-    hw = inputs.shape[1]
+    dhw = inputs.shape[1]
+
+    if dhw == 0:
+        # return a zero cost matrix (no mask contribution)
+        return torch.zeros(
+            inputs.shape[0],
+            targets.shape[0],
+            device=inputs.device,
+            dtype=inputs.dtype,
+        )
 
     pos = F.binary_cross_entropy_with_logits(
         inputs, torch.ones_like(inputs), reduction="none"
@@ -161,12 +156,7 @@ def batch_sigmoid_ce_loss(inputs: torch.Tensor, targets: torch.Tensor):
         "nc,mc->nm", neg, (1 - targets)
     )
 
-    return loss / hw
-
-
-batch_sigmoid_ce_loss_jit = torch.jit.script(
-    batch_sigmoid_ce_loss
-)  # type: torch.jit.ScriptModule
+    return loss / dhw
 
 
 def calculate_uncertainty(logits):
@@ -237,7 +227,6 @@ class DETR_Set_Loss(nn.Module):
         
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = self.no_object_loss_weight
-        
         self.register_buffer("empty_weight", empty_weight)
 
         # pointwise mask loss parameters
@@ -248,9 +237,9 @@ class DETR_Set_Loss(nn.Module):
         self.focal_alpha = focal_alpha
         self.semantic_ce_loss = semantic_ce_loss
 
-    def loss_labels_ce(self, outputs, targets, indices):
+    def loss_labels_ce(self, outputs, targets, indices, num_boxes):
         """
-            Classification Loss: Cross Entropy Loss
+        Classification Loss: Cross Entropy Loss
         """
         # model predictions: (B, num_queries, num_classes)
         source_logits = outputs["pred_logits"].float()
@@ -263,7 +252,7 @@ class DETR_Set_Loss(nn.Module):
         # get the labels for all targets that were matched to the source indices
         # indices is a list of tuples (src_idx, tgt_idx) where src_idx are the indices of
         # the source boxes that were matched to the target boxes, and similar for tgt_idx 
-        target_labels = torch.cat([target.labels.tensor[matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)])
+        target_labels = torch.cat([target["labels"][matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)])
         # make tensor (B, num_queries) with values equal to num_classes for all elements
         target_classes = torch.full(
             source_logits.shape[:2], self.num_classes, dtype=torch.int64, device=source_logits.device
@@ -279,12 +268,12 @@ class DETR_Set_Loss(nn.Module):
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """
-            Classification loss: Binary Focal Loss
+        Classification loss: Binary Focal Loss
         """
         source_logits = outputs['pred_logits']
         query_indices = self._get_query_indices(indices)
 
-        target_labels = torch.cat([target.labels.tensor[matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)])
+        target_labels = torch.cat([target["labels"][matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)])
         target_classes = torch.full(source_logits.shape[:2], self.num_classes, dtype=torch.int64, device=source_logits.device)
         target_classes[query_indices] = target_labels
 
@@ -294,8 +283,7 @@ class DETR_Set_Loss(nn.Module):
         # scatter_ to write 1s in the correct class slot for each query (we write to channel dim, i.e. dim=2)
         # we need index tensor of shape (B, Q, 1) to tell scatter_ where to put the 1
         target_classes_onehot.scatter_(2, target_classes.unsqueeze(-1), 1)
-        # drop the last channel since focal loss is computed over the 
-        # real object classes
+        # drop the last channel since focal loss is computed over the real object classes
         target_classes_onehot = target_classes_onehot[:,:,:-1]
 
         loss_ce = sigmoid_focal_loss(source_logits, target_classes_onehot, num_boxes, alpha=self.focal_alpha, gamma=2) * source_logits.shape[1]
@@ -303,12 +291,12 @@ class DETR_Set_Loss(nn.Module):
 
     def loss_boxes(self, outputs, targets, indices, num_boxes):
         """
-            Compute L1 regression loss and the GIoU loss over bounding box coordinates.
-            Target boxes are expected in format (center_x, center_y, center_z, w, h, d), normalized by the image size.
+        Compute L1 regression loss and the GIoU loss over bounding box coordinates.
+        Target boxes are expected in format (center_x, center_y, center_z, w, h, d), normalized by the image size.
         """
         query_indices = self._get_query_indices(indices)
         source_boxes = outputs['pred_boxes'][query_indices]
-        target_boxes = torch.cat([target.boxes.tensor[matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)], dim=0)
+        target_boxes = torch.cat([target["boxes"][matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)], dim=0)
 
         losses = {}
 
@@ -333,13 +321,13 @@ class DETR_Set_Loss(nn.Module):
 
     def loss_masks(self, outputs, targets, indices, num_masks):
         """
-            Compute mask loss: Focal Loss and Dice Loss.
+        Compute mask loss: Focal Loss and Dice Loss.
         """
         query_indices = self._get_query_indices(indices)
         target_class_indices = self._get_target_class_indices(indices)
 
         source_masks = outputs["pred_masks"][query_indices]
-        masks = [target.masks.tensor for target in targets]
+        masks = [target["masks"] for target in targets]
 
         # TODO: use valid to mask invalid areas due to padding in loss
         target_masks, valid = batch_tensors(masks)
@@ -380,8 +368,8 @@ class DETR_Set_Loss(nn.Module):
 
         # compute losses: cross entropy classifcation loss and dice mask loss 
         losses = {
-            "loss_mask": sigmoid_ce_loss_jit(point_logits, point_labels, num_masks),
-            "loss_dice": dice_loss_jit(point_logits, point_labels, num_masks),
+            "loss_mask": sigmoid_ce_loss(point_logits, point_labels, num_masks),
+            "loss_dice": dice_loss(point_logits, point_labels, num_masks),
         }
 
         del source_masks, target_masks
@@ -424,13 +412,12 @@ class DETR_Set_Loss(nn.Module):
                 # hence we have L * denoise_queries_per_label queries in total, here we get their indices
                 # however, in decoder each batch element has a different number of target labels, so we need to pad the indices
                 # to the max number of denoise queries per label, which is what we do  
-                target_labels = target.labels
+                target_labels = target["labels"]
                 if len(target_labels) > 0:
                     # (num_target_labels, ) = [0,1,...,num_target_labels-1]
                     target_label_indices = torch.arange(0, len(target_labels)).long().cuda()
                     # (1, num_target_labels) -> (denoise_queries_per_label, num_target_labels)
                     # hence we get [[0, 1, ..., num_target_labels-1], ....]
-                    # NOTE: repeat(A,B,...) repeats 0th dim A times and 1st dim B times etc.  
                     target_label_indices = target_label_indices.unsqueeze(0).repeat(denoise_queries_per_label, 1)
                     # (denoise_queries_per_label, num_target_labels) -> (denoise_queries_per_label * num_target_labels, )
                     denoise_query_target_index = target_label_indices.flatten()
@@ -438,7 +425,10 @@ class DETR_Set_Loss(nn.Module):
                     # torch.arange(R) gives [0,1,...,R−1], shape: (denoise_queries_per_label,)
                     # multiply by pad_size P to get [r*P, r*P, ..., r*P], start offset for each row of queries
                     # unsqueeze -> (R,1), then broadcast-add t row r becomes [r*P + 0, r*P + 1, ..., r*P + (num_target_labels-1)]]
-                    padded_denoise_query_target_index = (torch.tensor(range(denoise_queries_per_label)) * query_pad_size_per_label).long().cuda().unsqueeze(1)
+                    padded_denoise_query_target_index = (torch.tensor(range(denoise_queries_per_label)) \
+                                                         * query_pad_size_per_label).long().cuda().unsqueeze(1)
+                    # broadcast addition: (denoise_queries_per_label, 1) + (1, num_target_labels) -> (denoise_queries_per_label, num_target_labels)
+                    # each row r becomes [r*P + 0, r*P + 1, ..., r*P + (num_target_labels-1)]
                     padded_denoise_query_target_index = padded_denoise_query_target_index  + target_label_indices
                     padded_denoise_query_target_index = padded_denoise_query_target_index.flatten()
                 else:
@@ -449,11 +439,11 @@ class DETR_Set_Loss(nn.Module):
         matched_target_indices = self.matcher(outputs_without_aux_data, targets)
 
         # compute number of target boxes accross all nodes for normalization
-        total_num_masks = sum(len(target.labels) for target in targets)
+        total_num_masks = sum(len(target["labels"]) for target in targets)
         total_num_masks = torch.as_tensor(
             [total_num_masks], dtype=torch.float, device=next(iter(outputs.values())).device
         )
-        # TODO: perform dist init and available check with Ray instead?
+
         if is_torch_dist_initialized():
             torch.distributed.all_reduce(total_num_masks)
         average_num_masks_per_node = torch.clamp(total_num_masks / get_world_size(), min=1).item()
@@ -470,8 +460,7 @@ class DETR_Set_Loss(nn.Module):
                                                       predicted_denoise_bboxes, 
                                                       targets, 
                                                       denoise_query_target_indices, 
-                                                      average_num_masks_per_node * denoise_queries_per_label)
-                                                      )
+                                                      average_num_masks_per_node * denoise_queries_per_label))
             extra_losses = {k + f'_denoise': v for k, v in extra_losses.items()}
             losses.update(extra_losses)
         
@@ -494,7 +483,11 @@ class DETR_Set_Loss(nn.Module):
                 # hungarian matcher to get indices of the matched auxiliary_outputs and targets
                 auxiliary_matched_target_indices = self.matcher(auxiliary_output, targets)
                 for loss in self.losses:
-                    extra_losses = self.compute_loss(loss, auxiliary_output, targets, auxiliary_matched_target_indices, average_num_masks_per_node)
+                    extra_losses = self.compute_loss(loss, 
+                                                     auxiliary_output, 
+                                                     targets, 
+                                                     auxiliary_matched_target_indices, 
+                                                     average_num_masks_per_node)
                     extra_losses = {k + f"_{i}": v for k, v in extra_losses.items()}
                     losses.update(extra_losses)
                                 
@@ -526,7 +519,11 @@ class DETR_Set_Loss(nn.Module):
             intermediate_outputs = outputs['intermediate_outputs']
             intermediate_matched_target_indices = self.matcher(intermediate_outputs, targets)
             for loss in self.losses:
-                extra_losses = self.compute_loss(loss, intermediate_outputs, targets, intermediate_matched_target_indices, average_num_masks_per_node)
+                extra_losses = self.compute_loss(loss, 
+                                                 intermediate_outputs, 
+                                                 targets, 
+                                                 intermediate_matched_target_indices, 
+                                                 average_num_masks_per_node)
                 extra_losses = {k + f'_intermediate': v for k, v in extra_losses.items()}
                 losses.update(extra_losses)
 

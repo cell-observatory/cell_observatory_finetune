@@ -21,3 +21,97 @@ def get_supervised_input_data(model, inputs, mask_generator, device: Optional[to
     # in a tuple with a single dict element
     input_data = ({"data_tensor": torch.randn(*inputs, device=device), "metainfo": meta},)
     return input_data
+
+
+def mask_ids_to_masks(mask_ids_batch, masks, input_format, input_shape, device):
+    """
+    Convert per-sample mask IDs to per-sample binary masks.
+
+    Args:
+        mask_ids_batch (list[list[int]]): For each sample in the batch, a list of instance IDs.
+        masks (torch.Tensor): Tensor containing instance-ID maps.
+                              Shape: [B, *spatial] or [*spatial] (then B assumed 1).
+        input_format (str): Input format string (e.g. "TZYXC"). Used for sanity checks.
+        input_shape (tuple): Shape of the input (no batch), matching input_format.
+        device (torch.device): Device for output tensors.
+
+    Returns:
+        list[torch.Tensor]: For each sample b, a tensor of shape
+                            [NUM_INST_b, *spatial], dtype=bool.
+    """
+    masks = masks.to(device)
+    if masks.dim() == len(input_shape):
+        masks = masks.unsqueeze(0)  # [1, *spatial]
+
+    B = masks.size(0)
+    if len(mask_ids_batch) != B:
+        raise ValueError(
+            f"mask_ids_batch length ({len(mask_ids_batch)}) "
+            f"does not match batch size ({B})."
+        )
+
+    spatial_shape = masks.shape[1:]
+    binary_masks_batch = []
+
+    for b in range(B):
+        instance_ids = list(mask_ids_batch[b])
+        m = masks[b]
+
+        if len(instance_ids) == 0:
+            # No instances: return empty [0, *spatial]
+            empty = torch.zeros(
+                (0,) + spatial_shape,
+                dtype=torch.bool,
+                device=device,
+            )
+            binary_masks_batch.append(empty)
+            continue
+
+        ids_tensor = torch.as_tensor(instance_ids, device=device, dtype=m.dtype)
+        view_shape = (len(instance_ids),) + (1,) * m.dim()  # [N_inst, 1, 1, ...]
+        binary_masks = (m.unsqueeze(0) == ids_tensor.view(view_shape))  # [N_inst, *spatial]
+        binary_masks_batch.append(binary_masks.to(torch.bool))
+
+    return binary_masks_batch
+
+
+def get_image_sizes(input_format, input_shape, batch_size, metadata):
+    """
+    Get image sizes for each sample in the batch.
+
+    Args:
+        input_format (str): Input format string (e.g. "TZYXC").
+        input_shape (tuple): Shape of the input (no batch), matching input_format.
+        batch_size (int): Number of samples in the batch.
+        metadata (list[dict]): List of metadata dicts, one per sample.
+
+    Returns:
+        list[tuple]: List of image sizes for each sample in the batch.
+    """
+    if input_format == "TZYXC":
+        ax_names = ('time', 'z', 'y', 'x')
+    elif input_format == "ZYXC":
+        ax_names = ('z', 'y', 'x')
+    elif input_format == "TCZYX":
+        ax_names = ('time', 'channel', 'z', 'y', 'x')
+    elif input_format == "CZYX":
+        ax_names = ('channel', 'z', 'y', 'x')
+    else:
+        raise ValueError(f"Unsupported input_format: {input_format}")
+
+    image_sizes = []
+    for i in range(batch_size):
+        meta = metadata[i]
+        spatial_dims = [meta[f"{ax}_size"] for ax in ax_names]
+        image_sizes.append(tuple(spatial_dims))
+    
+    if "orig_image_sizes" in metadata[0]:
+        orig_image_sizes = []
+        for i in range(batch_size):
+            meta = metadata[i]
+            spatial_dims = [meta[f"orig_{ax}_size"] for ax in ax_names]
+            orig_image_sizes.append(tuple(spatial_dims))
+    else:
+        orig_image_sizes = image_sizes
+
+    return image_sizes, orig_image_sizes

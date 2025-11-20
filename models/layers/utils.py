@@ -1,25 +1,9 @@
 """
+Adapted from:
 https://github.com/facebookresearch/detectron2/blob/536dc9d527074e3b15df5f6677ffe1f4e104a4ab/projects/PointRend/point_rend/point_features.py#L63
 https://github.com/facebookresearch/detectron2/blob/536dc9d527074e3b15df5f6677ffe1f4e104a4ab/detectron2/layers/wrappers.py#L65
 https://github.com/IDEA-Research/MaskDINO/blob/3831d8514a3728535ace8d4ecc7d28044c42dd14/maskdino/utils/misc.py#L49
-
-Apache License
-Version 2.0, January 2004
-http://www.apache.org/licenses/
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
 """
-
 
 from typing import List
 
@@ -127,12 +111,10 @@ def get_reference_points(shapes, valid_ratios, device):
                                             torch.linspace(0.5, D_ - 0.5, D_, dtype=torch.float32, device=device),
                                             torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
                                             torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device),
-                                            indexing='ij'
-                                            ) 
+                                            indexing='ij') 
         
         # scaling by valid_ratios adjusts the normalized reference grid so that it
-        # only spans the unpadded region, i.e. [1, D*H*W] / (valid_ratio_d * D), 
-        # i.e. scale grid to [0, 1] adjusted by valid ratio
+        # only spans the unpadded region, i.e. scale grid to [0, 1]
         ref_z = ref_z.reshape(-1)[None] / (valid_ratios[:, None, lvl, 2] * D_) 
         ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)
         ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_)
@@ -167,7 +149,6 @@ def point_sample(input, point_coords, **kwargs):
         # (N, P, 3) -> (N, P, 1, 1, 3)
         point_coords = point_coords.unsqueeze(2).unsqueeze(3)
     # sample points in [-1, 1] x [-1, 1] x [-1, 1] coordinate space
-    # returns: 
     output = F.grid_sample(input, 2.0 * point_coords - 1.0, **kwargs)
     if add_dim:
         # (N, C, P, 1, 1) -> (N, C, P)
@@ -218,7 +199,8 @@ def get_uncertain_point_coords_with_randomness(
     # two coarse predictions with -1 and 1 logits has 0 logits, and therefore 0 uncertainty value
     # however, if we calculate uncertainties for the coarse predictions first,
     # both will have -1 uncertainty, and the sampled point will get -1 uncertainty
-    point_uncertainties = uncertainty_func(point_logits) # returns: (N, 1, num_sampled) per point score
+    # returns: (N, 1, num_sampled) per point score
+    point_uncertainties = uncertainty_func(point_logits)
     num_uncertain_points = int(importance_sample_ratio * num_points)
     num_random_points = num_points - num_uncertain_points
     

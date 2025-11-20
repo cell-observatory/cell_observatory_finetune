@@ -182,8 +182,7 @@ class MSDeformAttnTransformerEncoder(nn.Module):
                                        level_start_index, 
                                        valid_ratios, 
                                        positional_embeddings, 
-                                       masks_flattened
-                                       )
+                                       masks_flattened)
 
         return memory, feature_shapes, level_start_index
 
@@ -251,7 +250,10 @@ class MaskDINOEncoder(nn.Module):
         # 3. position embedding (sine positional encoding)
         # 4. mask feature conv layer (1x1 conv to reduce channels for mask prediction)
         # 5. FPN layers (lateral and output convs for top-down fusion)
-        
+
+        assert conv_dim % 32 == 0 and conv_dim % 3 == 0, \
+            "conv_dim must be divisible by 32 and 3 for GroupNorm"
+
         if self.num_feature_levels > 1:
             channel_align_blocks = []
             # align all feature maps to have the same channel dim
@@ -345,7 +347,7 @@ class MaskDINOEncoder(nn.Module):
         # encode feature maps with deformable attention transformer encoder
         # features_list: List[Tensor[B, C, D, H, W]] ordered
         # masks: List[Tensor[B, D, H, W]] ordered
-        # retuns:
+        # returns:
         # transformer_features: Tensor[B, sum(D*H*W), C], shapes: List[(D, H, W)], level_start_index: Tensor[num_levels]
         transformer_features, shapes, level_start_index = self.transformer_encoder(features_list, masks, pos_embeddings_list)
         

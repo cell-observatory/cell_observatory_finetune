@@ -12,9 +12,9 @@ from torch import nn, Tensor
 
 from cell_observatory_finetune.models.layers.layers import MLP
 from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
+from cell_observatory_finetune.models.layers.positional_encodings import PositionalEmbeddingSinCos
 
 from cell_observatory_platform.models.activation import get_activation
-from cell_observatory_platform.models.positional_encoding import PosEmbedding
 
 
 class DeformableTransformerDecoderLayer(nn.Module):
@@ -31,11 +31,16 @@ class DeformableTransformerDecoderLayer(nn.Module):
                  ):
         super().__init__()
 
+        assert embed_dim // num_heads % 8 == 0, "embed_dim//num_heads must be divisible by 8 ..."
+
         # cross attention
         if use_deformable_box_attention:
             raise NotImplementedError("Deformable box attention is not implemented yet")
         else:
-            self.cross_attention = FlashDeformAttn3D(embed_dim, num_levels, num_heads, num_points)
+            self.cross_attention = FlashDeformAttn3D(d_model=embed_dim, 
+                                                     n_levels=num_levels, 
+                                                     n_heads=num_heads, 
+                                                     n_points=num_points)
 
         self.dropout1 = nn.Dropout(dropout)
         self.norm1 = nn.LayerNorm(embed_dim)
@@ -47,7 +52,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
 
         # ffn
         self.linear1 = nn.Linear(embed_dim, feedforward_dim)
-        self.activation = get_activation(activation) 
+        self.activation = get_activation(activation)()
         self.dropout3 = nn.Dropout(dropout)
         self.linear2 = nn.Linear(feedforward_dim, embed_dim)
         self.dropout4 = nn.Dropout(dropout)
@@ -104,8 +109,9 @@ class DeformableTransformerDecoderLayer(nn.Module):
                 raise NotImplementedError("Unknown key_aware_type: {}".format(self.key_aware_type))
 
         # pos encoding q -> deformable cross attention -> res + dropout -> norm
-        target_cross_attn = self.cross_attention(self.with_pos_embeddings(target, \
-                                                                          target_query_pos_embeddings).transpose(0, 1), # (bs, num_queries, embed_dim)
+        target_cross_attn = self.cross_attention(self.with_pos_embeddings(
+                               target,
+                               target_query_pos_embeddings).transpose(0, 1), # (bs, num_queries, embed_dim)
                                target_reference_points.transpose(0, 1).contiguous(), # (bs, num_queries, 3/6)
                                memory.transpose(0, 1),  # (bs, num_tokens, embed_dim)
                                memory_shapes, # (bs, num_levels, 3)
@@ -190,9 +196,9 @@ class TransformerDecoder(nn.Module):
         # used for generating reference points for attention sampling
         # we embed_dim-dim positional encodings per axis
         # recall: MLP args = input_dim, hidden_dim, output_dim, num_layers
-        self.ref_point_head = MLP(query_dim // 3 * embed_dim, embed_dim, embed_dim, 2)
-
-        self.pos_embedding = PosEmbedding(embed_dim // 3, normalize=True)
+        self.num_pos_feats = embed_dim // 3
+        self.ref_point_head = MLP(self.query_dim * self.num_pos_feats, embed_dim, embed_dim, 2)
+        self.pos_embedding = PositionalEmbeddingSinCos(self.num_pos_feats, normalize=True)
         
         #  learn a scale to modulate sine positional encodings per query
         if not deformable_decoder:

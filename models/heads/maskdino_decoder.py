@@ -3,7 +3,7 @@ Adapted from:
 https://github.com/IDEA-Research/MaskDINO/maskdino/modeling/transformer_decoder/maskdino_decoder.py
 """
 
-
+from typing import Optional, List, Literal
 import fvcore.nn.weight_init as weight_init
 
 import torch
@@ -21,8 +21,7 @@ from cell_observatory_platform.models.activation import get_activation
 class MaskDINODecoder(nn.Module):
     def __init__(
             self,
-            in_channels,
-            *,
+            in_channels: int,
             num_classes: int,
             hidden_dim: int,
             num_queries: int,
@@ -31,12 +30,12 @@ class MaskDINODecoder(nn.Module):
             mask_dim: int,
             enforce_input_projection: bool,
             two_stage_flag: bool,
-            denoise_queries_flag: str,
+            denoise_queries_flag: bool,
             noise_scale: float,
             total_denosing_queries:int,
             # TODO: make this Enumeral
-            initialize_box_type: str,
-            initial_prediction_flag:bool,
+            initialize_box_type: Optional[Literal["bitmask", "mask2box"]],
+            with_initial_prediction: bool,
             learn_query_embeddings: bool,
             total_num_feature_levels: int = 4,
             dropout: float = 0.0,
@@ -73,8 +72,9 @@ class MaskDINODecoder(nn.Module):
         super().__init__()
         
         # flag to support prediction from initial matching and denoising outputs
-        self.initial_prediction_flag = initial_prediction_flag 
+        self.with_initial_prediction = with_initial_prediction 
         self.initialize_box_type = initialize_box_type
+        self.init_boxes = initialize_box_type is not None
 
         # flag to support two-stage pipeline
         self.two_stage_flag = two_stage_flag
@@ -113,7 +113,10 @@ class MaskDINODecoder(nn.Module):
         if not two_stage_flag or self.learn_query_embeddings:
             self.query_features = nn.Embedding(num_queries, hidden_dim)
         
-        if not two_stage_flag and initialize_box_type == 'no':
+        # NOTE: decide if we want to support all possible options
+        #       regarding initialization for query_embeddings and
+        #       query_features
+        if not two_stage_flag or not self.init_boxes:
             self.query_embeddings = nn.Embedding(num_queries, 6)
         
         # encoder generates class logits and proposals
@@ -145,8 +148,7 @@ class MaskDINODecoder(nn.Module):
                                           embed_dim=hidden_dim, 
                                           query_dim=query_dim,
                                           num_feature_levels=self.num_feature_levels,
-                                          share_decoder_layers=share_decoder_layers,
-                                          )
+                                          share_decoder_layers=share_decoder_layers)
         
         self.num_classes = num_classes
         self.class_predictor = nn.Linear(hidden_dim, num_classes)
@@ -184,7 +186,6 @@ class MaskDINODecoder(nn.Module):
             valid_H = (~level_padding_mask).any(dim=(1,3)).sum(dim=1) # (N,)
             valid_W = (~level_padding_mask).any(dim=(1,2)).sum(dim=1) # (N,)
 
-            # 
             grid_z, grid_y, grid_x = torch.meshgrid(
                                             torch.linspace(0, D - 1, D, dtype=torch.float32, device=memory.device),
                                             torch.linspace(0, H - 1, H, dtype=torch.float32, device=memory.device),
@@ -221,14 +222,14 @@ class MaskDINODecoder(nn.Module):
         output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
         return output_memory, output_proposals
 
-    def generate_denoising_queries(self, 
+    def generate_denoising_queries(self,
                                    targets, 
                                    target_query_embeddings, 
                                    reference_point_embeddings, 
                                    batch_size
     ):
         if self.training:
-            labels_per_image = [(torch.ones_like(target.labels.tensor)).cuda() for target in targets] # (bs, num_known_per_image)
+            labels_per_image = [(torch.ones_like(target["labels"])).cuda() for target in targets] # (bs, num_known_per_image)
             label_indices_per_image = [torch.nonzero(target) for target in labels_per_image] # (bs, num_known_per_image) 
             num_labels_per_image = [sum(gt_labels) for gt_labels in labels_per_image] # (bs, )
 
@@ -243,12 +244,12 @@ class MaskDINODecoder(nn.Module):
             # can be modified to selectively denosie some labels or boxes (hence the overcomplicated logic)
             bboxes_denoise_index_mask = labels_denoise_index_mask = torch.cat(labels_per_image) # (total_num_labels, ) all 1s
             # retrieve labels and boxes
-            labels = torch.cat([target.labels.tensor for target in targets]) # (total num labels)
-            bboxes = torch.cat([target.boxes.tensor for target in targets]) # (total num bboxes)
+            labels = torch.cat([target["labels"] for target in targets]) # (total num labels)
+            bboxes = torch.cat([target["boxes"] for target in targets]) # (total num bboxes)
             
             # allows for assigning each DN query to the correct image
             # in the batch: [0] * num_labels_image1 + [1] * num_labels_image2 + ... => (num_targets, total_num_labels)
-            batch_idx = torch.cat([torch.full_like(target.labels.tensor, idx) for idx, target in enumerate(targets)]) 
+            batch_idx = torch.cat([torch.full_like(target["labels"], idx) for idx, target in enumerate(targets)])
 
             # roundabout way to get the num of labels and bboxes to denoise (legacy code)
             # shape: (total_num_objects_denoise,) = 2 x (total_num_labels)
@@ -426,7 +427,9 @@ class MaskDINODecoder(nn.Module):
                'pred_boxes': outputs_bboxes_denoise[-1], 
                'pred_masks': outputs_mask_denoise[-1]
         }
-        out['auxiliary_outputs'] = self._set_aux_loss(outputs_labels_denoise, outputs_mask_denoise, outputs_bboxes_denoise)
+        out['auxiliary_outputs'] = self._set_aux_loss(outputs_labels_denoise, 
+                                                      outputs_mask_denoise, 
+                                                      outputs_bboxes_denoise)
         denoise_data['predicted_denoise_bboxes'] = out
         return outputs_labels, outputs_bboxes, outputs_mask
 
@@ -439,7 +442,8 @@ class MaskDINODecoder(nn.Module):
             outputs_bbox_list = [initial_reference_pts.to(device)]
 
         # iterate over all decoder layers and update the reference points for each layer 
-        for layer_id, (reference_pts, layer_bbox_regressor, intermediate) in enumerate(zip(reference_pts_list[:-1], self.bbox_regressor, intermediates)):
+        for layer_id, (reference_pts, layer_bbox_regressor, intermediate) in \
+            enumerate(zip(reference_pts_list[:-1], self.bbox_regressor, intermediates)):
             layer_deltas = layer_bbox_regressor(intermediate).to(device)
             reference_pts_output = layer_deltas + inverse_sigmoid(reference_pts).to(device)
             outputs_bbox_list.append(reference_pts_output.sigmoid())
@@ -481,7 +485,9 @@ class MaskDINODecoder(nn.Module):
 
         # disabling masking does not affect performance unless feature map
         # is not divisible by 32
-        if masks is None or not any(feature_map.size(2) % 32 or feature_map.size(3) % 32 or feature_map.size(4) % 32 for feature_map in x):
+        if masks is None or not any(feature_map.size(2) % 32 or \
+                                    feature_map.size(3) % 32 or \
+                                    feature_map.size(4) % 32 for feature_map in x):
             # masks: (num_feature_levels, bs, d, h, w)
             masks = [
                 torch.zeros((feature_map.size(0), feature_map.size(2), feature_map.size(3), feature_map.size(4)), 
@@ -560,9 +566,9 @@ class MaskDINODecoder(nn.Module):
             intermediate_outputs['pred_masks'] = outputs_masks
 
             # optionally: initialize decoder box queries using predicted masks
-            if self.initialize_box_type != 'no':
+            if self.init_boxes:
                 # convert masks into boxes to better initialize boxes in the decoder
-                assert self.initial_prediction_flag, "Initial prediction flag must be set to True when using box initialization"
+                assert self.with_initial_prediction, "Initial prediction flag must be set to True when using box initialization!"
                 # we flatten masks since the mask_to_boxes functions expect (N, D, H, W) mask tensor
                 flatten_mask = outputs_masks.detach().flatten(0, 1) # (B * num_queries, D, H, W)
                 d, h, w = outputs_masks.shape[-3:]
@@ -583,6 +589,9 @@ class MaskDINODecoder(nn.Module):
                 refpoint_embeddings = refpoint_embeddings.reshape(outputs_masks.shape[0], outputs_masks.shape[1], 6)
                 refpoint_embeddings = inverse_sigmoid(refpoint_embeddings)
 
+            else:
+                refpoint_embeddings = self.query_embeddings.weight[None].repeat(bs, 1, 1)    
+
             # optionally override topk queries with learned embeddings
             if self.learn_query_embeddings:
                 # shape: (1, num_queries, d_model) -> (bs, num_queries, d_model)
@@ -600,7 +609,7 @@ class MaskDINODecoder(nn.Module):
 
         # generate denoising queries if training and denoising queries flag is set
         attn_mask, denoise_metadata = None, None
-        if self.denoise_queries_flag != "no" and self.training:
+        if self.denoise_queries_flag and self.training:
             assert targets is not None, "If denoising queries are used, targets must be provided"
             # generates noisy copies of the ground-truth labels (flipped) and bboxes (shifted)
             # TODO: consider including target_query_embeddings and reference_point_embeddings
@@ -613,7 +622,7 @@ class MaskDINODecoder(nn.Module):
             if denoise_metadata is not None: 
                 queries = torch.cat([label_queries, queries], dim=1) # (bs, num_dn + num_queries, d_model)
 
-        if self.initial_prediction_flag:
+        if self.with_initial_prediction:
             # predict class logits and masks from queries and pixel decoder output
             # NOTE: consider reworking transpose logic
             outputs_class, outputs_mask = self.forward_prediction_heads(queries.transpose(0, 1), pixel_decoder_output, self.training)
@@ -621,7 +630,7 @@ class MaskDINODecoder(nn.Module):
             predictions_mask.append(outputs_mask)
         
         # TODO: three flag logic possibly redundant
-        if self.denoise_queries_flag != "no" and self.training and denoise_metadata is not None:
+        if self.denoise_queries_flag and self.training and denoise_metadata is not None:
             refpoint_embeddings=torch.cat([bbox_queries, refpoint_embeddings], dim=1)
 
         # NOTE: target = queries in this case (nn.Transformer vs DETR nomenclature)
@@ -649,7 +658,7 @@ class MaskDINODecoder(nn.Module):
             predictions_class.append(outputs_class)
             predictions_mask.append(outputs_mask)
 
-        if self.initial_prediction_flag:
+        if self.with_initial_prediction:
             # include refpoint embeddings in pred_box predictions
             # recall: refpoint_embeddings are given by encoded mask preds of encoder proposals
             # (+ optional denosing bboxes) or learned query embeddings
@@ -667,6 +676,7 @@ class MaskDINODecoder(nn.Module):
                                                                                                predictions_mask, 
                                                                                                denoise_metadata)            
             predictions_class, predictions_mask = list(predictions_class), list(predictions_mask)
+        
         # ensures self.label_embeddings is marked as used for computation graph
         elif self.training: 
             predictions_class[-1] += 0.0*self.label_embeddings.weight.sum()

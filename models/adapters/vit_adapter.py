@@ -97,7 +97,7 @@ class DWConv(nn.Module):
                 y = feature_map.transpose(1,2).reshape(B,C,Z,Y,X)
                 y = self.spatial_conv(y).flatten(2).transpose(1,2)
             else:
-                raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
+                raise ValueError(f"Only Dim=3 with axial strategy is supported, "
                                  f"got dim={self.dim}, strategy={self.strategy}.")
 
             out.append(y)
@@ -540,7 +540,7 @@ class EncoderAdapter(nn.Module):
         if self.dim == 3 and self.strategy == 'axial':
             self.up_spatial = nn.ConvTranspose3d(self.embed_dim, self.embed_dim, 2, 2)
         else:
-            raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
+            raise ValueError(f"Only Dim=3 with axial strategy is supported, "
                              f"got dim={self.dim}, strategy={self.strategy}.")
 
         self.norm1 = nn.SyncBatchNorm(self.embed_dim)
@@ -550,7 +550,6 @@ class EncoderAdapter(nn.Module):
 
         if self.use_deform_attention:
             self.apply(self._init_deform_weights)
-
 
     def _get_stride(self, key: str, val):
         if isinstance(val, int):

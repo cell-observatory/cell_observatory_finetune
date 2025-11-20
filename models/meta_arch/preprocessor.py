@@ -2,6 +2,7 @@ import time
 
 import torch
 
+from cell_observatory_finetune.training.helpers import mask_ids_to_masks, get_image_sizes
 from cell_observatory_finetune.data.utils import downsample, create_na_masks, resize_mask
 
 from cell_observatory_platform.data.io import read_file
@@ -142,6 +143,74 @@ class FinetunePreprocessor(RayPreprocessor):
             )
         elif self.task == "upsample_time":
             targets = None
+        
+        elif self.task == "instance_segmentation":
+            if self.channel_idx is None:
+                raise ValueError(
+                    "Channel axis 'C' not present in input_format; "
+                    "cannot perform instance_segmentation."
+                )
+
+            # masks: [B, *spatial] (instance-ID label maps)
+            masks = inputs.select(dim=self.channel_idx, index=self.mask_idx)
+
+            # List of length B; each entry is a dict {mask_id: bbox}
+            instances_list = meta["metadata_json"]["mask_bbox_dict"]
+
+            mask_ids_batch: list[list[int]] = []
+            bboxes_batch: list[torch.Tensor] = []
+
+            for instances in instances_list:
+                ids = list(instances.keys())
+                mask_ids_batch.append(ids)
+
+                if len(ids) == 0:
+                    bboxes_batch.append(
+                        torch.zeros((0, 4), device=inputs.device, dtype=torch.float32)
+                    )
+                else:
+                    # Collect bboxes in same order as ids
+                    bboxes_batch.append(
+                        torch.as_tensor(
+                            [instances[i] for i in ids],
+                            device=inputs.device,
+                            dtype=torch.float32,
+                        )
+                    )
+
+            # Convert label maps -> per-sample binary masks (list of tensors)
+            binary_masks_batch = mask_ids_to_masks(
+                mask_ids_batch=mask_ids_batch,
+                masks=masks,
+                input_format=self.input_format,
+                input_shape=self.input_shape,
+                device=inputs.device,
+            )
+
+            # Build per-sample target dicts
+            targets = []
+            for mask_ids, bm, boxes in zip(mask_ids_batch, binary_masks_batch, bboxes_batch):
+                targets.append(
+                    {
+                        "masks": bm,  # [NUM_INST, *spatial]
+                        "bboxes": boxes,  # [NUM_INST, box_dim]
+                        "mask_ids": torch.as_tensor(
+                            mask_ids, device=inputs.device, dtype=torch.long
+                        ),
+                    }
+                )
+
+            # TODO: generalize to arbitrary spatial dims per sample across entire
+            #       data pipeline 
+            image_sizes, orig_image_sizes = get_image_sizes(
+                input_format=self.input_format,
+                input_shape=self.input_shape,
+                batch_size=inputs.shape[0],
+                metadata=meta
+            )
+            meta['image_sizes'] = image_sizes
+            meta['orig_image_sizes'] = orig_image_sizes
+        
         else:
             raise ValueError(f"Unknown task: {self.task}")
 
