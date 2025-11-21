@@ -9,6 +9,8 @@ from typing import Optional
 
 import torch
 from torch import nn, Tensor
+from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from cell_observatory_finetune.models.layers.layers import MLP
 from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
@@ -46,7 +48,18 @@ class DeformableTransformerDecoderLayer(nn.Module):
         self.norm1 = nn.LayerNorm(embed_dim)
 
         # self attention
-        self.self_attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout)
+        # self.self_attention = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout)
+        self.self_attention = True
+        assert embed_dim % num_heads == 0, "d_model must be divisible by nhead"
+        self.d_model = embed_dim
+        self.num_heads = num_heads
+        self.d_head = embed_dim // num_heads
+        self.attn_drop = dropout
+
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+
         self.dropout2 = nn.Dropout(dropout)
         self.norm2 = nn.LayerNorm(embed_dim)
 
@@ -62,13 +75,41 @@ class DeformableTransformerDecoderLayer(nn.Module):
         self.memory_projection = None
 
     def remove_self_attn_modules(self):
-        self.self_attention = None
+        self.self_attention = False
+        self.q_proj = None
+        self.k_proj = None
+        self.v_proj = None
         self.dropout2 = None
         self.norm2 = None
 
     @staticmethod
     def with_pos_embeddings(tensor, pos):
         return tensor if pos is None else tensor + pos
+
+    # (B, L, C) -> (B, H, L, d_head)
+    def split_heads(self, x: Tensor) -> Tensor:
+        B, L, C = x.shape
+        x = x.view(B, L, self.num_heads, self.d_head)
+        return x.permute(0, 2, 1, 3)  # (B, H, L, d_head)
+
+    # (B, H, L, d_head) -> (B, L, C)
+    def combine_heads(self, x: Tensor) -> Tensor:
+        B, H, L, d = x.shape
+        return x.permute(0, 2, 1, 3).reshape(B, L, H * d)
+    
+    def _build_attn_mask(
+        self,
+        self_attention_mask: Optional[Tensor],
+        device: torch.device,
+    ) -> Optional[Tensor]:
+        attn_mask = None
+        if self_attention_mask is not None:
+            m = self_attention_mask.to(device)
+            if m.dtype != torch.bool and not torch.is_floating_point(m):
+                m = m.bool()
+            # (L, L) -> (1, 1, L, L) so it broadcasts over batch & heads
+            attn_mask = m.unsqueeze(0).unsqueeze(0)  # (1, 1, L, L)
+        return attn_mask
 
     def forward_ffn(self, x):
         res = x
@@ -78,25 +119,62 @@ class DeformableTransformerDecoderLayer(nn.Module):
 
     def forward(self,
                 # for tgt
-                target: Optional[Tensor],  # num_queries, bs, embed_dim
-                target_query_pos_embeddings: Optional[Tensor] = None,  # pos_embeddings for query: MLP(Sine(pos_embeddings))
-                target_query_sine_embed: Optional[Tensor] = None,  # pos_embeddings for query: Sine(pos_embeddings)
+                target: Optional[Tensor],
+                target_query_pos_embeddings: Optional[Tensor] = None,
+                target_query_sine_embed: Optional[Tensor] = None,
                 target_key_padding_mask: Optional[Tensor] = None,
-                target_reference_points: Optional[Tensor] = None,  # num_queries, bs, 6
+                target_reference_points: Optional[Tensor] = None,
                 # for memory
-                memory: Optional[Tensor] = None,  # dhw, bs, embed_dim
+                memory: Optional[Tensor] = None,
                 memory_key_padding_mask: Optional[Tensor] = None,
-                memory_level_start_index: Optional[Tensor] = None,  # num_levels
-                memory_shapes: Optional[Tensor] = None,  # bs, num_levels, 3
+                memory_level_start_index: Optional[Tensor] = None,
+                memory_shapes: Optional[Tensor] = None,
                 memory_pos_embeddings: Optional[Tensor] = None,  # pos_embeddings for memory
                 # for attention masking
                 self_attention_mask: Optional[Tensor] = None,  # mask used for self-attention
                 cross_attention_mask: Optional[Tensor] = None,  # mask used for cross-attention
                 ):
         # self attention: q,k pos encoding -> self_attn(q,k,v) -> dropout + res -> norm
-        if self.self_attention is not None:
-            q = k = self.with_pos_embeddings(target, target_query_pos_embeddings) # optionally add positional encodings
-            target = target + self.dropout2(self.self_attention(q, k, target, attn_mask=self_attention_mask)[0]) 
+        if self.self_attention:
+            # q = k = self.with_pos_embeddings(target, target_query_pos_embeddings) # optionally add positional encodings
+            # attn_out = self.self_attention(q, k, target, attn_mask=self_attention_mask)[0]
+
+            tgt = target.transpose(0, 1)
+
+            device = target.device
+
+            if target_query_pos_embeddings is not None:
+                pos = target_query_pos_embeddings.transpose(0, 1)  # (B, L, C)
+            else:
+                pos = None
+
+            q_in = self.with_pos_embeddings(tgt, pos)
+            k_in = q_in
+            v_in = tgt
+
+            q = self.split_heads(self.q_proj(q_in))  # (B, H, L, d)
+            k = self.split_heads(self.k_proj(k_in))  # (B, H, L, d)
+            v = self.split_heads(self.v_proj(v_in))  # (B, H, L, d)
+
+            attn_mask = self._build_attn_mask(
+                self_attention_mask=self_attention_mask,
+                device=device,
+            )
+
+            with sdpa_kernel(
+                [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]
+            ):
+                attn_out = F.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    dropout_p=self.attn_drop if self.training else 0.0,
+                    attn_mask=attn_mask,
+                    is_causal=False,
+                )  # (B, H, L, d)
+
+            attn_out = self.combine_heads(attn_out).transpose(0, 1)  # (L, B, C)
+            target = target + self.dropout2(attn_out)
             target = self.norm2(target)
 
         # inject a global summary of the memory into the queries
@@ -106,7 +184,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
             elif self.summarize_memory_method == 'projection_mean':
                 target = target + self.memory_projection(memory).mean(0, keepdim=True)
             else:
-                raise NotImplementedError("Unknown key_aware_type: {}".format(self.key_aware_type))
+                raise NotImplementedError("Unknown summarize_memory_method: {}".format(self.summarize_memory_method))
 
         # pos encoding q -> deformable cross attention -> res + dropout -> norm
         target_cross_attn = self.cross_attention(self.with_pos_embeddings(
