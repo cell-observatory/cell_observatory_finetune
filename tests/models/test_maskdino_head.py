@@ -8,7 +8,8 @@ from cell_observatory_finetune.training.losses import DETR_Set_Loss
 from cell_observatory_finetune.models.utils.matchers import HungarianMatcher
 from cell_observatory_finetune.models.heads.pixel_decoders import MaskDINOEncoder
 from cell_observatory_finetune.models.heads.maskdino_decoder import MaskDINODecoder
-from cell_observatory_finetune.models.heads.maskdino_head import MaskDINOHead, MaskDINO
+from cell_observatory_finetune.models.heads.maskdino_head import MaskDINOHead
+from cell_observatory_finetune.models.meta_arch.maskdino import MaskDINO
 
 CUDA_AVAILABLE = torch.cuda.is_available()
 
