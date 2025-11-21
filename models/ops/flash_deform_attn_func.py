@@ -10,7 +10,7 @@ from torch.autograd.function import once_differentiable
 try:
     from ops3d import _C
 except ImportError:
-    print("3D NMS op failed to load. Please compile ops3d if needed.")
+    print("ops3D failed to load. Please compile ops3d if needed.")
 
 def factors(N):
     res = []

@@ -1,3 +1,5 @@
+from omegaconf import ListConfig
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,7 +7,7 @@ import torch.nn.functional as F
 from timm.layers.drop import DropPath
 
 try:
-    from cell_observatory_finetune.models.ops.flash_deform_attn import MSDeformAttn
+    from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
     MSDEFORM_ATTN_AVAILABLE = True
 except ImportError:
     MSDEFORM_ATTN_AVAILABLE = False
@@ -159,12 +161,12 @@ class Extractor(nn.Module):
         if use_deform_attention:
             assert dim == 3, "Deformable attention kernel is only supported in 3D currently."
             self.with_deform_attention = True
-            self.attn = MSDeformAttn(
+            self.attn = FlashDeformAttn3D(
                 d_model=embed_dim, 
                 n_levels=n_levels, 
                 n_heads=num_heads, 
                 n_points=n_points, 
-                ratio=deform_ratio
+                # ratio=deform_ratio
             )
         else:
             self.with_deform_attention = False
@@ -553,7 +555,7 @@ class EncoderAdapter(nn.Module):
         if isinstance(val, int):
             if self.dim == 3:
                 return (1, val, val, val)
-        if isinstance(val, tuple):
+        if isinstance(val, (tuple, list, ListConfig)):
             if len(val) == 3:
                 z, y, x = val
                 return (1, z, y, x)
@@ -628,7 +630,7 @@ class EncoderAdapter(nn.Module):
             raise ValueError(f"Unsupported input format: {input_format}")
 
     def _init_deform_weights(self, m):
-        if isinstance(m, MSDeformAttn):
+        if isinstance(m, FlashDeformAttn3D):
             m._reset_parameters()
 
     def _add_level_embed(self, c2, c3, c4):

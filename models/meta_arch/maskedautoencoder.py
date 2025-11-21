@@ -115,11 +115,15 @@ class FinetuneMaskedAutoEncoder(nn.Module):
     def __init__(
         self,
         decoder_args: dict,
-        decoder: Literal['vit', 'linear', 'dense_predictor'],
+        decoder: Literal['vit', 
+                        'linear', 
+                        'dense_predictor', 
+                        'maskdino'],
         task: Literal['channel_split', 
                       'upsample_time', 
                       'upsample_space', 
-                      'upsample_spacetime'],
+                      'upsample_spacetime', 
+                      'instance_segmentation'],
         output_channels: Optional[int],
         model_template: Literal[
             'mae', # custom use `embed_dim`, `decoder_embed_dim`, `depth`, `num_heads` and `mlp_ratio` to config model
@@ -220,7 +224,8 @@ class FinetuneMaskedAutoEncoder(nn.Module):
             rope_mixed=self.rope_mixed,
             rope_theta=self.rope_theta,
             mlp_wide_silu=mlp_wide_silu,
-            out_layers=decoder_args.get("encoder_out_layers", None)
+            out_layers=decoder_args.get("encoder_out_layers", None) \
+                if decoder_args is not None else None
         )
 
         self.task = task
@@ -307,6 +312,9 @@ class FinetuneMaskedAutoEncoder(nn.Module):
                 strategy=self.decoder_strategy
             )
         
+        elif self.decoder == "maskdino":
+            self.masked_decoder = None
+
         # TODO: add support for segmentation decoders
         else:
             raise ValueError(f"Unknown decoder type: {self.decoder}")

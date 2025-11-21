@@ -18,7 +18,7 @@ class MaskDINO(nn.Module):
         self,
         # parameters for modules
         # MaskDINOEncoder (pixel decoder)
-        input_shape: Dict,
+        input_shape_metadata: Dict,
         transformer_in_features: List[str],
         target_min_stride: int,
         total_num_feature_levels: int,
@@ -61,9 +61,9 @@ class MaskDINO(nn.Module):
         # backbone
         backbone: nn.Module,
         # backbone adapter
+        input_shape: tuple[int, int, int],
         with_backbone_adapter: bool,
         dim: int,
-        adapter_in_channels: int,
         backbone_embed_dim: int,
         input_format: str,
         patch_shape: tuple[int, int, int],
@@ -108,8 +108,8 @@ class MaskDINO(nn.Module):
         self.with_adapter = with_backbone_adapter
         if self.with_adapter:
             self.adapter = EncoderAdapter(
+                input_shape=input_shape,
                 dim=dim,
-                in_channels=adapter_in_channels,
                 backbone_embed_dim=backbone_embed_dim,
                 input_format=input_format,
                 patch_shape=patch_shape,
@@ -139,9 +139,9 @@ class MaskDINO(nn.Module):
         
         self.criterion = DETR_Set_Loss(
             num_classes=num_classes,
-            loss_weight_dict=loss_weight_dict,
             matcher=self.matcher,
-            eos_coef=no_object_loss_weight,
+            loss_weight_dict=loss_weight_dict,
+            no_object_loss_weight=no_object_loss_weight,
             losses=losses,
             num_points=num_points,
             oversample_ratio=oversample_ratio,
@@ -154,7 +154,7 @@ class MaskDINO(nn.Module):
         )
 
         pixel_decoder=MaskDINOEncoder(
-            input_shape=input_shape,
+            input_shape_metadata=input_shape_metadata,
             transformer_in_features=transformer_in_features,
             target_min_stride=target_min_stride,
             total_num_feature_levels=total_num_feature_levels,
@@ -226,8 +226,8 @@ class MaskDINO(nn.Module):
         # 1. Denoising: base k -> k + "_denoise"
         if denoise:
             for group in denoise_losses:
-                if base_key in loss_weight_dict:
-                    weight_dict[f"{base_key}_denoise"] = loss_weight_dict[base_key]
+                if group in loss_weight_dict:
+                    weight_dict[f"{group}_denoise"] = loss_weight_dict[group]
 
         # 2. Two-stage: intermediate head k -> k + "_intermediate"
         if two_stage_flag:

@@ -200,7 +200,7 @@ class DETR_Set_Loss(nn.Module):
                  denoise_losses = [], 
                  semantic_ce_loss = True,
                  focal_alpha: float = 0.25
-                 ):
+    ):
         super().__init__()
 
         self.matcher = matcher
