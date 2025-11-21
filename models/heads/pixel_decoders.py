@@ -190,7 +190,7 @@ class MSDeformAttnTransformerEncoder(nn.Module):
 class MaskDINOEncoder(nn.Module):
     def __init__(
         self,
-        input_shape: Dict,
+        input_shape_metadata: Dict,
         # deformable transformer encoder args
         transformer_in_features: List[str],
         target_min_stride: int,
@@ -203,18 +203,6 @@ class MaskDINOEncoder(nn.Module):
         mask_dim: int,
         norm: Callable = None,
     ):
-        """
-        Args:
-            input_shape: shapes (channels and stride) of the input features
-            transformer_dropout: dropout probability in transformer
-            transformer_nheads: number of heads in transformer
-            transformer_dim_feedforward: dimension of feedforward network
-            transformer_enc_layers: number of transformer encoder layers
-            conv_dims: number of output channels for the intermediate conv layers.
-            mask_dim: number of output channels for the final conv layer.
-            norm (callable): normalization for all conv layers
-            total_num_feature_levels: total feature scales used (including downsampled features).
-        """
         super().__init__()
 
         # MaskDINOEncoder:
@@ -227,7 +215,7 @@ class MaskDINOEncoder(nn.Module):
         # 7. Mask head : single 1×1 conv on coarsest FPN map
 
         # determine shapes of input features
-        input_shapes = {k: v for k, v in input_shape.items() if k in transformer_in_features}
+        input_shapes = {k: v for k, v in input_shape_metadata.items() if k in transformer_in_features}
         # sort feature shapes from high to low resolution
         input_shapes_sorted = sorted(input_shapes.items(), key=lambda x: -x[1]["stride"])
         
@@ -238,9 +226,9 @@ class MaskDINOEncoder(nn.Module):
 
         # note that this is not sorted in high resolution -> low resolution order
         # this will be important for order in which we iterate for FPN lateral fusion   
-        input_shape = sorted(input_shape.items(), key = lambda x: x[1]["stride"])
+        input_shape_metadata = sorted(input_shape_metadata.items(), key = lambda x: x[1]["stride"])
         self.full_feature_map_set, _, self.full_feature_set_channels = zip(*[(k, v["stride"], v["channels"]) \
-                                                                             for k, v in input_shape])
+                                                                             for k, v in input_shape_metadata])
         self.total_num_feature_levels = total_num_feature_levels
 
         # define modules:

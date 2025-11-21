@@ -391,3 +391,7 @@ class FinetuneMaskedAutoEncoder(nn.Module):
 
         x = self.masked_encoder.patch_embedding.unpatchify(x, out_channels=self.output_channels if self.task == "channel_split" else None)
         return x
+    
+    def forward_features(self, data_tensor: torch.Tensor):
+        x, patches = self.masked_encoder(data_tensor)
+        return x

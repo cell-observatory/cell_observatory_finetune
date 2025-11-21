@@ -411,13 +411,11 @@ class EncoderAdapter(nn.Module):
     def __init__(
         self,
         dim,
-        in_channels,
-        backbone_embed_dim,
         input_shape,
+        patch_shape,
+        backbone_embed_dim,
         input_format,
-        dtype="bfloat16",
-        patch_shape=(4,16,16,16),
-        interaction_indexes=[9, 19, 29, 39],
+        num_backbone_features=4,
         add_vit_feature=True,
         # Spatial Prior Module parameters
         conv_inplane=64,
@@ -446,13 +444,10 @@ class EncoderAdapter(nn.Module):
 
         self.strategy = strategy
 
-        self.dtype = TORCH_DTYPES[dtype].value if isinstance(dtype, str) else dtype
-
         self.dim = dim
-        self.in_channels = in_channels
 
         self.add_vit_feature = add_vit_feature
-        self.interaction_indexes = interaction_indexes
+        self.num_backbone_features = num_backbone_features
 
         self.use_deform_attention = use_deform_attention
         if use_deform_attention and not MSDEFORM_ATTN_AVAILABLE:
@@ -478,6 +473,9 @@ class EncoderAdapter(nn.Module):
             self.spatial_shape = (axis_to_value.get("Z", None),
                                 axis_to_value.get("Y", None),
                                 axis_to_value.get("X", None))
+
+        self.in_channels = axis_to_value.get("C", None)
+        assert self.in_channels is not None, "Input format must contain 'C' channel."
 
         self.spatial_patchified_shape = self._get_spatial_patchified_shape(
             self.spatial_shape, 
@@ -528,12 +526,12 @@ class EncoderAdapter(nn.Module):
                     cffn_ratio=cffn_ratio,
                     deform_ratio=deform_ratio,
                     extra_extractor=(
-                        (True if i == len(self.interaction_indexes) - 1 else False) \
+                        (True if i == self.num_backbone_features - 1 else False) \
                             and use_extra_extractor
                     ),
                     strategy=self.strategy
                 )
-                for i in range(len(self.interaction_indexes))
+                for i in range(self.num_backbone_features)
             ]
         )
 
@@ -787,4 +785,4 @@ class EncoderAdapter(nn.Module):
         f3 = self.norm3(c3)
         f4 = self.norm4(c4)
 
-        return f1, f2, f3, f4
+        return {"1": f1, "2": f2, "3": f3, "4": f4}

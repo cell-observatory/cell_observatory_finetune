@@ -66,9 +66,8 @@ class MaskDINO(nn.Module):
         adapter_in_channels: int,
         backbone_embed_dim: int,
         input_format: str,
-        dtype: str,
         patch_shape: tuple[int, int, int],
-        interaction_indexes: list[int],
+        num_backbone_features: int,
         add_vit_feature: bool,
         conv_inplane: int,
         use_deform_attention: bool,
@@ -83,13 +82,13 @@ class MaskDINO(nn.Module):
         strategy: str,
         spatial_prior_module_strides: dict[str, tuple[int, int, int]],
         # criterion
-        loss_weight_dict: dict, 
+        loss_weight_dict: dict,
         no_object_loss_weight: float, 
         losses: list[str],
         oversample_ratio: float,
         importance_sample_ratio: float,
         denoise: bool,
-        denoise_type: str,
+        with_segmentation: bool,
         denoise_losses: list[str], 
         semantic_ce_loss: bool,
         focal_alpha: float,
@@ -97,9 +96,12 @@ class MaskDINO(nn.Module):
         instance_segmentation_flag: bool,
         topk_per_image: int,
         focus_on_boxes: bool = False,
-        use_softmax_loss: bool = False
     ):
         super().__init__()
+
+        # TODO: there might be a better way to adjust loss weights
+        loss_weight_dict = self.adjust_loss_weight_dict(loss_weight_dict, two_stage_flag,
+                                                        denoise, denoise_losses, decoder_num_layers)
 
         self.backbone = backbone
 
@@ -110,9 +112,8 @@ class MaskDINO(nn.Module):
                 in_channels=adapter_in_channels,
                 backbone_embed_dim=backbone_embed_dim,
                 input_format=input_format,
-                dtype=dtype,
                 patch_shape=patch_shape,
-                interaction_indexes=interaction_indexes,
+                num_backbone_features=num_backbone_features,
                 add_vit_feature=add_vit_feature,
                 conv_inplane=conv_inplane,
                 use_deform_attention=use_deform_attention,
@@ -138,15 +139,15 @@ class MaskDINO(nn.Module):
         
         self.criterion = DETR_Set_Loss(
             num_classes=num_classes,
+            loss_weight_dict=loss_weight_dict,
             matcher=self.matcher,
-            weight_dict=loss_weight_dict,
             eos_coef=no_object_loss_weight,
             losses=losses,
             num_points=num_points,
             oversample_ratio=oversample_ratio,
             importance_sample_ratio=importance_sample_ratio,
             denoise=denoise,
-            denoise_type=denoise_type,
+            with_segmentation=with_segmentation,
             denoise_losses=denoise_losses,
             semantic_ce_loss=semantic_ce_loss,
             focal_alpha=focal_alpha
@@ -202,10 +203,56 @@ class MaskDINO(nn.Module):
         self.topk_per_image = topk_per_image
         self.instance_segmentation_flag = instance_segmentation_flag
         self.focus_on_boxes = focus_on_boxes
-        self.use_softmax_loss = use_softmax_loss
 
+    def adjust_loss_weight_dict(self, 
+                                loss_weight_dict: dict,
+                                two_stage_flag: bool,
+                                denoise: bool,
+                                denoise_losses: list[str],
+                                decoder_num_layers: int
+    ):
+        """
+        Expand a base loss_weight_dict (e.g. {"loss_ce": 4., "loss_mask": 5., ...})
+        to include:
+          - intermediate head losses:      k + "_intermediate"        (if two_stage_flag)
+          - denoising losses:              k + "_denoise"             (driven by denoise_losses)
+          - aux decoder layer losses:      k + f"_{i}"                for i in [0, dec_layers)
+          - aux denoising decoder losses:  k + f"_denoise_{i}"
+        The actual loss keys produced are controlled by DETR_Set_Loss; extra
+        entries in the dict are harmless (they're just never used).
+        """
+        weight_dict = dict(loss_weight_dict)
+
+        # 1. Denoising: base k -> k + "_denoise"
+        if denoise:
+            for group in denoise_losses:
+                if base_key in loss_weight_dict:
+                    weight_dict[f"{base_key}_denoise"] = loss_weight_dict[base_key]
+
+        # 2. Two-stage: intermediate head k -> k + "_intermediate"
+        if two_stage_flag:
+            # only use the *main* prediction loss keys (no suffix)
+            for base_key, v in loss_weight_dict.items():
+                # don't create intermediate for denoise keys etc.
+                if base_key.endswith("_denoise"):
+                    continue
+                weight_dict[f"{base_key}_intermediate"] = v
+
+        # 3. Deep supervision over decoder layers: k -> k + f"_{i}"
+        #    This covers both main and *_denoise keys, matching the old
+        #    pattern where aux weights were built from the full weight_dict.
+        if decoder_num_layers > 0:
+            current_items = list(weight_dict.items())
+            aux_weight_dict = {}
+            for i in range(decoder_num_layers):
+                for k, v in current_items:
+                    aux_weight_dict[f"{k}_{i}"] = v
+            weight_dict.update(aux_weight_dict)
+
+        return weight_dict
+    
     def forward(self, data_sample: dict):
-        features = self.backbone(data_sample['data_tensor'])
+        features = self.backbone.forward_features(data_sample['data_tensor'])
         if self.with_adapter:
             features_dict = self.adapter(data_sample['data_tensor'], features)
         else:
@@ -223,10 +270,12 @@ class MaskDINO(nn.Module):
                 # remove this loss if not specified in loss_weight_dict
                 losses.pop(loss)
 
+        losses["step_loss"] = sum(losses.values())
+
         return losses, outputs
 
     def predict(self, data_sample: dict):
-        features = self.backbone(data_sample['data_tensor'])
+        features = self.backbone.forward_features(data_sample['data_tensor'])
         if self.with_adapter:
             features_dict = self.adapter(data_sample['data_tensor'], features)
         else:

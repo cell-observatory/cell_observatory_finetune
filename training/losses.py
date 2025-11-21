@@ -189,36 +189,27 @@ class DETR_Set_Loss(nn.Module):
     def __init__(self, 
                  num_classes, 
                  matcher, 
-                 loss_weight_dict, 
+                 loss_weight_dict,
                  no_object_loss_weight, 
                  losses,
                  num_points, 
                  oversample_ratio, 
                  importance_sample_ratio,
                  denoise: bool = False,
-                 # TODO: make Enum for denoise_type
-                 denoise_type: str = "seg",
+                 with_segmentation: bool = True,
                  denoise_losses = [], 
                  semantic_ce_loss = True,
                  focal_alpha: float = 0.25
                  ):
-        """
-        Args:
-            num_classes: number of object categories, omitting the special no-object category
-            matcher: module that computes matching between targets and proposals
-            loss_weight_dict: dict given by {loss names : relative weights}
-            no_object_loss_weight: relative classification weight applied to the no-object category
-            losses: list of all the losses to be applied
-        """
         super().__init__()
 
         self.matcher = matcher
         self.num_classes = num_classes
-        self.loss_weight_dict = loss_weight_dict
 
-        self.denoise_type = denoise_type
+        self.with_segmentation = with_segmentation
         
         self.losses = losses
+        self.loss_weight_dict = loss_weight_dict
         self.no_object_loss_weight = no_object_loss_weight
         
         self.denoise = denoise
@@ -469,7 +460,7 @@ class DETR_Set_Loss(nn.Module):
             extra_losses['loss_bbox_denoise'] = torch.as_tensor(0.).to('cuda')
             extra_losses['loss_giou_denoise'] = torch.as_tensor(0.).to('cuda')
             extra_losses['loss_ce_denoise'] = torch.as_tensor(0.).to('cuda')
-            if self.denoise_type == "seg":
+            if self.with_segmentation:
                 extra_losses['loss_mask_denoise'] = torch.as_tensor(0.).to('cuda')
                 extra_losses['loss_dice_denoise'] = torch.as_tensor(0.).to('cuda')
             
@@ -508,7 +499,7 @@ class DETR_Set_Loss(nn.Module):
                         extra_losses[f'loss_bbox_denoise_{i}'] = torch.as_tensor(0.).to('cuda')
                         extra_losses[f'loss_giou_denoise_{i}'] = torch.as_tensor(0.).to('cuda')
                         extra_losses[f'loss_ce_denoise_{i}'] = torch.as_tensor(0.).to('cuda')
-                        if self.denoise_type == "seg":
+                        if self.with_segmentation:
                             extra_losses[f'loss_mask_denoise_{i}'] = torch.as_tensor(0.).to('cuda')
                             extra_losses[f'loss_dice_denoise_{i}'] = torch.as_tensor(0.).to('cuda')
                         
@@ -526,6 +517,7 @@ class DETR_Set_Loss(nn.Module):
                 extra_losses = {k + f'_intermediate': v for k, v in extra_losses.items()}
                 losses.update(extra_losses)
 
+    
         return losses
 
 

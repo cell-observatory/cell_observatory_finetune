@@ -95,6 +95,29 @@ class FinetunePreprocessor(RayPreprocessor):
             channels=self.channels,
         )
 
+    def _split_inputs_and_masks(self, inputs: torch.Tensor):
+        """
+        Split `inputs` into:
+        - inputs_wo_mask: all channels except `self.mask_idx`
+        - masks: the mask channel (instance-id label map), with channel dim removed
+        """
+        C = inputs.shape[self.channel_idx]
+        device = inputs.device
+
+        # 1. Extract mask channel -> shape [B, *spatial]
+        masks = inputs.select(dim=self.channel_idx, index=self.mask_idx)
+
+        # 2. Build indices for all channels except the mask channel
+        all_idx = torch.arange(C, device=device)
+        keep_idx = torch.cat(
+            [all_idx[: self.mask_idx], all_idx[self.mask_idx + 1 :]]
+        )  # (C-1,)
+
+        # 3. Select remaining channels along channel dim
+        inputs_wo_mask = inputs.index_select(self.channel_idx, keep_idx)
+
+        return inputs_wo_mask, masks
+
     def forward(self, data_sample: dict, data_time: float) -> dict:
         preprocess_time = time.time()
 
@@ -151,8 +174,7 @@ class FinetunePreprocessor(RayPreprocessor):
                     "cannot perform instance_segmentation."
                 )
 
-            # masks: [B, *spatial] (instance-ID label maps)
-            masks = inputs.select(dim=self.channel_idx, index=self.mask_idx)
+            inputs, masks = self._split_inputs_and_masks(inputs)
 
             # List of length B; each entry is a dict {mask_id: bbox}
             instances_list = meta["metadata_json"]["mask_bbox_dict"]
