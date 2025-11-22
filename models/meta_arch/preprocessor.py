@@ -3,6 +3,7 @@ import ujson
 
 import torch
 
+from cell_observatory_finetune.data.structures import convert_bbox_format
 from cell_observatory_finetune.training.helpers import mask_ids_to_masks, get_image_sizes
 from cell_observatory_finetune.data.utils import downsample, create_na_masks, resize_mask
 
@@ -26,7 +27,9 @@ class FinetunePreprocessor(RayPreprocessor):
                  ideal_psf_path: str | None = None,
                  na_mask_thresholds: list[float] | None = None,
                  resize_na_masks: bool = True,
-                 mask_idx: int = -1
+                 mask_idx: int = -1,
+                 bbox_data_format: Optional[str] = None,
+                 bbox_output_format: Optional[str] = None
     ):
         super().__init__(dtype=dtype,
                          transforms_list=transforms_list,
@@ -37,6 +40,9 @@ class FinetunePreprocessor(RayPreprocessor):
         # TODO: consider supporting different channel axis positions
         assert input_format[-1] == 'C', "Input format must end with 'C' (channels)"
         self.input_shape = input_shape
+
+        self.bbox_data_format = bbox_data_format
+        self.bbox_output_format = bbox_output_format
 
         # increment for batch dim
         self.axis_index = {ax: i+1 for i, ax in enumerate(input_format)}
@@ -231,6 +237,9 @@ class FinetunePreprocessor(RayPreprocessor):
                 input_shape=self.input_shape,
                 device=inputs.device,
             )
+
+            if self.bbox_data_format != self.bbox_output_format:
+                bboxes_batch = convert_bbox_format(bboxes_batch, self.bbox_data_format, self.bbox_output_format)
 
             targets = []
             for mask_ids, bm, boxes in zip(mask_ids_batch, binary_masks_batch, bboxes_batch):

@@ -6,6 +6,21 @@ from torch import Tensor
 from cell_observatory_finetune.models.ops.roi_align_nd import RoIAlign3DFunction
 
 
+def convert_bbox_format(bboxes, bbox_input_format, bbox_output_format):
+    """
+    Convert bounding boxes from one format to another.
+    Supported formats: 'cxcyczwhd', 'xyzxyz'
+    """
+    if bbox_input_format == bbox_output_format:
+        return bboxes
+    if bbox_input_format == 'cxcyczwhd' and bbox_output_format == 'xyzxyz':
+        return box_cxcyczwhd_to_xyzxyz(bboxes)
+    elif bbox_input_format == 'xyzxyz' and bbox_output_format == 'cxcyczwhd':
+        return box_xyzxyz_to_cxcyczwhd(bboxes)
+    else:
+        raise ValueError(f"Unsupported bbox format conversion from {bbox_input_format} to {bbox_output_format}")
+
+
 def box_cxcyczwhd_to_xyzxyz(boxes: Tensor) -> Tensor:
     """
     Converts bounding boxes from (cx, cy, cz, w, h, d) format to (x1, y1, z1, x2, y2, z2) format.
