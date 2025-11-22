@@ -221,32 +221,35 @@ class MaskDINO(nn.Module):
         Expand a base loss_weight_dict (e.g. {"loss_ce": 4., "loss_mask": 5., ...})
         to include:
           - intermediate head losses:      k + "_intermediate"        (if two_stage_flag)
-          - denoising losses:              k + "_denoise"             (driven by denoise_losses)
+          - denoising losses:              k + "_denoise"             (driven by denoise_losses groups)
           - aux decoder layer losses:      k + f"_{i}"                for i in [0, dec_layers)
           - aux denoising decoder losses:  k + f"_denoise_{i}"
-        The actual loss keys produced are controlled by DETR_Set_Loss; extra
-        entries in the dict are harmless (they're just never used).
         """
         weight_dict = dict(loss_weight_dict)
 
-        # 1. Denoising: base k -> k + "_denoise"
+        # mapping from group name -> scalar loss keys that group produces
+        group_to_keys = {
+            "labels": ["loss_ce"],
+            "boxes": ["loss_bbox", "loss_giou"],
+            "masks": ["loss_mask", "loss_dice"],
+        }
+
+        # 1. Denoising: base k -> k + "_denoise" for selected groups
         if denoise:
             for group in denoise_losses:
-                if group in loss_weight_dict:
-                    weight_dict[f"{group}_denoise"] = loss_weight_dict[group]
+                for k in group_to_keys.get(group, []):
+                    if k in loss_weight_dict:
+                        weight_dict[f"{k}_denoise"] = loss_weight_dict[k]
 
         # 2. Two-stage: intermediate head k -> k + "_intermediate"
         if two_stage_flag:
-            # only use the *main* prediction loss keys (no suffix)
             for base_key, v in loss_weight_dict.items():
-                # don't create intermediate for denoise keys etc.
                 if base_key.endswith("_denoise"):
                     continue
                 weight_dict[f"{base_key}_intermediate"] = v
 
         # 3. Deep supervision over decoder layers: k -> k + f"_{i}"
-        #    This covers both main and *_denoise keys, matching the old
-        #    pattern where aux weights were built from the full weight_dict.
+        #    This covers both main and *_denoise keys
         if decoder_num_layers > 0:
             current_items = list(weight_dict.items())
             aux_weight_dict = {}

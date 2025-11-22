@@ -148,6 +148,10 @@ def point_sample(input, point_coords, **kwargs):
         add_dim = True
         # (N, P, 3) -> (N, P, 1, 1, 3)
         point_coords = point_coords.unsqueeze(2).unsqueeze(3)
+
+    if point_coords.dtype != input.dtype:
+        point_coords = point_coords.to(dtype=input.dtype)
+    
     # sample points in [-1, 1] x [-1, 1] x [-1, 1] coordinate space
     output = F.grid_sample(input, 2.0 * point_coords - 1.0, **kwargs)
     if add_dim:
@@ -187,7 +191,7 @@ def get_uncertain_point_coords_with_randomness(
     # NOTE: we oversample points first 
     num_sampled = int(num_points * oversample_ratio)
     
-    point_coords = torch.rand(num_boxes, num_sampled, 3, device=coarse_logits.device)
+    point_coords = torch.rand(num_boxes, num_sampled, 3, device=coarse_logits.device, dtype=coarse_logits.dtype)
     # NOTE: align_corners passed to grid_sample
     # returns: (N, C, D, H, W)
     point_logits = point_sample(coarse_logits, point_coords, align_corners=False)
@@ -224,9 +228,11 @@ def get_uncertain_point_coords_with_randomness(
         point_coords = torch.cat(
             [
                 point_coords,
-                torch.rand(num_boxes, num_random_points, 3, device=coarse_logits.device),
+                torch.rand(num_boxes, 
+                        num_random_points, 3, 
+                        device=coarse_logits.device, dtype=coarse_logits.dtype),
             ],
-            dim=1,
+            dim=1
         )
     
     return point_coords
@@ -240,17 +246,49 @@ def _max_by_axis(img_list):
     return maxes
 
 
-def batch_tensors(tensor_list: List[torch.Tensor]) -> torch.Tensor:
-    max_size = _max_by_axis([list(img.shape) for img in tensor_list])
-    batch_shape = [len(tensor_list)] + max_size
-    b, n, d, h, w = batch_shape
-    dtype, device = tensor_list[0].dtype, tensor_list[0].device
-    tensors = torch.zeros(batch_shape, dtype=dtype, device=device)
-    masks = torch.ones((b, d, h, w), dtype=torch.bool, device=device)
-    for img, img_pad, mask in zip(tensor_list, tensors, masks):
-        img_pad[: img.shape[0], : img.shape[1], : img.shape[2], : img.shape[3]].copy_(img)
-        mask[: img.shape[1], : img.shape[2], : img.shape[3]] = False
-    return tensors, masks
+def batch_tensors(tensors: List[torch.Tensor], pad_value: float = 0.0):
+    """
+    Batch a list of tensors with shape (N_i, *spatial_dims) into a tensor of
+    shape (B, max_N, *spatial_dims) plus a validity mask.
+
+    Args:
+        tensors: list of length B, each tensor of shape (N_i, *spatial_dims)
+                 e.g. (num_instances_i, D, H, W) for 3D masks.
+        pad_value: value to use for padding.
+
+    Returns:
+        batched: Tensor of shape (B, max_N, *spatial_dims)
+        valid:   Bool tensor of shape (B, max_N), True for real instances.
+    """
+    assert len(tensors) > 0, "batch_tensors: empty tensor list"
+
+    # Ensure all tensors have the same spatial shape
+    spatial_shape = tensors[0].shape[1:]
+    for t in tensors:
+        if t.shape[1:] != spatial_shape:
+            raise ValueError(
+                f"All tensors must have the same spatial shape. "
+                f"Got {t.shape[1:]} and {spatial_shape}."
+            )
+
+    B = len(tensors)
+    max_n = max(t.shape[0] for t in tensors)
+    device = tensors[0].device
+    dtype = tensors[0].dtype
+
+    # (B, max_N, *spatial_dims)
+    batched = tensors[0].new_full((B, max_n, *spatial_shape), pad_value)
+    # (B, max_N)
+    valid = torch.zeros((B, max_n), dtype=torch.bool, device=device)
+
+    for i, t in enumerate(tensors):
+        n = t.shape[0]
+        if n == 0:
+            continue
+        batched[i, :n].copy_(t)
+        valid[i, :n] = True
+
+    return batched, valid
 
 
 def compute_unmasked_ratio(mask):

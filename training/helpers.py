@@ -23,11 +23,13 @@ def get_supervised_input_data(model, inputs, mask_generator, device: Optional[to
     return input_data
 
 
-def mask_ids_to_masks(mask_ids_batch, masks, input_format, input_shape, device):
+def mask_ids_to_masks(batch_size, spatial_shape, mask_ids_batch, masks, input_format, input_shape, device):
     """
     Convert per-sample mask IDs to per-sample binary masks.
 
     Args:
+        batch_size (int): Number of samples in the batch.
+        spatial_shape (tuple): Shape of the spatial dimensions.
         mask_ids_batch (list[list[int]]): For each sample in the batch, a list of instance IDs.
         masks (torch.Tensor): Tensor containing instance-ID maps.
                               Shape: [B, *spatial] or [*spatial] (then B assumed 1).
@@ -40,19 +42,15 @@ def mask_ids_to_masks(mask_ids_batch, masks, input_format, input_shape, device):
                             [NUM_INST_b, *spatial], dtype=bool.
     """
     masks = masks.to(device)
-    if masks.dim() == len(input_shape):
-        masks = masks.unsqueeze(0)  # [1, *spatial]
 
-    B = masks.size(0)
+    B = batch_size
     if len(mask_ids_batch) != B:
         raise ValueError(
             f"mask_ids_batch length ({len(mask_ids_batch)}) "
             f"does not match batch size ({B})."
         )
 
-    spatial_shape = masks.shape[1:]
     binary_masks_batch = []
-
     for b in range(B):
         instance_ids = list(mask_ids_batch[b])
         m = masks[b]

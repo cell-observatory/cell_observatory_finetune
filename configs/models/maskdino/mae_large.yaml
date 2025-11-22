@@ -142,13 +142,14 @@ cost_box_giou: 2.0
 # λ_dice = 5."
 
 # criterion
+losses: ["labels", "boxes", "masks"]
+denoise_losses: ["labels", "boxes", "masks"]
+
 no_object_loss_weight: 0.1
-losses: ["loss_mask", "loss_dice", "loss_ce", "loss_bbox", "loss_giou"]
 oversample_ratio: 3.0
 importance_sample_ratio: 0.75
 denoise: true
 with_segmentation: true
-denoise_losses: ["loss_mask", "loss_dice", "loss_ce", "loss_bbox", "loss_giou"]
 semantic_ce_loss: false
 focal_alpha: 0.25
 loss_weight_dict:

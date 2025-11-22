@@ -223,6 +223,8 @@ class FinetunePreprocessor(RayPreprocessor):
                     )
 
             binary_masks_batch = mask_ids_to_masks(
+                batch_size=inputs.shape[0],
+                spatial_shape=self.spatial_shape,
                 mask_ids_batch=mask_ids_batch,
                 masks=masks,
                 input_format=self.input_format,
