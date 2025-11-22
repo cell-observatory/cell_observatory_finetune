@@ -34,7 +34,13 @@ class FlashDeformAttn3D(nn.Module):
         if d_model % n_heads != 0:
             raise ValueError("d_model must be divisible by n_heads, but got {} and {}".format(d_model, n_heads))
         _d_per_head = d_model // n_heads
-        
+
+        if _d_per_head % 8 != 0:
+            raise ValueError(
+                f"Per-head dim must be multiple of 8 for this kernel, "
+                f"got d_model={d_model}, n_heads={n_heads}, per_head={_d_per_head}."
+            )
+
         # set _d_per_head to a power of 2
         if not _is_power_of_2(_d_per_head):
             warnings.warn(
@@ -132,7 +138,7 @@ class FlashDeformAttn3D(nn.Module):
             value = value.masked_fill(input_padding_mask[..., None], float(0))
 
         # (N, Len_in, C=d_model) -> (N, Len_in, n_heads, d_model // n_heads)
-        value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads)
+        value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads).to(query.dtype)
 
         # offsets: (N, Len_q, C=d_model) -> (N, Len_q, n_heads * n_levels * n_points * 3) 
         #                                -> (N, Len_q, n_heads, n_levels, n_points, 3)
@@ -167,7 +173,7 @@ class FlashDeformAttn3D(nn.Module):
             
         # cat sampling_offsets and attention_weights, generate sampling_loc_attn
         # (N, Len_q, n_heads, n_levels, n_levels, n_points, 3) -> (N, Len_q, n_heads, n_levels * n_points * 3)
-        sampling_locations = sampling_locations.flatten(-3).half()
+        sampling_locations = sampling_locations.flatten(-3).to(query.dtype)
         # sampling_loc_attn: (N, Len_q, n_heads, n_levels * n_points * 4) 
         # 3 for sampling locations, 1 for attention weights
         sampling_loc_attn = torch.cat([sampling_locations, attention_weights], dim=-1)

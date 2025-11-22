@@ -335,7 +335,7 @@ class TransformerDecoder(nn.Module):
             reference_points_per_level = reference_points[:, :, None] \
                                          * torch.cat([valid_ratios]*2, dim=-1)[None, :] 
             # (num_queries, bs, 256*query_dim)
-            query_sine_embeddings = self.pos_embedding(reference_points_per_level[:, :, 0, :])
+            query_sine_embeddings = self.pos_embedding(reference_points_per_level[:, :, 0, :].to(target.dtype))
             # MLP(query_dim//3*embed_dim,embed_dim,embed_dim,2) returns: (num_queries, bs, embed_dim)
             query_pos_embeddings = self.ref_point_head(query_sine_embeddings) 
 

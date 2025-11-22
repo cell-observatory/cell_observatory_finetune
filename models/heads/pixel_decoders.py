@@ -23,6 +23,7 @@ from cell_observatory_finetune.models.layers.positional_encodings import Positio
 from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio, get_reference_points
 
 from cell_observatory_platform.models.norm import get_norm
+from cell_observatory_platform.data.data_types import TORCH_DTYPES
 from cell_observatory_platform.models.activation import get_activation
 
 
@@ -202,8 +203,11 @@ class MaskDINOEncoder(nn.Module):
         conv_dim: int,
         mask_dim: int,
         norm: Callable = None,
+        dtype: str = "bfloat16"
     ):
         super().__init__()
+
+        self.dtype = TORCH_DTYPES[dtype].value if isinstance(dtype, str) else dtype
 
         # MaskDINOEncoder:
         # 1. Backbone inputs : len(transformer_in_features)
@@ -240,7 +244,10 @@ class MaskDINOEncoder(nn.Module):
         # 5. FPN layers (lateral and output convs for top-down fusion)
 
         assert conv_dim % 32 == 0 and conv_dim % 3 == 0, \
-            "conv_dim must be divisible by 32 and 3 for GroupNorm"
+            "conv_dim must be divisible by 32 and 3!"
+
+        assert (conv_dim / transformer_encoder_num_heads) % 8 == 0, \
+            "conv_dim / transformer_encoder_num_heads must be divisible by 8!"
 
         if self.num_feature_levels > 1:
             channel_align_blocks = []

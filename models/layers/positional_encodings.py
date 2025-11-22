@@ -23,7 +23,10 @@ class PositionalEmbeddingSinCos(nn.Module):
             scale = 2 * math.pi
         self.scale = scale
 
+    # TODO: run logic in self.dtype instead of casting
     def _forward_queries(self, x, shape, mask=None):
+        out_dtype = x.dtype
+        
         F = int(self.num_pos_feats)
         Fe = F - (F % 2)
         
@@ -74,10 +77,15 @@ class PositionalEmbeddingSinCos(nn.Module):
         else:
             raise ValueError("Unknown x shape(-1):{}".format(x.size(-1)))
         
+        # cast back to input dtype
+        if pos.dtype != out_dtype:
+            pos = pos.to(out_dtype)
+
         return pos
     
     def _forward_image(self, x, shape, mask=None):
         N, C, D, H, W = shape
+        out_dtype = x.dtype
         if mask is None:
             mask = torch.zeros((N, D, H, W), device=x.device, dtype=torch.bool)
         not_mask = ~mask
@@ -122,6 +130,9 @@ class PositionalEmbeddingSinCos(nn.Module):
         remainder = 3 * F - 3 * Fe
         if remainder > 0:
             pos = torch.cat([pos, pos.new_zeros(N, remainder, D, H, W)], dim=1)
+
+        if pos.dtype != out_dtype:
+            pos = pos.to(out_dtype)
 
         return pos
 

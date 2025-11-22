@@ -62,7 +62,7 @@ def findspec_bwd(B, Q, G, C, max_tpb=256, max_mult=64):
 
 class FlashDeformAttnFunction(Function):
     @staticmethod
-    @torch.autocast("cuda", enabled=True, dtype=torch.float16)
+    # @torch.autocast("cuda", enabled=True, dtype=torch.float16)
     def forward(
         ctx, 
         value, 

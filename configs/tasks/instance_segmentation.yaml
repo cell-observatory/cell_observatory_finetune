@@ -1,1 +1,2 @@
 task: instance_segmentation
+input_channels: 1

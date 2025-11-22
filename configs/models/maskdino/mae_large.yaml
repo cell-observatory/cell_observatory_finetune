@@ -34,10 +34,11 @@ backbone:
   mlp_wide_silu: false
   loss_fn: l2_masked
 
-  decoder_args: null
   decoder: "maskdino"
   task: "instance_segmentation"
   output_channels: null
+  decoder_args:
+    encoder_out_layers: [10, 14, 18, 22]  # use these layers from encoder
 
 # NOTE: they seem to use defaults in DINOv3 for adapter when used with plainDETR
 
@@ -45,6 +46,7 @@ backbone:
 input_format: ${dataset_layout_order}
 input_shape: ${datasets.input_shape}
 patch_shape: ${datasets.patch_shape}
+dtype: ${quantization}
 with_backbone_adapter: true
 dim: 3
 backbone_embed_dim: ${models.backbone.embed_dim}
@@ -53,6 +55,7 @@ add_vit_feature: true
 conv_inplane: 64
 use_deform_attention: true 
 n_points: 4
+n_levels: 1
 deform_num_heads: 16
 drop_path_rate: 0.3
 init_values: 0.0
@@ -93,12 +96,14 @@ transformer_encoder_dropout: 0.1
 transformer_encoder_num_heads: 8
 transformer_encoder_dim_feedforward: 1024
 num_transformer_encoder_layers: 4
-conv_dim: 288 # NOTE: needs to be multiple of 32 for GroupNorm and 3 for pos encodings!
+# NOTE: we needs to be multiple of 32 for GroupNorm and 3
+#       after div by transformer_encoder_num_heads also needs divisible by 8
+conv_dim: 384
 mask_dim: 256
 norm: null
 
 # MaskDINODecoder
-in_channels: ${models.backbone.embed_dim}
+in_channels: ${models.conv_dim}
 num_classes: 1
 hidden_dim: 256
 num_queries: 100

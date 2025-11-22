@@ -83,10 +83,11 @@ def get_image_sizes(input_format, input_shape, batch_size, metadata):
         input_format (str): Input format string (e.g. "TZYXC").
         input_shape (tuple): Shape of the input (no batch), matching input_format.
         batch_size (int): Number of samples in the batch.
-        metadata (list[dict]): List of metadata dicts, one per sample.
+        metadata (dict): Batch metadata; each key maps to a 1D array of
+                         length `batch_size` (e.g. "y_size", "x_size", ...).
 
     Returns:
-        list[tuple]: List of image sizes for each sample in the batch.
+        list[tuple], list[tuple]: (image_sizes, orig_image_sizes) for each sample.
     """
     if input_format == "TZYXC":
         ax_names = ('time', 'z', 'y', 'x')
@@ -101,15 +102,14 @@ def get_image_sizes(input_format, input_shape, batch_size, metadata):
 
     image_sizes = []
     for i in range(batch_size):
-        meta = metadata[i]
-        spatial_dims = [meta[f"{ax}_size"] for ax in ax_names]
+        spatial_dims = [metadata[f"{ax}_size"][i] for ax in ax_names]
         image_sizes.append(tuple(spatial_dims))
-    
-    if "orig_image_sizes" in metadata[0]:
+
+    # use orig_* sizes only if all of them are present
+    if all(f"orig_{ax}_size" in metadata for ax in ax_names):
         orig_image_sizes = []
         for i in range(batch_size):
-            meta = metadata[i]
-            spatial_dims = [meta[f"orig_{ax}_size"] for ax in ax_names]
+            spatial_dims = [metadata[f"orig_{ax}_size"][i] for ax in ax_names]
             orig_image_sizes.append(tuple(spatial_dims))
     else:
         orig_image_sizes = image_sizes

@@ -72,6 +72,8 @@ class MaskDINO(nn.Module):
         conv_inplane: int,
         use_deform_attention: bool,
         n_points: int,
+        n_levels: int,
+        dtype: str,
         deform_num_heads: int,
         drop_path_rate: float,
         init_values: float,
@@ -110,6 +112,7 @@ class MaskDINO(nn.Module):
             self.adapter = EncoderAdapter(
                 input_shape=input_shape,
                 dim=dim,
+                dtype=dtype,
                 backbone_embed_dim=backbone_embed_dim,
                 input_format=input_format,
                 patch_shape=patch_shape,
@@ -118,6 +121,7 @@ class MaskDINO(nn.Module):
                 conv_inplane=conv_inplane,
                 use_deform_attention=use_deform_attention,
                 n_points=n_points,
+                n_levels=n_levels,
                 deform_num_heads=deform_num_heads,
                 drop_path_rate=drop_path_rate,
                 init_values=init_values,
@@ -165,6 +169,7 @@ class MaskDINO(nn.Module):
             conv_dim=conv_dim,
             mask_dim=mask_dim,
             norm=norm,
+            dtype=dtype
         )
 
         decoder = MaskDINODecoder(
@@ -191,6 +196,7 @@ class MaskDINO(nn.Module):
             return_intermediates_decoder=return_intermediates_decoder,
             query_dim=query_dim,
             share_decoder_layers=share_decoder_layers,
+            dtype=dtype
         )
 
         self.segmentation_head = MaskDINOHead(
@@ -258,10 +264,10 @@ class MaskDINO(nn.Module):
         else:
             features_dict = features
 
-        outputs, denoise_predictions = self.segmentation_head(features_dict, targets=data_sample['metainfo']['targets'])
+        outputs, denoise_predictions = self.segmentation_head(features_dict, targets=data_sample['metainfo']['targets'][0])
 
         # bipartite matching-based loss
-        losses = self.criterion(outputs, data_sample['metainfo']['targets'], denoise_predictions)
+        losses = self.criterion(outputs, data_sample['metainfo']['targets'][0], denoise_predictions)
 
         for loss in list(losses.keys()):
             if loss in self.criterion.loss_weight_dict:

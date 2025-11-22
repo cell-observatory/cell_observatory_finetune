@@ -19,3 +19,4 @@ seed: ${seed}
 ideal_psf_path: null
 na_mask_thresholds: null
 resize_na_masks: null
+mask_idx: -1

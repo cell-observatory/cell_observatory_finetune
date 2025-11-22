@@ -9,6 +9,8 @@ import fvcore.nn.weight_init as weight_init
 import torch
 from torch import nn
 
+from cell_observatory_platform.data.data_types import TORCH_DTYPES
+
 from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio
 from cell_observatory_finetune.models.layers.layers import Conv3d, MLP, inverse_sigmoid
 from cell_observatory_finetune.data.structures import box_xyzxyz_to_cxcyczwhd, bitmask_to_boxes, masks_to_boxes_v2
@@ -44,6 +46,7 @@ class MaskDINODecoder(nn.Module):
             return_intermediates_decoder: bool = True,
             query_dim: int = 6,
             share_decoder_layers: bool = False,
+            dtype: str = "bfloat16"
     ):
         """
         Args:
@@ -70,6 +73,8 @@ class MaskDINODecoder(nn.Module):
         """
         super().__init__()
         
+        self.dtype = TORCH_DTYPES[dtype].value if isinstance(dtype, str) else dtype
+
         # flag to support prediction from initial matching and denoising outputs
         self.with_initial_prediction = with_initial_prediction 
         self.initialize_box_type = initialize_box_type
@@ -287,7 +292,7 @@ class MaskDINODecoder(nn.Module):
                 total_denoise_bboxes_copy = total_denoise_bboxes_copy.clamp(min=0.0, max=1.0) # clamp new bbox coordinates to [0,1] range
 
             # embed/encode noised labels and bboxes
-            total_denoise_label_embeddings = self.label_embeddings(total_denoise_labels.long().cuda())
+            total_denoise_label_embeddings = self.label_embeddings(total_denoise_labels.long().cuda()).to(self.dtype)
             # encode bboxes into sigmoid space
             total_denoise_bboxes_encoded = inverse_sigmoid(total_denoise_bboxes_copy) 
             
@@ -297,7 +302,7 @@ class MaskDINODecoder(nn.Module):
 
             # pad the number of denoise queries (labels per image * num queries per label)
             # per image to the same size
-            denoise_labels_padded = torch.zeros(max_query_pad_size, self.hidden_dim).cuda()
+            denoise_labels_padded = torch.zeros(max_query_pad_size, self.hidden_dim, dtype=self.dtype).cuda()
             denoise_bboxes_padded = torch.zeros(max_query_pad_size, 6).cuda()
 
             # combine the denoised labels and bboxes with target queries/bbox embeddings if they exist
