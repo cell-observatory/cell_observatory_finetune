@@ -18,7 +18,7 @@ import torch.nn.functional as F
 from torch.nn.init import constant_, normal_, xavier_uniform_
 
 from cell_observatory_finetune.models.layers.layers import LayerNorm3D
-from cell_observatory_finetune.models.layers,utils import compute_unmasked_ratio
+from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio
 from cell_observatory_finetune.data.structures import box_xyzxyz_to_cxcyczwhd, delta2bbox
 # from cell_observatory_finetune.models.heads.global_ape_decoder import build_global_ape_decoder
 from cell_observatory_finetune.models.heads.global_rpe_decomp_decoder import build_global_rpe_decomp_decoder
@@ -62,6 +62,7 @@ class Transformer(nn.Module):
             # self.decoder = build_global_ape_decoder(global_decoder_args)
         elif decoder_type == "global_rpe_decomp":
             self.decoder = build_global_rpe_decomp_decoder(global_decoder_args)
+            assert two_stage == True, "global_rpe_decomp decoder only supports two_stage=True"
         else:
             raise NotImplementedError
 
@@ -74,7 +75,9 @@ class Transformer(nn.Module):
             self.pos_trans = nn.Linear(in_dim, 2 * self.d_model)
             self.pos_trans_norm = nn.LayerNorm(2 * self.d_model)
         else:
-            # TODO: check if this is correct
+            # FIXME: not currently excercised and not compatible with rpe_decomp decoder
+            #        which is the only decoder that is currently implemented
+            #        so perhaps we should remove this branch altogether
             self.reference_points = nn.Linear(d_model, 3)
 
         self.mixed_selection = mixed_selection
@@ -209,7 +212,7 @@ class Transformer(nn.Module):
             # valid_*.unsqueeze(-1): [N_, 1, 1]
             # cat along dim=1: [N_, 3, 1]
             # view -> [N_, 1, 1, 3]
-            scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1), valid_D.unsqueeze(-1)], 1).view(N_, 1, 1, 3)
+            scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1), valid_D.unsqueeze(-1)], 1).view(N_, 1, 1, 1, 3)
             # grid.unsqueeze(0): [1, D_, H_, W_, 3]
             # expand -> [N_, D_, H_, W_, 3]
             # scale -> [N_, 1, 1, 3], broadcast over (D_, H_, W_)
@@ -267,12 +270,12 @@ class Transformer(nn.Module):
         )
 
         # HACK: two-stage Deformable DETR
+        assert hasattr(self.decoder, "class_embed"), "Ensure that plainDETR has initial decoder class_embed!"
         enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
         enc_outputs_delta = None
         enc_outputs_coord_unact = self.decoder.bbox_embed[self.decoder.num_layers](output_memory) + output_proposals
 
-        topk = self.two_stage_num_proposals
-        topk_proposals = torch.topk(enc_outputs_class[..., 0], topk, dim=1)[1]
+        topk_proposals = torch.topk(enc_outputs_class[..., 0], self.two_stage_num_proposals, dim=1)[1]
         topk_coords_unact = torch.gather(enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 6))
         topk_coords_unact = topk_coords_unact.detach()
         reference_points = topk_coords_unact.sigmoid()
@@ -387,76 +390,113 @@ class Transformer(nn.Module):
         return hs, init_reference_out, inter_references_out, None, None, None, None, None
 
 
-# class TransformerReParam(Transformer):
-#     def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes):
-#         if self.proposal_feature_levels > 1:
-#             memory, memory_padding_mask, spatial_shapes = self.expand_encoder_output(
-#                 memory, memory_padding_mask, spatial_shapes
-#             )
-#         N_, S_, C_ = memory.shape
-#         # base_scale = 4.0
-#         proposals = []
-#         _cur = 0
-#         for lvl, (H_, W_) in enumerate(spatial_shapes):
-#             stride = self.proposal_tgt_strides[lvl]
+class TransformerReParam(Transformer):
+    def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes):
+        if self.proposal_feature_levels > 1:
+            memory, memory_padding_mask, spatial_shapes = self.expand_encoder_output(
+                memory, memory_padding_mask, spatial_shapes
+            )
+        N_, S_, C_ = memory.shape
 
-#             grid_y, grid_x = torch.meshgrid(
-#                 torch.linspace(0, H_ - 1, H_, dtype=torch.float32, device=memory.device),
-#                 torch.linspace(0, W_ - 1, W_, dtype=torch.float32, device=memory.device),
-#             )
-#             grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)
-#             grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) * stride
-#             wh = torch.ones_like(grid) * self.proposal_min_size * (2.0**lvl)
-#             proposal = torch.cat((grid, wh), -1).view(N_, -1, 4)
-#             proposals.append(proposal)
-#             _cur += H_ * W_
+        # base_scale = 4.0
+        proposals, _cur = [], 0
+        for lvl, (D_, H_, W_) in enumerate(spatial_shapes):
+            stride = self.proposal_tgt_strides[lvl]
+
+            # grid_z: [D_, H_, W_], grid_y: [D_, H_, W_], grid_x: [D_, H_, W_]
+            grid_z, grid_y, grid_x = torch.meshgrid(
+                torch.linspace(0, D_ - 1, D_, dtype=torch.float32, device=memory.device),
+                torch.linspace(0, H_ - 1, H_, dtype=torch.float32, device=memory.device),
+                torch.linspace(0, W_ - 1, W_, dtype=torch.float32, device=memory.device),
+            )
+            # grid: [D_, H_, W_, 3] -> [N_, D_, H_, W_, 3]
+            grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1), grid_z.unsqueeze(-1)], -1)
+            grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1, -1) + 0.5) * stride
+            # whd: [N_, D_, H_, W_, 3]
+            whd = torch.ones_like(grid) * self.proposal_min_size * (2.0**lvl)
+            # proposal: [N_, D_*H_*W_, 6] (x,y,z,w,h,d)
+            proposal = torch.cat((grid, whd), -1).view(N_, -1, 6)
+            proposals.append(proposal)
+            _cur += H_ * W_ * D_
         
-#         output_proposals = torch.cat(proposals, 1)
+        # output_proposals: [N_, \sum{D*H*W}, 6]
+        output_proposals = torch.cat(proposals, 1)
 
-#         H_, W_ = spatial_shapes[0]
-#         stride = self.proposal_tgt_strides[0]
-#         mask_flatten_ = memory_padding_mask[:, : H_ * W_].view(N_, H_, W_, 1)
-#         valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1, keepdim=True) * stride
-#         valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1, keepdim=True) * stride
-#         img_size = torch.cat([valid_W, valid_H, valid_W, valid_H], dim=-1)
-#         img_size = img_size.unsqueeze(1)  # [BS, 1, 4]
+        D_, H_, W_ = spatial_shapes[0]
+        stride = self.proposal_tgt_strides[0]
+        # mask_flatten: [N_, D_*H_*W_] -> [N_, D_, H_, W_, 1]
+        mask_flatten_ = memory_padding_mask[:, : D_ * H_ * W_].view(N_, D_, H_, W_, 1)
 
-#         output_proposals_valid = ((output_proposals > 0.01 * img_size) & (output_proposals < 0.99 * img_size)).all(
-#             -1, keepdim=True
-#         )
-#         output_proposals = output_proposals.masked_fill(
-#             memory_padding_mask.unsqueeze(-1).repeat(1, 1, 1), max(H_, W_) * stride
-#         )
-#         output_proposals = output_proposals.masked_fill(~output_proposals_valid, max(H_, W_) * stride)
+        # valid_*: [N_] — any valid pixel in each i-slice
+        valid_D = (~mask_flatten_).any(dim=(2,3)).sum(dim=1) # [B] — any valid pixel in each D-slice
+        valid_H = (~mask_flatten_).any(dim=(1,3)).sum(dim=1) # [B] — any valid pixel in each H-slice
+        valid_W = (~mask_flatten_).any(dim=(1,2)).sum(dim=1) # [B] — any valid pixel in each W-slice
+        
+        # img_size: [BS, 1, 6] (W, H, D, W, H, D)
+        img_size = torch.cat([valid_W, valid_H, valid_D, valid_W, valid_H, valid_D], dim=-1).unsqueeze(1)
 
-#         output_memory = memory
-#         output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float(0))
-#         output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
-#         output_memory = self.enc_output_norm(self.enc_output(output_memory))
+        # output_proposals_valid: [N_, \sum{D*H*W}, 1]
+        output_proposals_valid = ((output_proposals > 0.01 * img_size) & (output_proposals < 0.99 * img_size)).all(
+            -1, keepdim=True
+        )
+        # output_proposals: [N_, \sum{D*H*W}, 6] broadcast against 
+        # memory_padding_mask: [N_, \sum{D*H*W}, 1]
+        output_proposals = output_proposals.masked_fill(
+            memory_padding_mask.unsqueeze(-1), max(D_, H_, W_) * stride
+        )
+        output_proposals = output_proposals.masked_fill(~output_proposals_valid, max(D_, H_, W_) * stride)
 
-#         max_shape = (valid_H[:, None, :], valid_W[:, None, :])
-#         return output_memory, output_proposals, max_shape
+        # output_memory: [N_, \sum{D*H*W}, C] broadcast against
+        # memory_padding_mask: [N_, \sum{D*H*W}, 1] OR output_proposals_valid: [N_, \sum{D*H*W}, 1]
+        output_memory = memory
+        output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float(0))
+        output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))
+        output_memory = self.enc_output_norm(self.enc_output(output_memory))
 
-#     def get_reference_points(self, memory, mask_flatten, spatial_shapes):
-#         output_memory, output_proposals, max_shape = self.gen_encoder_output_proposals(
-#             memory, mask_flatten, spatial_shapes
-#         )
+        max_shape = (valid_D[:, None, :], valid_H[:, None, :], valid_W[:, None, :])
+        return output_memory, output_proposals, max_shape
 
-#         # HACK: two-stage Deformable DETR
-#         enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
-#         enc_outputs_delta = self.decoder.bbox_embed[self.decoder.num_layers](output_memory)
-#         enc_outputs_coord_unact = box_xyxy_to_cxcywh(delta2bbox(output_proposals, enc_outputs_delta, max_shape))
+    def get_reference_points(self, memory, mask_flatten, spatial_shapes):
+        output_memory, output_proposals, max_shape = self.gen_encoder_output_proposals(
+            memory, mask_flatten, spatial_shapes
+        )
 
-#         topk = self.two_stage_num_proposals
-#         topk_proposals = torch.topk(enc_outputs_class[..., 0], topk, dim=1)[1]
-#         topk_coords_unact = torch.gather(enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 4))
-#         topk_coords_unact = topk_coords_unact.detach()
-#         reference_points = topk_coords_unact
-#         return (
-#             reference_points,
-#             max_shape,
-#             enc_outputs_class,
-#             enc_outputs_coord_unact,
-#             enc_outputs_delta,
-#             output_proposals,
-#         )
+        # HACK: two-stage Deformable DETR
+        assert hasattr(self.decoder, "class_embed"), "Ensure that plainDETR has initial decoder class_embed!"
+        enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
+        enc_outputs_delta = self.decoder.bbox_embed[self.decoder.num_layers](output_memory)
+        enc_outputs_coord_unact = box_xyzxyz_to_cxcyczwhd(delta2bbox(output_proposals, enc_outputs_delta, max_shape))
+
+        topk_proposals = torch.topk(enc_outputs_class[..., 0], self.two_stage_num_proposals, dim=1)[1]
+        topk_coords_unact = torch.gather(enc_outputs_coord_unact, 1, topk_proposals.unsqueeze(-1).repeat(1, 1, 6))
+        topk_coords_unact = topk_coords_unact.detach()
+        reference_points = topk_coords_unact
+        return (
+            reference_points,
+            max_shape,
+            enc_outputs_class,
+            enc_outputs_coord_unact,
+            enc_outputs_delta,
+            output_proposals,
+        )
+
+
+def build_transformer(args):
+    model_class = Transformer if (not args.reparam) else TransformerReParam
+    return model_class(
+        d_model=args.hidden_dim,
+        nhead=args.nheads,
+        num_feature_levels=args.num_feature_levels,
+        two_stage=args.two_stage,
+        two_stage_num_proposals=args.num_queries_one2one + args.num_queries_one2many,
+        mixed_selection=args.mixed_selection,
+        norm_type=args.norm_type,
+        decoder_type=args.decoder_type,
+        proposal_feature_levels=args.proposal_feature_levels,
+        proposal_in_stride=args.proposal_in_stride,
+        proposal_tgt_strides=args.proposal_tgt_strides,
+        proposal_min_size=args.proposal_min_size,
+        # transformer_encoder
+        add_transformer_encoder=args.add_transformer_encoder,
+        num_encoder_layers=args.num_encoder_layers,
+    )

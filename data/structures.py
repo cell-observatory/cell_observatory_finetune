@@ -1,3 +1,4 @@
+import math
 from typing import Tuple
 
 import torch
@@ -10,7 +11,7 @@ def delta2bbox(
     proposals, 
     deltas, 
     max_shape=None, 
-    wh_ratio_clip=16 / 1000, 
+    whd_ratio_clip=16 / 1000, 
     clip_border=True, 
     add_ctr_clamp=False, 
     ctr_clamp=32
@@ -32,19 +33,18 @@ def delta2bbox(
 
     gxyz = pxyz + dxyz_whd
     gwhd = pwhd * whd.exp()
+    # [N, 3]
     x1y1z1 = gxyz - (gwhd * 0.5)
     x2y2z2 = gxyz + (gwhd * 0.5)
+    # [N, 6]
     bboxes = torch.cat([x1y1z1, x2y2z2], dim=-1)
-    if clip_border and max_shape is not None:
-        D, H, W = max_shape
-        # x coordinates (0 and 3)
-        bboxes[..., 0::3].clamp_(min=0, max=W)
-        # y coordinates (1 and 4)
-        bboxes[..., 1::3].clamp_(min=0, max=H)
-        # z coordinates (2 and 5)
-        bboxes[..., 2::3].clamp_(min=0, max=D)
-    return bboxes
 
+    if clip_border and max_shape is not None:
+        bboxes[..., 0::3].clamp_(min=0).clamp_(max=max_shape[1])
+        bboxes[..., 1::3].clamp_(min=0).clamp_(max=max_shape[0])
+        bboxes[..., 2::3].clamp_(min=0).clamp_(max=max_shape[2])
+
+    return bboxes
 
 def bbox2delta(proposals, 
             gt, 

@@ -502,3 +502,5 @@ def test_detr_set_loss_with_aux_and_intermediate(monkeypatch):
     for key in ["loss_ce", "loss_ce_0", "loss_ce_intermediate"]:
         assert losses[key].ndim == 0
         assert torch.isfinite(losses[key])
+
+
