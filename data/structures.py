@@ -6,16 +6,96 @@ from torch import Tensor
 from cell_observatory_finetune.models.ops.roi_align_nd import RoIAlign3DFunction
 
 
+def delta2bbox(
+    proposals, 
+    deltas, 
+    max_shape=None, 
+    wh_ratio_clip=16 / 1000, 
+    clip_border=True, 
+    add_ctr_clamp=False, 
+    ctr_clamp=32
+):
+    dxyz = deltas[..., :3]
+    whd = deltas[..., 3:]
+
+    pxyz = proposals[..., :3]
+    pwhd = proposals[..., 3:]
+
+    dxyz_whd = pwhd * dxyz
+
+    max_ratio = abs(math.log(whd_ratio_clip))
+    if add_ctr_clamp:
+        dxyz_whd = torch.clamp(dxyz_whd, max=ctr_clamp, min=-ctr_clamp)
+        whd = torch.clamp(whd, max=max_ratio)
+    else:
+        whd = whd.clamp(min=-max_ratio, max= max_ratio)
+
+    gxyz = pxyz + dxyz_whd
+    gwhd = pwhd * whd.exp()
+    x1y1z1 = gxyz - (gwhd * 0.5)
+    x2y2z2 = gxyz + (gwhd * 0.5)
+    bboxes = torch.cat([x1y1z1, x2y2z2], dim=-1)
+    if clip_border and max_shape is not None:
+        D, H, W = max_shape
+        # x coordinates (0 and 3)
+        bboxes[..., 0::3].clamp_(min=0, max=W)
+        # y coordinates (1 and 4)
+        bboxes[..., 1::3].clamp_(min=0, max=H)
+        # z coordinates (2 and 5)
+        bboxes[..., 2::3].clamp_(min=0, max=D)
+    return bboxes
+
+
+def bbox2delta(proposals, 
+            gt, 
+            means=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 
+            stds=(1.0, 1.0, 1.0, 1.0, 1.0, 1.0)
+):
+    # hack for matcher
+    if proposals.size() != gt.size():
+        proposals = proposals[:, None]
+        gt = gt[None]
+
+    proposals = proposals.float()
+    gt = gt.float()
+    px, py, pz, pw, ph, pd = proposals.unbind(-1)
+    gx, gy, gz, gw, gh, gd = gt.unbind(-1)
+
+    dx = (gx - px) / (pw + 0.1)
+    dy = (gy - py) / (ph + 0.1)
+    dz = (gz - pz) / (pd + 0.1)
+    dw = torch.log(gw / (pw + 0.1))
+    dh = torch.log(gh / (ph + 0.1))
+    dd = torch.log(gd / (pd + 0.1))
+    deltas = torch.stack([dx, dy, dz, dw, dh, dd], dim=-1)
+
+    # avoid unnecessary sync point if not needed
+    if means != (0.0, 0.0, 0.0, 0.0, 0.0, 0.0) \
+        or stds != (1.0, 1.0, 1.0, 1.0, 1.0, 1.0):
+        means = deltas.new_tensor(means).unsqueeze(0)
+        stds = deltas.new_tensor(stds).unsqueeze(0)
+        deltas = deltas.sub_(means).div_(stds)
+
+    return deltas
+
+
 def convert_bbox_format(bboxes, bbox_input_format, bbox_output_format):
     """
     Convert bounding boxes from one format to another.
     Supported formats: 'cxcyczwhd', 'xyzxyz'
     """
+    bbox_input_format = bbox_input_format.lower()
+    bbox_output_format = bbox_output_format.lower()
+
     if bbox_input_format == bbox_output_format:
         return bboxes
     if bbox_input_format == 'cxcyczwhd' and bbox_output_format == 'xyzxyz':
         return box_cxcyczwhd_to_xyzxyz(bboxes)
     elif bbox_input_format == 'xyzxyz' and bbox_output_format == 'cxcyczwhd':
+        return box_xyzxyz_to_cxcyczwhd(bboxes)
+    elif bbox_input_format == 'zyxzyx' and bbox_output_format == 'cxcyczwhd':
+        # zyxzyx -> xyzxyz -> cxcyczwhd
+        bboxes = bboxes[:, [2, 1, 0, 5, 4, 3]]
         return box_xyzxyz_to_cxcyczwhd(bboxes)
     else:
         raise ValueError(f"Unsupported bbox format conversion from {bbox_input_format} to {bbox_output_format}")

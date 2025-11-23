@@ -12,6 +12,21 @@ import torch.nn.functional as F
 from cell_observatory_platform.models.patch_embeddings import calc_num_patches
 
 
+class LayerNorm3D(nn.Module):
+    def __init__(self, normalized_shape, norm_layer=nn.LayerNorm):
+        super().__init__()
+        self.ln = norm_layer(normalized_shape) if norm_layer is not None else nn.Identity()
+
+    def forward(self, x):
+        """
+        x: N C D H W
+        """
+        x = x.permute(0, 2, 3, 4, 1)
+        x = self.ln(x)
+        x = x.permute(0, 4, 1, 2, 3)
+        return x
+
+
 class MLP(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
         super().__init__()

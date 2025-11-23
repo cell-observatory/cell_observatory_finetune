@@ -9,7 +9,12 @@ from torch import nn
 import torch.nn.functional as F
 
 from cell_observatory_finetune.models.layers.utils import batch_tensors
-from cell_observatory_finetune.data.structures import generalized_box_iou, box_cxcyczwhd_to_xyzxyz
+from cell_observatory_finetune.data.structures import (
+    generalized_box_iou, 
+    box_cxcyczwhd_to_xyzxyz, 
+    box_xyzxyz_to_cxcyczwhd, 
+    bbox2delta
+)
 
 from cell_observatory_finetune.models.layers.utils import point_sample, get_uncertain_point_coords_with_randomness
 
@@ -289,7 +294,6 @@ class DETR_Set_Loss(nn.Module):
         target_boxes = torch.cat([target["boxes"][matched_target_idx] for target, (_, matched_target_idx) in zip(targets, indices)], dim=0)
 
         losses = {}
-
         # L1 loss over bounding box corordinates, normalized by nr. of boxes
         loss_bbox = F.l1_loss(source_boxes, target_boxes, reduction='none')
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
@@ -518,6 +522,271 @@ class DETR_Set_Loss(nn.Module):
                 losses.update(extra_losses)
 
     
+        return losses
+
+
+class PlainDETR_Set_Loss(nn.Module):
+    """ 
+    Computes the loss for PlainDETR.
+    The process happens in two steps:
+        1) we compute hungarian assignment between ground truth boxes and the outputs of the model
+        2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
+    """
+
+    def __init__(self, 
+                num_classes, 
+                matcher, 
+                weight_dict, 
+                losses, 
+                focal_alpha=0.25, 
+                reparam=False
+    ):
+        """
+        Parameters:
+            num_classes: number of object categories, omitting the special no-object category
+            matcher: module able to compute a matching between targets and proposals
+            weight_dict: dict containing as key the names of the losses and as values their relative weight.
+            losses: list of all the losses to be applied. See get_loss for list of available losses.
+            focal_alpha: alpha in Focal Loss
+            loss_bbox_type: how to perform loss_bbox
+        """
+        super().__init__()
+
+        self.num_classes = num_classes
+        self.matcher = matcher
+        self.weight_dict = weight_dict
+        self.losses = losses
+        self.focal_alpha = focal_alpha
+        self.loss_bbox_type = 'l1' if (not reparam) else 'reparam'
+
+    def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
+        """
+        Classification loss
+        """
+        assert "pred_logits" in outputs, "Predictions must contain pred_logits"
+        src_logits = outputs["pred_logits"]
+
+        idx = self._get_src_permutation_idx(indices)
+        target_classes_o = torch.cat(
+            [t["labels"][J] for t, (_, J) in zip(targets, indices)]
+        )
+        # target_classes: [B, Q] with values in [0, num_classes] 
+        # where num_classes is no-object class
+        target_classes = torch.full(
+            src_logits.shape[:2], # [B, Q]
+            self.num_classes, # fill with no-object class
+            dtype=torch.int64,
+            device=src_logits.device,
+        )
+        target_classes[idx] = target_classes_o
+
+        # target_classes_onehot: [B, Q, num_classes+1]
+        target_classes_onehot = torch.zeros(
+            [src_logits.shape[0], src_logits.shape[1], src_logits.shape[2] + 1],
+            dtype=src_logits.dtype,
+            layout=src_logits.layout,
+            device=src_logits.device,
+        )
+        # scatter_(dim=2, index, 1) writes a 1 at the appropriate 
+        # class channel, 0 elsewhere
+        target_classes_onehot.scatter_(2, target_classes.unsqueeze(-1), 1)
+
+        # focal loss is applied only over the real classes, not the no-object class
+        target_classes_onehot = target_classes_onehot[:, :, :-1]
+        loss_ce = (
+            sigmoid_focal_loss(
+                src_logits,
+                target_classes_onehot,
+                num_boxes,
+                alpha=self.focal_alpha,
+                gamma=2,
+            ) * src_logits.shape[1]
+        )
+        losses = {"loss_ce": loss_ce}
+        return losses
+
+    @torch.no_grad()
+    def loss_cardinality(self, outputs, targets, indices, num_boxes):
+        """ 
+        Compute the cardinality error, ie the absolute error in the number of predicted non-empty boxes.
+        For logging purposes only. It doesn't propagate gradients.
+        """
+        pred_logits = outputs["pred_logits"]
+        tgt_lengths = torch.as_tensor(
+            [len(v["labels"]) for v in targets], device=pred_logits.device
+        )
+        # Count the number of predictions that are NOT "no-object" (which is the last class)
+        card_pred = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
+        card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
+        losses = {"cardinality_error": card_err}
+        return losses
+
+    def loss_boxes(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the bounding boxes: L1 regression loss and the GIoU loss.
+           Targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 6].
+           The target boxes are expected in format (center_x, center_y, center_z, h, w, d), normalized by the image size.
+        """
+        assert "pred_boxes" in outputs, "Predictions must contain pred_boxes"
+        
+        idx = self._get_src_permutation_idx(indices)
+        src_boxes = outputs["pred_boxes"][idx]
+        target_boxes = torch.cat(
+            [t["boxes"][i] for t, (_, i) in zip(targets, indices)], dim=0
+        )
+
+        if self.loss_bbox_type == "l1":
+            loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction="none")
+        elif self.loss_bbox_type == "reparam":
+            src_deltas = outputs["pred_deltas"][idx]
+            src_boxes_old = outputs["pred_boxes_old"][idx]
+            target_deltas = bbox2delta(src_boxes_old, target_boxes)
+            loss_bbox = F.l1_loss(src_deltas, target_deltas, reduction="none")
+        else:
+            raise NotImplementedError
+
+        losses = {}
+        losses["loss_bbox"] = loss_bbox.sum() / num_boxes
+        loss_giou = 1 - torch.diag(
+            generalized_box_iou(
+                box_cxcyczwhd_to_xyzxyz(src_boxes),
+                box_cxcyczwhd_to_xyzxyz(target_boxes),
+            )
+        )
+        losses["loss_giou"] = loss_giou.sum() / num_boxes
+        return losses
+
+    def loss_masks(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the masks: the focal loss and the dice loss.
+           targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w, d]
+        """
+        assert "pred_masks" in outputs, "Predictions must contain pred_masks"
+
+        src_idx = self._get_src_permutation_idx(indices)
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+
+        source_masks = outputs["pred_masks"]
+        masks = [target["masks"] for target in targets]
+        # TODO: use valid to mask invalid areas due to padding in loss
+        target_masks, valid = batch_tensors(masks)
+        target_masks = target_masks.to(source_masks)
+
+        source_masks = source_masks[src_idx]
+        target_masks = target_masks[tgt_idx]
+
+        # upsample predictions to the target size
+        src_masks = interpolate(
+            source_masks[:, None],
+            size=target_masks.shape[-3:],
+            mode="trilinear",
+            align_corners=False,
+        )
+
+        # src_masks/target_masks: (N, D, H, W) -> (N, D*H*W)
+        src_masks = src_masks[:, 0].flatten(1)
+        target_masks = target_masks.flatten(1)
+
+        losses = {
+            "loss_mask": sigmoid_focal_loss(src_masks, target_masks, num_boxes),
+            "loss_dice": dice_loss(src_masks, target_masks, num_boxes),
+        }
+        return losses
+
+    def _get_src_permutation_idx(self, indices):
+        # permute predictions following indices
+        batch_idx = torch.cat(
+            [torch.full_like(src, i) for i, (src, _) in enumerate(indices)]
+        )
+        src_idx = torch.cat([src for (src, _) in indices])
+        return batch_idx, src_idx
+
+    def _get_tgt_permutation_idx(self, indices):
+        # permute targets following indices
+        batch_idx = torch.cat(
+            [torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)]
+        )
+        tgt_idx = torch.cat([tgt for (_, tgt) in indices])
+        return batch_idx, tgt_idx
+
+    def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
+        loss_map = {
+            "labels": self.loss_labels,
+            "cardinality": self.loss_cardinality,
+            "boxes": self.loss_boxes,
+            "masks": self.loss_masks,
+        }
+        assert loss in loss_map, f"Unknown loss: {loss}"
+        return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
+
+    def forward(self, outputs, targets):
+        """
+        Parameters:
+             outputs: dict of tensors, see the output specification of the model for the format
+             targets: list of dicts, such that len(targets) == batch_size.
+                      The expected keys in each dict depends on the losses applied, see each loss' doc
+        """
+        outputs_without_aux = {
+            k: v
+            for k, v in outputs.items()
+            if k != "aux_outputs" and k != "enc_outputs"
+        }
+
+        # matching between the outputs of the last layer and the targets
+        indices = self.matcher(outputs_without_aux, targets)
+
+        # average number of target boxes accross all nodes, for normalization purposes
+        num_boxes = sum(len(t["labels"]) for t in targets)
+        num_boxes = torch.as_tensor(
+            [num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device
+        )
+        if is_dist_avail_and_initialized():
+            torch.distributed.all_reduce(num_boxes)
+        num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
+
+        # Compute all the requested losses
+        losses = {}
+        for loss in self.losses:
+            kwargs = {}
+            losses.update(
+                self.get_loss(loss, outputs, targets, indices, num_boxes, **kwargs)
+            )
+
+        if "aux_outputs" in outputs:
+            for i, aux_outputs in enumerate(outputs["aux_outputs"]):
+                indices = self.matcher(aux_outputs, targets)
+                for loss in self.losses:
+                    if loss == "masks":
+                        # Intermediate masks losses are too costly to compute, we ignore them
+                        continue
+                    kwargs = {}
+                    if loss == "labels":
+                        # Logging is enabled only for the last layer
+                        kwargs["log"] = False
+                    l_dict = self.get_loss(
+                        loss, aux_outputs, targets, indices, num_boxes, **kwargs
+                    )
+                    l_dict = {k + f"_{i}": v for k, v in l_dict.items()}
+                    losses.update(l_dict)
+
+        if "enc_outputs" in outputs:
+            enc_outputs = outputs["enc_outputs"]
+            bin_targets = copy.deepcopy(targets)
+            for bt in bin_targets:
+                bt["labels"] = torch.zeros_like(bt["labels"])
+            indices = self.matcher(enc_outputs, bin_targets)
+            for loss in self.losses:
+                if loss == "masks":
+                    # Intermediate masks losses are too costly to compute, we ignore them.
+                    continue
+                kwargs = {}
+                if loss == "labels":
+                    # Logging is enabled only for the last layer
+                    kwargs["log"] = False
+                l_dict = self.get_loss(
+                    loss, enc_outputs, bin_targets, indices, num_boxes, **kwargs
+                )
+                l_dict = {k + "_enc": v for k, v in l_dict.items()}
+                losses.update(l_dict)
+
         return losses
 
 

@@ -1,6 +1,8 @@
+import copy
 from typing import Optional
 
 import torch
+from torch import Tensor, nn
 
 
 def get_supervised_input_data(model, inputs, mask_generator, device: Optional[torch.device] = 'cuda'):
@@ -113,3 +115,7 @@ def get_image_sizes(input_format, input_shape, batch_size, metadata):
         orig_image_sizes = image_sizes
 
     return image_sizes, orig_image_sizes
+
+
+def get_clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])

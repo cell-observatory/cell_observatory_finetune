@@ -1,5 +1,6 @@
 import time
 import ujson
+from typing import Optional
 
 import torch
 
@@ -94,6 +95,10 @@ class FinetunePreprocessor(RayPreprocessor):
                 target_shape=self.spatial_shape,
                 resize=self.resize_na_masks,
             )
+
+        if self.task == "instance_segmentation":
+            assert self.bbox_data_format is not None, "bbox_data_format must be specified for instance_segmentation task"
+            assert self.bbox_output_format is not None, "bbox_output_format must be specified for instance_segmentation task"
 
         self.patch_shape = patch_shape
         self.patch_embedding = PatchEmbedding(
@@ -237,7 +242,7 @@ class FinetunePreprocessor(RayPreprocessor):
                 input_shape=self.input_shape,
                 device=inputs.device,
             )
-
+            
             if self.bbox_data_format != self.bbox_output_format:
                 bboxes_batch = convert_bbox_format(bboxes_batch, self.bbox_data_format, self.bbox_output_format)
 
