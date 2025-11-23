@@ -3,6 +3,7 @@ Adapted from:
 https://github.com/IDEA-Research/MaskDINO/maskdino/modeling/criterion.py
 """
 
+import copy
 
 import torch
 from torch import nn
@@ -738,7 +739,7 @@ class PlainDETR_Set_Loss(nn.Module):
         num_boxes = torch.as_tensor(
             [num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device
         )
-        if is_dist_avail_and_initialized():
+        if is_torch_dist_initialized():
             torch.distributed.all_reduce(num_boxes)
         num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
 

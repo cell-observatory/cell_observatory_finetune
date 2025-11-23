@@ -307,7 +307,7 @@ def test_detr_set_loss_denoise_without_predictions(monkeypatch):
         oversample_ratio=3,
         importance_sample_ratio=0.75,
         denoise=True,
-        denoise_type="seg",
+        # denoise_type="seg",
         denoise_losses=["labels", "boxes", "masks"],
         semantic_ce_loss=True,
     ).to(device)
@@ -368,7 +368,7 @@ def test_detr_set_loss_denoise_with_predictions(monkeypatch):
         oversample_ratio=3,
         importance_sample_ratio=0.75,
         denoise=True,
-        denoise_type="seg",
+        # denoise_type="seg",
         denoise_losses=["labels", "boxes", "masks"],
         semantic_ce_loss=True,
     ).to(device)
@@ -504,3 +504,256 @@ def test_detr_set_loss_with_aux_and_intermediate(monkeypatch):
         assert torch.isfinite(losses[key])
 
 
+# -------------------------------------------------------------------------
+# PlainDETR_Set_Loss tests
+# -------------------------------------------------------------------------
+
+
+def _make_plain_detr_batch(
+    batch_size: int = 2,
+    num_queries: int = 5,
+    num_classes: int = 3,
+    num_targets_per_image: int = 2,
+    device: str = "cpu",
+):
+    """
+    Helper to build a small, consistent batch of outputs/targets/indices/num_boxes
+    for PlainDETR_Set_Loss.
+    """
+    torch.manual_seed(0)
+
+    pred_logits = torch.randn(batch_size, num_queries, num_classes, device=device)
+    pred_boxes = torch.rand(batch_size, num_queries, 6, device=device)  # cx,cy,cz,w,h,d
+
+    outputs = {
+        "pred_logits": pred_logits,
+        "pred_boxes": pred_boxes,
+    }
+
+    targets = []
+    for _ in range(batch_size):
+        labels = torch.randint(0, num_classes, (num_targets_per_image,), device=device)
+        boxes = torch.rand(num_targets_per_image, 6, device=device)
+        targets.append({"labels": labels, "boxes": boxes})
+
+    matcher = DummyMatcher()
+    indices = matcher(outputs, targets)
+
+    num_boxes = float(sum(len(t["labels"]) for t in targets))
+    return outputs, targets, indices, num_boxes
+
+
+def test_plain_detr_loss_labels_basic_cpu():
+    num_classes = 3
+    outputs, targets, indices, num_boxes = _make_plain_detr_batch(num_classes=num_classes)
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=["labels"],
+        focal_alpha=0.25,
+        reparam=False,
+    )
+
+    losses = criterion.loss_labels(outputs, targets, indices, num_boxes)
+
+    assert "loss_ce" in losses
+    v = losses["loss_ce"]
+    assert v.ndim == 0
+    assert torch.isfinite(v)
+
+
+def test_plain_detr_loss_cardinality_scalar_and_finite():
+    num_classes = 3
+    outputs, targets, indices, num_boxes = _make_plain_detr_batch(num_classes=num_classes)
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=["cardinality"],
+        focal_alpha=0.25,
+        reparam=False,
+    )
+
+    losses = criterion.loss_cardinality(outputs, targets, indices, num_boxes)
+    assert "cardinality_error" in losses
+    v = losses["cardinality_error"]
+    assert v.ndim == 0
+    assert torch.isfinite(v)
+
+
+def test_plain_detr_loss_boxes_l1_perfect_match_zero():
+    """
+    When pred_boxes == target boxes on matched indices, L1 and GIoU losses should be ~0.
+    """
+    num_classes = 3
+    batch_size = 1
+    num_queries = 4
+    num_targets_per_image = 4
+
+    outputs, targets, indices, num_boxes = _make_plain_detr_batch(
+        batch_size=batch_size,
+        num_queries=num_queries,
+        num_classes=num_classes,
+        num_targets_per_image=num_targets_per_image,
+    )
+
+    # Force perfect match on the matched queries
+    with torch.no_grad():
+        for (src_idx, tgt_idx), t in zip(indices, targets):
+            outputs["pred_boxes"][0, src_idx] = t["boxes"][tgt_idx]
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=["boxes"],
+        focal_alpha=0.25,
+        reparam=False,  # L1 mode
+    )
+
+    losses = criterion.loss_boxes(outputs, targets, indices, num_boxes)
+
+    assert "loss_bbox" in losses
+    assert "loss_giou" in losses
+    assert losses["loss_bbox"].ndim == 0
+    assert losses["loss_giou"].ndim == 0
+    assert torch.allclose(losses["loss_bbox"], torch.tensor(0.0), atol=1e-5)
+    assert torch.allclose(losses["loss_giou"], torch.tensor(0.0), atol=1e-5)
+
+
+def test_plain_detr_loss_boxes_reparam_requires_keys():
+    """
+    In reparam mode, missing pred_deltas / pred_boxes_old should raise KeyError.
+    """
+    num_classes = 3
+    outputs, targets, indices, num_boxes = _make_plain_detr_batch(num_classes=num_classes)
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=["boxes"],
+        focal_alpha=0.25,
+        reparam=True,
+    )
+
+    with pytest.raises(KeyError):
+        _ = criterion.loss_boxes(outputs, targets, indices, num_boxes)
+
+
+def test_plain_detr_loss_boxes_reparam_runs_with_required_keys():
+    num_classes = 3
+    outputs, targets, indices, num_boxes = _make_plain_detr_batch(num_classes=num_classes)
+
+    B, Q, _ = outputs["pred_boxes"].shape
+    device = outputs["pred_boxes"].device
+
+    outputs["pred_boxes_old"] = torch.rand(B, Q, 6, device=device)
+    outputs["pred_deltas"] = torch.randn(B, Q, 6, device=device)
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=["boxes"],
+        focal_alpha=0.25,
+        reparam=True,
+    )
+
+    losses = criterion.loss_boxes(outputs, targets, indices, num_boxes)
+
+    assert "loss_bbox" in losses
+    assert "loss_giou" in losses
+    assert losses["loss_bbox"].ndim == 0
+    assert losses["loss_giou"].ndim == 0
+    assert torch.isfinite(losses["loss_bbox"]).item()
+    assert torch.isfinite(losses["loss_giou"]).item()
+
+
+@pytest.mark.parametrize("loss_name,expected_key", [
+    ("labels", "loss_ce"),
+    ("boxes", "loss_bbox"),
+    ("cardinality", "cardinality_error"),
+])
+def test_plain_detr_get_loss_dispatch(loss_name, expected_key):
+    num_classes = 3
+    outputs, targets, indices, num_boxes = _make_plain_detr_batch(num_classes=num_classes)
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=[loss_name],
+        focal_alpha=0.25,
+        reparam=False,
+    )
+
+    losses = criterion.get_loss(loss_name, outputs, targets, indices, num_boxes)
+    assert expected_key in losses
+    assert losses[expected_key].ndim == 0
+    assert torch.isfinite(losses[expected_key])
+
+
+def test_plain_detr_set_loss_forward_with_aux_and_enc_outputs_cpu():
+    torch.manual_seed(0)
+
+    batch_size = 2
+    num_queries = 5
+    num_classes = 3
+
+    outputs, targets, _, _ = _make_plain_detr_batch(
+        batch_size=batch_size,
+        num_queries=num_queries,
+        num_classes=num_classes,
+        num_targets_per_image=2,
+    )
+
+    # Add aux_outputs: one aux layer with same shapes
+    aux_outputs = [{
+        "pred_logits": outputs["pred_logits"].clone(),
+        "pred_boxes": outputs["pred_boxes"].clone(),
+    }]
+    outputs["aux_outputs"] = aux_outputs
+
+    # Add enc_outputs: encoder head outputs with same shapes
+    enc_outputs = {
+        "pred_logits": outputs["pred_logits"].clone(),
+        "pred_boxes": outputs["pred_boxes"].clone(),
+    }
+    outputs["enc_outputs"] = enc_outputs
+
+    criterion = losses_mod.PlainDETR_Set_Loss(
+        num_classes=num_classes,
+        matcher=DummyMatcher(),
+        weight_dict={},
+        losses=["labels", "boxes", "cardinality"],
+        focal_alpha=0.25,
+        reparam=False,
+    )
+
+    loss_dict = criterion(outputs, targets)
+
+    # Base losses
+    assert "loss_ce" in loss_dict
+    assert "loss_bbox" in loss_dict
+    assert "loss_giou" in loss_dict
+    assert "cardinality_error" in loss_dict
+
+    # Aux losses (index 0)
+    assert "loss_ce_0" in loss_dict
+    assert "loss_bbox_0" in loss_dict
+    assert "loss_giou_0" in loss_dict
+    assert "cardinality_error_0" in loss_dict
+
+    # Encoder losses
+    assert "loss_ce_enc" in loss_dict
+    assert "loss_bbox_enc" in loss_dict
+    assert "loss_giou_enc" in loss_dict
+    assert "cardinality_error_enc" in loss_dict
+
+    for k, v in loss_dict.items():
+        assert v.ndim == 0, f"{k} is not scalar"
+        assert torch.isfinite(v), f"{k} is not finite"
