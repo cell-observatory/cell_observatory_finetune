@@ -834,3 +834,18 @@ class EncoderAdapter(nn.Module):
         f4 = self.norm4(c4)
 
         return {"1": f1, "2": f2, "3": f3, "4": f4}
+
+
+def build_adapter(adapter_args: dict):
+    input_channels = adapter_args.get("input_channels")
+    input_shape = adapter_args.get("input_shape")
+    if input_channels is not None:
+        assert adapter_args["input_format"][-1] == "C", \
+            "Input format must end with 'C' when specifying input_channels."
+        adapter_args["input_shape"] = list(input_shape)
+        adapter_args["input_shape"][-1] = input_channels
+        adapter_args["input_shape"] = tuple(adapter_args["input_shape"])
+
+    adapter_args.pop("input_channels", None)
+
+    return EncoderAdapter(**adapter_args)

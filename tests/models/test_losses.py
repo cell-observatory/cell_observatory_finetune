@@ -1,13 +1,15 @@
 import pytest
 import torch
 
-from cell_observatory_finetune.training.losses import (
-    sigmoid_focal_loss,
-    dice_loss,
+from cell_observatory_finetune.models.ops.losses import (
+    sigmoid_focal_loss, 
+    dice_loss, 
     sigmoid_ce_loss,
     batch_dice_loss,
     batch_sigmoid_ce_loss,
-    calculate_uncertainty,
+    calculate_uncertainty
+)
+from cell_observatory_finetune.training.losses import (
     DETR_Set_Loss,
 )
 import cell_observatory_finetune.training.losses as losses_mod

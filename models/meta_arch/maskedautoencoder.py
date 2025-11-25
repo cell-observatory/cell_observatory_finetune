@@ -312,12 +312,8 @@ class FinetuneMaskedAutoEncoder(nn.Module):
                 strategy=self.decoder_strategy
             )
         
-        elif self.decoder == "maskdino":
-            self.masked_decoder = None
-
-        # TODO: add support for segmentation decoders
         else:
-            raise ValueError(f"Unknown decoder type: {self.decoder}")
+            self.masked_decoder = None
 
         self.weight_init_type = weight_init_type
         init_weights(self, weight_init_type=weight_init_type)

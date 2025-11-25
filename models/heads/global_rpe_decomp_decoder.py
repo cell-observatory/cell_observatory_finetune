@@ -442,14 +442,14 @@ class GlobalDecoder(nn.Module):
 
 def build_global_rpe_decomp_decoder(args):
     decoder_layer = GlobalDecoderLayer(
-        d_model=args.hidden_dim,
+        d_model=args.rpe_hidden_dim,
         d_ffn=args.dim_feedforward,
         dropout=args.dropout,
         activation="relu",
-        n_heads=args.nheads,
+        n_heads=args.num_heads,
         norm_type=args.norm_type,
-        rpe_hidden_dim=args.decoder_rpe_hidden_dim,
-        rpe_type=args.decoder_rpe_type,
+        rpe_hidden_dim=args.rpe_hidden_dim,
+        rpe_type=args.rpe_type,
         feature_stride=args.proposal_in_stride,
         reparam=args.reparam,
     )
@@ -458,7 +458,7 @@ def build_global_rpe_decomp_decoder(args):
         num_layers=args.dec_layers,
         return_intermediate=True,
         look_forward_twice=args.look_forward_twice,
-        d_model=args.hidden_dim,
+        d_model=args.rpe_hidden_dim,
         norm_type=args.norm_type,
         reparam=args.reparam,
     )

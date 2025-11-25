@@ -244,7 +244,10 @@ class FinetunePreprocessor(RayPreprocessor):
             )
             
             if self.bbox_data_format != self.bbox_output_format:
-                bboxes_batch = convert_bbox_format(bboxes_batch, self.bbox_data_format, self.bbox_output_format)
+                bboxes_batch = [
+                    convert_bbox_format(b, self.bbox_data_format, self.bbox_output_format)
+                    for b in bboxes_batch
+                ]
 
             targets = []
             for mask_ids, bm, boxes in zip(mask_ids_batch, binary_masks_batch, bboxes_batch):
@@ -259,7 +262,7 @@ class FinetunePreprocessor(RayPreprocessor):
                     }
                 )
 
-            image_sizes, orig_image_sizes = get_image_sizes(
+            image_sizes, orig_image_sizes, padding_mask = get_image_sizes(
                 input_format=self.input_format,
                 input_shape=self.input_shape,
                 batch_size=inputs.shape[0],
@@ -267,6 +270,7 @@ class FinetunePreprocessor(RayPreprocessor):
             )
             meta["image_sizes"] = image_sizes
             meta["orig_image_sizes"] = orig_image_sizes
+            meta["padding_mask"] = padding_mask
 
         else:
             raise ValueError(f"Unknown task: {self.task}")

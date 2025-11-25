@@ -1,5 +1,5 @@
 import copy
-from typing import Optional
+from typing import List, Tuple, Dict, Any, Optional
 
 import torch
 from torch import Tensor, nn
@@ -75,46 +75,115 @@ def mask_ids_to_masks(batch_size, spatial_shape, mask_ids_batch, masks, input_fo
     return binary_masks_batch
 
 
-def get_image_sizes(input_format, input_shape, batch_size, metadata):
+def get_image_sizes(
+    input_format: str,
+    input_shape: Tuple[int, ...],
+    batch_size: int,
+    metadata: Dict[str, Any],
+    device: Optional[torch.device] = None,
+):
     """
-    Get image sizes for each sample in the batch.
+    Get image sizes and a 3D padding mask for each sample in the batch.
 
     Args:
-        input_format (str): Input format string (e.g. "TZYXC").
+        input_format (str): Input format string (e.g. "TZYXC", "ZYXC").
         input_shape (tuple): Shape of the input (no batch), matching input_format.
         batch_size (int): Number of samples in the batch.
         metadata (dict): Batch metadata; each key maps to a 1D array of
                          length `batch_size` (e.g. "y_size", "x_size", ...).
+        device (torch.device, optional): Device on which to allocate the padding
+                         mask. If None, uses CPU.
 
     Returns:
-        list[tuple], list[tuple]: (image_sizes, orig_image_sizes) for each sample.
+        image_sizes:        list[tuple], per-sample "current" sizes
+        orig_image_sizes:   list[tuple], per-sample original sizes (or image_sizes)
+        padding_mask:       torch.BoolTensor of shape [B, Z, Y, X] or [B, Y, X]
+                            True = padded voxel, False = valid voxel.
     """
     if input_format == "TZYXC":
-        ax_names = ('time', 'z', 'y', 'x')
+        ax_names = ("time", "z", "y", "x")
     elif input_format == "ZYXC":
-        ax_names = ('z', 'y', 'x')
+        ax_names = ("z", "y", "x")
     elif input_format == "TCZYX":
-        ax_names = ('time', 'channel', 'z', 'y', 'x')
+        ax_names = ("time", "channel", "z", "y", "x")
     elif input_format == "CZYX":
-        ax_names = ('channel', 'z', 'y', 'x')
+        ax_names = ("channel", "z", "y", "x")
     else:
         raise ValueError(f"Unsupported input_format: {input_format}")
 
-    image_sizes = []
+    image_sizes: List[Tuple[int, ...]] = []
     for i in range(batch_size):
-        spatial_dims = [metadata[f"{ax}_size"][i] for ax in ax_names]
+        spatial_dims = [int(metadata[f"{ax}_size"][i]) for ax in ax_names]
         image_sizes.append(tuple(spatial_dims))
 
-    # use orig_* sizes only if all of them are present
+    # use orig_* sizes only if *all* are present
     if all(f"orig_{ax}_size" in metadata for ax in ax_names):
-        orig_image_sizes = []
+        orig_image_sizes: List[Tuple[int, ...]] = []
         for i in range(batch_size):
-            spatial_dims = [metadata[f"orig_{ax}_size"][i] for ax in ax_names]
+            spatial_dims = [int(metadata[f"orig_{ax}_size"][i]) for ax in ax_names]
             orig_image_sizes.append(tuple(spatial_dims))
     else:
         orig_image_sizes = image_sizes
 
-    return image_sizes, orig_image_sizes
+    # Build a 3D padding mask [B, Z, Y, X] or [B, Y, X]
+    # We only care about spatial volume axes for DETR-style masks.
+    spatial_axes = [ax for ax in ("Z", "Y", "X") if ax in input_format]
+
+    # map axis -> full size from input_shape
+    axis_to_size = dict(zip(input_format, input_shape))
+    full_sizes = {ax: int(axis_to_size[ax]) for ax in spatial_axes}
+
+    # spatial mask shape (Z, Y, X) or (Y, X)
+    spatial_shape = tuple(full_sizes[ax] for ax in spatial_axes)
+    if device is None:
+        device = torch.device("cpu")
+
+    padding_mask = torch.zeros(
+        (batch_size, *spatial_shape),
+        dtype=torch.bool,
+        device=device,
+    )
+
+    # metadata keys for sizes: z_size, y_size, x_size
+    size_keys = {ax: f"{ax.lower()}_size" for ax in spatial_axes}
+
+    for b in range(batch_size):
+        # actual sizes along each spatial axis (default: full size if missing)
+        actual = {}
+        for ax in spatial_axes:
+            key = size_keys[ax]
+            if key in metadata:
+                actual[ax] = int(metadata[key][b])
+            else:
+                actual[ax] = full_sizes[ax]
+
+        # Mark padded voxels as True
+        # We want: padded if index >= actual[ax] along ANY spatial axis.
+        if spatial_axes == ["Z", "Y", "X"]:
+            Z_full, Y_full, X_full = full_sizes["Z"], full_sizes["Y"], full_sizes["X"]
+            z_lim, y_lim, x_lim = actual["Z"], actual["Y"], actual["X"]
+
+            if z_lim < Z_full:
+                padding_mask[b, z_lim:, :, :] = True
+            if y_lim < Y_full:
+                padding_mask[b, :, y_lim:, :] = True
+            if x_lim < X_full:
+                padding_mask[b, :, :, x_lim:] = True
+
+        elif spatial_axes == ["Y", "X"]:
+            Y_full, X_full = full_sizes["Y"], full_sizes["X"]
+            y_lim, x_lim = actual["Y"], actual["X"]
+
+            if y_lim < Y_full:
+                padding_mask[b, y_lim:, :] = True
+            if x_lim < X_full:
+                padding_mask[b, :, x_lim:] = True
+
+        else:
+            # If you ever support other combos, extend here.
+            raise ValueError(f"Unsupported spatial_axes combination: {spatial_axes}")
+
+    return image_sizes, orig_image_sizes, padding_mask
 
 
 def get_clones(module, N):

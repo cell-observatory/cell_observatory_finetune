@@ -11,8 +11,11 @@ from torch import nn
 from torch.amp import autocast
 
 from cell_observatory_finetune.models.layers.utils import point_sample
-from cell_observatory_finetune.training.losses import batch_sigmoid_ce_loss, batch_dice_loss
-from cell_observatory_finetune.data.structures import generalized_box_iou, box_cxcyczwhd_to_xyzxyz
+from cell_observatory_finetune.models.ops.losses import (
+    batch_dice_loss,
+    batch_sigmoid_ce_loss,
+)
+from cell_observatory_finetune.data.structures import generalized_box_iou, box_cxcyczwhd_to_xyzxyz, bbox2delta
 
 
 class HungarianMatcher(nn.Module):
@@ -146,3 +149,64 @@ class HungarianMatcher(nn.Module):
             (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
             for i, j in matched_masks
         ]
+
+
+class PlainDETRHungarianMatcher(nn.Module):
+    def __init__(self, cost_class: float, cost_bbox: float, cost_giou: float, reparam: bool):
+        super().__init__()
+        self.cost_class = cost_class
+        self.cost_bbox = cost_bbox
+        self.cost_giou = cost_giou
+        self.reparam = reparam
+
+    @torch.no_grad()
+    def forward(self, outputs, targets):
+        bs, num_queries = outputs["pred_logits"].shape[:2]
+        out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
+        out_bbox = outputs["pred_boxes"].flatten(0, 1)
+
+        tgt_ids = torch.cat([v["labels"] for v in targets])
+        tgt_bbox = torch.cat([v["boxes"] for v in targets])
+
+        # focal class cost (same as official)
+        alpha, gamma = 0.25, 2.0
+        neg = (1 - alpha) * (out_prob ** gamma) * (-(1 - out_prob + 1e-8).log())
+        pos = alpha * ((1 - out_prob) ** gamma) * (-(out_prob + 1e-8).log())
+        cost_class = pos[:, tgt_ids] - neg[:, tgt_ids]
+
+        # bbox cost
+        if self.reparam:
+            out_delta = outputs["pred_deltas"].flatten(0, 1)
+            out_bbox_old = outputs["pred_boxes_old"].flatten(0, 1)
+            tgt_delta = bbox2delta(out_bbox_old, tgt_bbox)
+            cost_bbox = torch.cdist(out_delta[:, None], tgt_delta, p=1).squeeze(1)
+        else:
+            cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
+
+        cost_giou = -generalized_box_iou(
+            box_cxcyczwhd_to_xyzxyz(out_bbox),
+            box_cxcyczwhd_to_xyzxyz(tgt_bbox),
+        )
+
+        C = (
+            self.cost_bbox * cost_bbox
+            + self.cost_class * cost_class
+            + self.cost_giou * cost_giou
+        )
+        C = C.view(bs, num_queries, -1).cpu()
+
+        sizes = [len(v["boxes"]) for v in targets]
+        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+        return [
+            (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
+            for i, j in indices
+        ]
+
+
+def build_plain_detr_matcher(args):
+    return PlainDETRHungarianMatcher(
+        cost_class=args.cost_class,
+        cost_bbox=args.cost_bbox,
+        cost_giou=args.cost_giou,
+        reparam=(getattr(args, "cost_bbox_type", "l1") == "reparam"),
+    )

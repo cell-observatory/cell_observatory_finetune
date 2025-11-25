@@ -15,15 +15,19 @@ Adapted from:
 """
 
 import math
+import copy
+from typing import List, Dict
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 
 from cell_observatory_finetune.training.helpers import get_clones
-from cell_observatory_finetune.models.layers.layers import inverse_sigmoid
+from cell_observatory_finetune.models.layers.layers import inverse_sigmoid, MLP
+from cell_observatory_finetune.models.layers.positional_encodings import PositionalEmbeddingSinCos
 
-from cell_observatory_finetune.models.heads.plain_detr_backbone import build_backbone
+from cell_observatory_finetune.training.losses import build_plainDETR_Set_Loss
+from cell_observatory_finetune.models.heads.plain_detr_backbone import build_backbone_wrapper
 from cell_observatory_finetune.models.heads.plain_detr_transformer import build_transformer
 from cell_observatory_finetune.data.structures import box_xyzxyz_to_cxcyczwhd, delta2bbox, box_cxcyczwhd_to_xyzxyz
 
@@ -31,10 +35,16 @@ from cell_observatory_finetune.data.structures import box_xyzxyz_to_cxcyczwhd, d
 class PlainDETR(nn.Module):
     def __init__(
         self,
-        backbone,
-        backbone_embed_dim,
-        transformer,
-        loss,
+        #backbone
+        backbone_wrapper_args,
+        # adapter
+        adapter_args,
+        # transformer
+        transformer_args,
+        # criterion
+        criterion_args,
+        # plainDETR args
+        backbone_embed_dims,
         num_classes,
         num_feature_levels,
         aux_loss=True,
@@ -43,15 +53,38 @@ class PlainDETR(nn.Module):
         num_queries_one2one=300,
         num_queries_one2many=0,
         mixed_selection=False,
+        k_one2many=0,
+        lambda_one2many=0.0,
+        reparam=True,
+        normalize_pos_encodings=True,
     ):
         super().__init__()
-        
+
+        # backbone
+        self.backbone = build_backbone_wrapper(backbone_wrapper_args, adapter_args)
+
+        # transformer
+        transformer_args["reparam"] = reparam
+        transformer_args["num_queries_one2one"] = num_queries_one2one
+        transformer_args["num_queries_one2many"] = num_queries_one2many
+        transformer_args["mixed_selection"] = mixed_selection
+        self.transformer = build_transformer(transformer_args)
+
+        # loss
+        self.loss = build_plainDETR_Set_Loss(criterion_args, 
+                                            num_classes=num_classes,
+                                            two_stage=two_stage, 
+                                            reparam=reparam, 
+                                            aux_loss=aux_loss, 
+                                            dec_layers=self.transformer.decoder.num_layers
+        )
+
+        # plainDETR parameters
         num_queries = num_queries_one2one + num_queries_one2many
         
         self.num_queries = num_queries
-        self.transformer = transformer
         
-        hidden_dim = transformer.d_model
+        hidden_dim = self.transformer.d_model
         self.class_embed = nn.Linear(hidden_dim, num_classes)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 6, 3)
         
@@ -65,17 +98,22 @@ class PlainDETR(nn.Module):
         self.input_proj = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Conv3d(backbone_embed_dim, hidden_dim, kernel_size=1),
+                    nn.Conv3d(backbone_embed_dims[i], hidden_dim, kernel_size=1),
                     nn.GroupNorm(32, hidden_dim),
                 )
+                for i in range(num_feature_levels)
             ]
         )
+
+        self.pos_embedding = PositionalEmbeddingSinCos(hidden_dim // 3, normalize=normalize_pos_encodings)
         
-        self.backbone = backbone
         self.aux_loss = aux_loss
         
         self.with_box_refine = with_box_refine
         self.two_stage = two_stage
+
+        assert (not two_stage) or with_box_refine, \
+            "Two-stage without box refinement is not supported in PlainDETR."
 
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
@@ -88,10 +126,10 @@ class PlainDETR(nn.Module):
             nn.init.constant_(proj[0].bias, 0)
 
         # if two-stage, the last class_embed and bbox_embed is for region proposal generation
-        num_pred = (transformer.decoder.num_layers + 1) if two_stage else transformer.decoder.num_layers
+        num_pred = (self.transformer.decoder.num_layers + 1) if two_stage else self.transformer.decoder.num_layers
         if with_box_refine:
-            self.class_embed = _get_clones(self.class_embed, num_pred)
-            self.bbox_embed = _get_clones(self.bbox_embed, num_pred)
+            self.class_embed = get_clones(self.class_embed, num_pred)
+            self.bbox_embed = get_clones(self.bbox_embed, num_pred)
             nn.init.constant_(self.bbox_embed[0].layers[-1].bias.data[3:], -2.0)
             # HACK: iterative bounding box refinement
             self.transformer.decoder.bbox_embed = self.bbox_embed
@@ -107,12 +145,13 @@ class PlainDETR(nn.Module):
             for box_embed in self.bbox_embed:
                 nn.init.constant_(box_embed.layers[-1].bias.data[3:], 0.0)
 
-        self.num_queries_one2one = num_queries_one2one
+        self.k_one2many = k_one2many
         self.mixed_selection = mixed_selection
+        self.lambda_one2many = lambda_one2many
+        self.num_queries_one2one = num_queries_one2one
+        self.num_queries_one2many = num_queries_one2many
 
-        self.loss = loss
-
-    def _forward(self, samples: List[Dict]):
+    def _forward(self, samples):
         """The forward expects a List, which consists of:
            - data_sample: batched images, of shape [batch_size x C x D x H x W]
            - metainfo.padded_mask: a binary mask of shape [batch_size x D x H x W], containing 1 on padded pixels
@@ -127,11 +166,13 @@ class PlainDETR(nn.Module):
            - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                             dictionaries containing the two above keys for each decoder layer.
         """
-        features, pos = self.backbone(samples)
+        features = self.backbone(samples)
 
-        srcs, masks = [], []
+        srcs, masks, pos_embeddings_list = [], [], []
         for layer, feat in enumerate(features):
             src, mask = feat["x"], feat["mask"]
+            pos = self.pos_embedding(src)
+            pos_embeddings_list.append(pos)
             srcs.append(self.input_proj[layer](src))
             masks.append(mask)
             assert mask is not None, "backbone must provide padding mask"
@@ -168,7 +209,7 @@ class PlainDETR(nn.Module):
             enc_outputs_delta,
             output_proposals,
             max_shape,
-        ) = self.transformer(srcs, masks, pos, query_embeds, self_attn_mask)
+        ) = self.transformer(srcs, masks, pos_embeddings_list, query_embeds, self_attn_mask)
 
         outputs_classes_one2one, outputs_coords_one2one = [], []
         outputs_classes_one2many, outputs_coords_one2many = [], []
@@ -219,9 +260,53 @@ class PlainDETR(nn.Module):
 
         return out
 
-    def forward(self, samples: List[Dict]):
+    def compute_hybrid_loss(self, outputs, targets, k_one2many, criterion, lambda_one2many):
+        # one-to-one loss
+        loss_dict = criterion(outputs, targets)
+
+        # repeat targets k_one2many times for one-to-many branch
+        multi_targets = copy.deepcopy(targets)
+        for target in multi_targets:
+            target["boxes"] = target["boxes"].repeat(k_one2many, 1)
+            target["labels"] = target["labels"].repeat(k_one2many)
+
+        outputs_one2many = {
+            "pred_logits": outputs["pred_logits_one2many"],
+            "pred_boxes": outputs["pred_boxes_one2many"],
+            "aux_outputs": outputs.get("aux_outputs_one2many", []),
+        }
+
+        # reparam extras (if present)
+        if "pred_boxes_old_one2many" in outputs:
+            outputs_one2many["pred_boxes_old"] = outputs["pred_boxes_old_one2many"]
+            outputs_one2many["pred_deltas"] = outputs["pred_deltas_one2many"]
+
+        # one-to-many loss
+        loss_dict_one2many = criterion(outputs_one2many, multi_targets)
+        for key, value in loss_dict_one2many.items():
+            name = key + "_one2many"
+            if name in loss_dict:
+                loss_dict[name] += value * lambda_one2many
+            else:
+                loss_dict[name] = value * lambda_one2many
+
+        return loss_dict
+
+    def forward(self, samples):
         outputs = self._forward(samples)
-        losses = self.loss(outputs, samples["targets"])
+
+        use_one2many = (self.num_queries_one2many > 0) and (self.k_one2many > 0)
+        if use_one2many:
+            losses = self.compute_hybrid_loss(
+                outputs=outputs,
+                targets=samples["targets"],
+                k_one2many=self.k_one2many,
+                criterion=self.loss,
+                lambda_one2many=self.lambda_one2many,
+            )
+        else:
+            losses = self.loss(outputs, samples["targets"])
+
         return outputs, losses
 
     @torch.jit.unused
@@ -233,7 +318,7 @@ class PlainDETR(nn.Module):
 
 
 class PlainDETRReParam(PlainDETR):
-    def _forward(self, samples: List[Dict]):
+    def _forward(self, samples: Dict):
         """
         The forward expects a List[Dict], which consists of:
            - data_tensor: batched images, of shape [batch_size x 3 x D x H x W]
@@ -249,11 +334,13 @@ class PlainDETRReParam(PlainDETR):
            - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                             dictionaries containing the two above keys for each decoder layer.
         """
-        features, pos = self.backbone(samples)
+        features = self.backbone(samples)
 
-        srcs, masks = [], []
+        srcs, masks, pos_embeddings_list = [], [], []
         for layer, feat in enumerate(features):
             src, mask = feat["x"], feat["mask"]
+            pos = self.pos_embedding(src)
+            pos_embeddings_list.append(pos)
             srcs.append(self.input_proj[layer](src))
             masks.append(mask)
             assert mask is not None, "backbone must provide padding mask"
@@ -288,7 +375,7 @@ class PlainDETRReParam(PlainDETR):
             enc_outputs_delta,
             output_proposals,
             max_shape,
-        ) = self.transformer(srcs, masks, pos, query_embeds, self_attn_mask)
+        ) = self.transformer(srcs, masks, pos_embeddings_list, query_embeds, self_attn_mask)
 
         outputs_classes_one2one, outputs_coords_one2one = [], []
         outputs_classes_one2many, outputs_coords_one2many = [], []
@@ -350,11 +437,6 @@ class PlainDETRReParam(PlainDETR):
                 "pred_deltas": enc_outputs_delta,
             }
         return out
-
-    def forward(self, samples: List[Dict]):
-        outputs = self._forward(samples)
-        losses = self.loss(outputs, samples["targets"])
-        return outputs, losses
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord, outputs_coord_old, outputs_deltas):

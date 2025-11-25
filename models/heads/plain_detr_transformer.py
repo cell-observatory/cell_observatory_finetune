@@ -428,11 +428,11 @@ class TransformerReParam(Transformer):
         mask_flatten_ = memory_padding_mask[:, : D_ * H_ * W_].view(N_, D_, H_, W_, 1)
 
         # valid_*: [N_] — any valid pixel in each i-slice
-        valid_D = (~mask_flatten_).any(dim=(2,3)).sum(dim=1) # [B] — any valid pixel in each D-slice
-        valid_H = (~mask_flatten_).any(dim=(1,3)).sum(dim=1) # [B] — any valid pixel in each H-slice
-        valid_W = (~mask_flatten_).any(dim=(1,2)).sum(dim=1) # [B] — any valid pixel in each W-slice
+        valid_D = (~mask_flatten_).any(dim=(2,3)).sum(dim=1) # [N_, 1] — any valid pixel in each D-slice
+        valid_H = (~mask_flatten_).any(dim=(1,3)).sum(dim=1) # [N_, 1] — any valid pixel in each H-slice
+        valid_W = (~mask_flatten_).any(dim=(1,2)).sum(dim=1) # [N_, 1] — any valid pixel in each W-slice
         
-        # img_size: [BS, 1, 6] (W, H, D, W, H, D)
+        # img_size: [N_, 1, 6] (W, H, D, W, H, D)
         img_size = torch.cat([valid_W, valid_H, valid_D, valid_W, valid_H, valid_D], dim=-1).unsqueeze(1)
 
         # output_proposals_valid: [N_, \sum{D*H*W}, 1]
@@ -484,8 +484,9 @@ class TransformerReParam(Transformer):
 def build_transformer(args):
     model_class = Transformer if (not args.reparam) else TransformerReParam
     return model_class(
-        d_model=args.hidden_dim,
+        d_model=args.d_model,
         nhead=args.nheads,
+        global_decoder_args=args.global_decoder_args,
         num_feature_levels=args.num_feature_levels,
         two_stage=args.two_stage,
         two_stage_num_proposals=args.num_queries_one2one + args.num_queries_one2many,
