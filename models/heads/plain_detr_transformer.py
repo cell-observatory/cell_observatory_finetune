@@ -157,6 +157,7 @@ class Transformer(nn.Module):
 
         scale = 2 * math.pi
         device = proposals.device
+        dtype = proposals.dtype
 
         dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=device)
         dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
@@ -170,7 +171,7 @@ class Transformer(nn.Module):
         ).flatten(2) # [N, L, K * num_pos_feats]
 
         # 3D: K=6  → 6 * (C//2) = 3C
-        return pos
+        return pos.to(dtype)
 
     def gen_encoder_output_proposals(self, memory, memory_padding_mask, spatial_shapes):
         if self.proposal_feature_levels > 1:
@@ -237,7 +238,7 @@ class Transformer(nn.Module):
         output_memory = self.enc_output_norm(self.enc_output(output_memory))
 
         max_shape = None
-        return output_memory, output_proposals, max_shape
+        return output_memory, output_proposals.to(memory.dtype), max_shape
 
     def expand_encoder_output(self, memory, memory_padding_mask, spatial_shapes):
         assert len(spatial_shapes) == 1, f"Recieved encoder output of shape: {spatial_shapes}!"
@@ -454,7 +455,7 @@ class TransformerReParam(Transformer):
         output_memory = self.enc_output_norm(self.enc_output(output_memory))
 
         max_shape = (valid_D[:, None, :], valid_H[:, None, :], valid_W[:, None, :])
-        return output_memory, output_proposals, max_shape
+        return output_memory, output_proposals.to(memory.dtype), max_shape
 
     def get_reference_points(self, memory, mask_flatten, spatial_shapes):
         output_memory, output_proposals, max_shape = self.gen_encoder_output_proposals(

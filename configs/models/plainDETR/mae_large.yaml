@@ -10,6 +10,7 @@ backbone_wrapper_args:
   train_backbone: true
   use_layernorm: true
   blocks_to_train: null
+  out_layers: [1]
   backbone_args:
     model: FinetuneMaskedAutoEncoder
     input_fmt: ${dataset_layout_order}
@@ -73,7 +74,7 @@ adapter_args:
   strategy: axial
   spatial_prior_module_strides:
     stem1: [2,2,2]
-    stem2: [2,2,2]
+    stem2: [1, 1, 1]
     stem3: [1,1,1]
     maxpool: 2
     stage2: [2,2,2]
@@ -102,7 +103,7 @@ transformer_args:
   num_encoder_layers: 6
   # global decoder
   global_decoder_args:
-    hidden_dim: 512
+    hidden_dim: 384
     dropout: 0.0
     proposal_in_stride: 16
     norm_type: "pre_norm"
@@ -137,7 +138,7 @@ criterion_args:
     cost_bbox_type: "reparam"
 
 # plainDETR
-backbone_embed_dims: [1024, 1024, 1024, 1024]
+backbone_embed_dim: 1024
 num_classes: 2
 num_feature_levels: 4
 aux_loss: true

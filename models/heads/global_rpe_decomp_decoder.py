@@ -90,13 +90,13 @@ class GlobalCrossAttention(nn.Module):
             ref_pts[..., 2::3] *= d * stride
 
         pos_x = (
-            torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=ref_pts.device)[None, None, :, None] * stride
+            torch.linspace(0.5, w - 0.5, w, dtype=torch.float32, device=query.device)[None, None, :, None] * stride
         )  # 1, 1, w, 1
         pos_y = (
-            torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=ref_pts.device)[None, None, :, None] * stride
+            torch.linspace(0.5, h - 0.5, h, dtype=torch.float32, device=query.device)[None, None, :, None] * stride
         )  # 1, 1, h, 1
         pos_z = (
-            torch.linspace(0.5, d - 0.5, d, dtype=torch.float32, device=ref_pts.device)[None, None, :, None] * stride
+            torch.linspace(0.5, d - 0.5, d, dtype=torch.float32, device=query.device)[None, None, :, None] * stride
         )  # 1, 1, d, 1
 
         if self.rpe_type == "abs_log8":
@@ -113,7 +113,8 @@ class GlobalCrossAttention(nn.Module):
         else:
             raise NotImplementedError
 
-        rpe_x, rpe_y, rpe_z = self.cpb_mlp1(delta_x), self.cpb_mlp2(delta_y), self.cpb_mlp3(delta_z)  # B, nQ, w/h/d, nheads
+        rpe_x, rpe_y, rpe_z = self.cpb_mlp1(delta_x.to(query.dtype)), \
+            self.cpb_mlp2(delta_y.to(query.dtype)), self.cpb_mlp3(delta_z.to(query.dtype))  # B, nQ, w/h/d, nheads
 
         # Lift to 3D and sum: (B, nQ, d, h, w, nheads)
         rpe = (
@@ -144,9 +145,9 @@ class GlobalCrossAttention(nn.Module):
         attn_mask = attn_mask.contiguous()  # to enable efficient attention
 
         x = torch.nn.functional.scaled_dot_product_attention(
-            query=q,
-            key=k,
-            value=v,
+            q,
+            k,
+            v,
             attn_mask=attn_mask,
             dropout_p=self.attn_drop.p if self.training else 0,
             scale=self.scale,
@@ -443,7 +444,7 @@ class GlobalDecoder(nn.Module):
 
 def build_global_rpe_decomp_decoder(args):
     decoder_layer = GlobalDecoderLayer(
-        d_model=args.rpe_hidden_dim,
+        d_model=args.hidden_dim,
         d_ffn=args.dim_feedforward,
         dropout=args.dropout,
         activation="relu",
@@ -459,7 +460,7 @@ def build_global_rpe_decomp_decoder(args):
         num_layers=args.dec_layers,
         return_intermediate=True,
         look_forward_twice=args.look_forward_twice,
-        d_model=args.rpe_hidden_dim,
+        d_model=args.hidden_dim,
         norm_type=args.norm_type,
         reparam=args.reparam,
     )

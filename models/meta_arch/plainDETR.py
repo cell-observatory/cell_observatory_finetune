@@ -44,7 +44,7 @@ class PlainDETR(nn.Module):
         # criterion
         criterion_args,
         # plainDETR args
-        backbone_embed_dims,
+        backbone_embed_dim,
         num_classes,
         num_feature_levels,
         aux_loss=True,
@@ -98,10 +98,9 @@ class PlainDETR(nn.Module):
         self.input_proj = nn.ModuleList(
             [
                 nn.Sequential(
-                    nn.Conv3d(backbone_embed_dims[i], hidden_dim, kernel_size=1),
+                    nn.Conv3d(backbone_embed_dim, hidden_dim, kernel_size=1),
                     nn.GroupNorm(32, hidden_dim),
                 )
-                for i in range(num_feature_levels)
             ]
         )
 
@@ -299,15 +298,17 @@ class PlainDETR(nn.Module):
         if use_one2many:
             losses = self.compute_hybrid_loss(
                 outputs=outputs,
-                targets=samples["targets"],
+                targets=samples['metainfo']["targets"][0],
                 k_one2many=self.k_one2many,
                 criterion=self.loss,
                 lambda_one2many=self.lambda_one2many,
             )
         else:
-            losses = self.loss(outputs, samples["targets"])
+            losses = self.loss(outputs, samples['metainfo']["targets"][0])
 
-        return outputs, losses
+        losses["step_loss"] = sum(losses.values())
+
+        return losses, outputs
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord):
@@ -336,6 +337,7 @@ class PlainDETRReParam(PlainDETR):
         """
         features = self.backbone(samples)
 
+        # NOTE: currently we only use one feature level
         srcs, masks, pos_embeddings_list = [], [], []
         for layer, feat in enumerate(features):
             src, mask = feat["x"], feat["mask"]

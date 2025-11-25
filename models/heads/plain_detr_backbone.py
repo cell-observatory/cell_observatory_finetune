@@ -36,6 +36,7 @@ class PlainDETRBackbone(nn.Module):
         train_backbone: bool,
         blocks_to_train: Optional[List[str]] = None,
         use_layernorm: bool = True,
+        out_layers: Optional[List[int]] = None,
     ):
         super().__init__()
 
@@ -60,6 +61,8 @@ class PlainDETRBackbone(nn.Module):
             raise NotImplementedError("Backbone adapter must be specified for PlainDETRBackbone.")
             # self.with_backbone_adapter = False
 
+        self.out_layers = out_layers
+
     def forward(self, data_sample: dict) -> List[dict]:
         features = self.backbone.forward_features(data_sample["data_tensor"])
 
@@ -74,6 +77,9 @@ class PlainDETRBackbone(nn.Module):
 
         if self.use_layernorm:
             features_list = [ln(x).contiguous() for ln, x in zip(self.layer_norms, features_list)]
+
+        if self.out_layers is not None:
+            features_list = [features_list[i] for i in self.out_layers]
 
         out = []
         m = data_sample["metainfo"]["padding_mask"]  # [B, Z, Y, X]
@@ -116,5 +122,6 @@ def build_backbone_wrapper(backbone_wrapper_args: dict, adapter_args: Optional[d
         train_backbone=backbone_wrapper_args["train_backbone"],
         blocks_to_train=backbone_wrapper_args.get("blocks_to_train"),
         use_layernorm=backbone_wrapper_args.get("use_layernorm", True),
+        out_layers=backbone_wrapper_args.get("out_layers"),
     )
     return model

@@ -83,7 +83,8 @@ class HungarianMatcher(nn.Module):
                 target_bboxes = targets[batch_idx]["boxes"]
                 # calculates the p-norm (p=1) distance between each pair of the
                 # two collections of tensors
-                cost_bbox = torch.cdist(predicted_bboxes, target_bboxes, p=1)
+                with autocast(enabled=False, device_type="cuda"):
+                    cost_bbox = torch.cdist(predicted_bboxes.float(), target_bboxes.float(), p=1)
                 # we omit constant terms in the cost function, so we can just use the negative of the generalized box iou
                 cost_box_giou = -generalized_box_iou(box_cxcyczwhd_to_xyzxyz(predicted_bboxes), box_cxcyczwhd_to_xyzxyz(target_bboxes))
             else:
@@ -179,9 +180,11 @@ class PlainDETRHungarianMatcher(nn.Module):
             out_delta = outputs["pred_deltas"].flatten(0, 1)
             out_bbox_old = outputs["pred_boxes_old"].flatten(0, 1)
             tgt_delta = bbox2delta(out_bbox_old, tgt_bbox)
-            cost_bbox = torch.cdist(out_delta[:, None], tgt_delta, p=1).squeeze(1)
+            with autocast(enabled=False, device_type="cuda"):
+                cost_bbox = torch.cdist(out_delta.float()[:, None], tgt_delta.float(), p=1).squeeze(1)
         else:
-            cost_bbox = torch.cdist(out_bbox, tgt_bbox, p=1)
+            with autocast(enabled=False, device_type="cuda"):
+                cost_bbox = torch.cdist(out_bbox.float(), tgt_bbox.float(), p=1)
 
         cost_giou = -generalized_box_iou(
             box_cxcyczwhd_to_xyzxyz(out_bbox),

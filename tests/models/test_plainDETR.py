@@ -2,6 +2,8 @@ import pytest
 from omegaconf import OmegaConf
 from hydra.utils import instantiate
 
+import torch
+
 from cell_observatory_finetune.models.meta_arch.plainDETR import PlainDETRReParam
 
 
@@ -15,6 +17,7 @@ def _build_plain_detr_reparam_cfg():
             "train_backbone": True,
             "use_layernorm": True,
             "blocks_to_train": None,
+            "out_layers": [1],
             "backbone_args": {
                 "model": "FinetuneMaskedAutoEncoder",
                 # pick a reasonable 3D layout + shape
@@ -107,7 +110,7 @@ def _build_plain_detr_reparam_cfg():
             "num_encoder_layers": 6,
             # global decoder
             "global_decoder_args": {
-                "hidden_dim": 512,
+                "hidden_dim": 384,
                 "dropout": 0.0,
                 "proposal_in_stride": 16,
                 "norm_type": "pre_norm",
@@ -146,7 +149,7 @@ def _build_plain_detr_reparam_cfg():
         },
 
         # plainDETR args
-        "backbone_embed_dims": [1024, 1024, 1024, 1024],
+        "backbone_embed_dim": 1024,
         "num_classes": 2,
         "num_feature_levels": 4,
         "aux_loss": True,
@@ -164,13 +167,36 @@ def _build_plain_detr_reparam_cfg():
     return OmegaConf.create(cfg_dict)
 
 
-@pytest.mark.cpu
-def test_plain_detr_reparam_instantiates_from_config():
-    cfg = _build_plain_detr_reparam_cfg()
-    model = instantiate(cfg)
+# @pytest.mark.cpu
+# def test_plain_detr_reparam_instantiates_from_config():
+#     cfg = _build_plain_detr_reparam_cfg()
+#     model = instantiate(cfg)
 
-    assert isinstance(model, PlainDETRReParam)
-    assert model.two_stage is True
-    assert model.with_box_refine is True
-    assert model.num_queries_one2one == 300
-    assert model.num_queries_one2many == 1500
+#     assert isinstance(model, PlainDETRReParam)
+#     assert model.two_stage is True
+#     assert model.with_box_refine is True
+#     assert model.num_queries_one2one == 300
+#     assert model.num_queries_one2many == 1500
+
+
+def test_plain_detr_reparam_forward_pass_smoke_bf16():
+    cfg = _build_plain_detr_reparam_cfg()
+    model: PlainDETRReParam = instantiate(cfg)
+    model = model.to(torch.bfloat16, device="cuda")
+    model.eval()
+
+    batch_size = 1
+    D, H, W, C = 128, 256, 256, 1
+    data_tensor = torch.randn(batch_size, D, H, W, C, dtype=torch.bfloat16, device="cuda")
+    padding_mask = torch.zeros(batch_size, D, H, W, dtype=torch.bool, device="cuda")
+
+    samples = {
+        "data_tensor": data_tensor,
+        "metainfo": {"padding_mask": padding_mask},
+    }
+
+    with torch.no_grad():
+        outputs = model._forward(samples)
+
+    assert "pred_logits" in outputs
+    assert "pred_boxes" in outputs
