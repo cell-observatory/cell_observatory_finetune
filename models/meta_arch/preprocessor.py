@@ -267,6 +267,7 @@ class FinetunePreprocessor(RayPreprocessor):
                 input_shape=self.input_shape,
                 batch_size=inputs.shape[0],
                 metadata=meta,
+                device=inputs.device,
             )
             meta["image_sizes"] = image_sizes
             meta["orig_image_sizes"] = orig_image_sizes

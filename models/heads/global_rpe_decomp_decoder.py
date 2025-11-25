@@ -139,6 +139,7 @@ class GlobalCrossAttention(nn.Module):
 
         attn_mask = rpe
         if input_padding_mask is not None:
+            input_padding_mask = input_padding_mask.to(attn_mask.device)
             attn_mask += input_padding_mask[:, None, None] * -100
         attn_mask = attn_mask.contiguous()  # to enable efficient attention
 

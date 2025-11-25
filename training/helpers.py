@@ -135,8 +135,9 @@ def get_image_sizes(
 
     # spatial mask shape (Z, Y, X) or (Y, X)
     spatial_shape = tuple(full_sizes[ax] for ax in spatial_axes)
+    
     if device is None:
-        device = torch.device("cpu")
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     padding_mask = torch.zeros(
         (batch_size, *spatial_shape),
@@ -180,7 +181,6 @@ def get_image_sizes(
                 padding_mask[b, :, x_lim:] = True
 
         else:
-            # If you ever support other combos, extend here.
             raise ValueError(f"Unsupported spatial_axes combination: {spatial_axes}")
 
     return image_sizes, orig_image_sizes, padding_mask
