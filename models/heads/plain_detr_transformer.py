@@ -184,14 +184,10 @@ class Transformer(nn.Module):
         # memory_padding_mask: [N_, S_]
         # spatial_shapes: List[(D_l, H_l, W_l)] for each level l
         
-        # base_scale = 4.0
         proposals, _cur = [], 0
         for lvl, (D_, H_, W_) in enumerate(spatial_shapes):
             mask_flatten_ = memory_padding_mask[:, _cur : (_cur + D_ * H_ * W_)].view(N_, D_, H_, W_, 1)
             
-            # valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
-            # valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
-
             # valid_i: [B] — any valid pixel in each i-slice
             # Example:
             # (~mask_flatten_).any(dim=(2,3)): [N_, D_, 1]
@@ -274,6 +270,7 @@ class Transformer(nn.Module):
         assert hasattr(self.decoder, "class_embed"), "Ensure that plainDETR has initial decoder class_embed!"
         enc_outputs_class = self.decoder.class_embed[self.decoder.num_layers](output_memory)
         enc_outputs_delta = None
+        # NOTE: use final layer bbox_embed for enc_outputs_coord_unact
         enc_outputs_coord_unact = self.decoder.bbox_embed[self.decoder.num_layers](output_memory) + output_proposals
 
         topk_proposals = torch.topk(enc_outputs_class[..., 0], self.two_stage_num_proposals, dim=1)[1]
@@ -337,11 +334,16 @@ class Transformer(nn.Module):
                 enc_outputs_delta, # (B, Q, Dr)
                 output_proposals, # (B, Q, Dr)
             ) = self.get_reference_points(memory, mask_flatten, spatial_shapes)
+            # NOTE: reference_points and enc_outputs_class main outputs
             init_reference_out = reference_points
             # pos_trans_out: (B, Q, 2C) from proposal_pos_embed -> MLP -> LayerNorm
-            pos_trans_out = torch.zeros((bs, self.two_stage_num_proposals, 2 * c), device=init_reference_out.device)
+            # pos_trans_out = torch.zeros((bs, self.two_stage_num_proposals, 2 * c), device=init_reference_out.device)
             pos_trans_out = self.pos_trans_norm(self.pos_trans(self.get_proposal_pos_embed(reference_points)))
 
+            # NOTE: either target queries and learned position embeddings are
+            #       both obtained from reference points OR target queries
+            #       are learned embeddings and query embeddings are obtained
+            #       from reference points
             if not self.mixed_selection:
                 # split query_embed into content and position embeddings
                 query_embed, tgt = torch.split(pos_trans_out, c, dim=2)
@@ -356,7 +358,7 @@ class Transformer(nn.Module):
             query_embed, tgt = torch.split(query_embed, c, dim=1)
             query_embed = query_embed.unsqueeze(0).expand(bs, -1, -1)
             tgt = tgt.unsqueeze(0).expand(bs, -1, -1)
-            # query_embed: (B, Q, C) -> reference_points: (B, Q, 2) in [0, 1]
+            # query_embed: (B, Q, C) -> reference_points: (B, Q, 3) in [0, 1]
             reference_points = self.reference_points(query_embed).sigmoid()
             init_reference_out = reference_points
             max_shape = None
@@ -399,7 +401,6 @@ class TransformerReParam(Transformer):
             )
         N_, S_, C_ = memory.shape
 
-        # base_scale = 4.0
         proposals, _cur = [], 0
         for lvl, (D_, H_, W_) in enumerate(spatial_shapes):
             stride = self.proposal_tgt_strides[lvl]
@@ -420,6 +421,8 @@ class TransformerReParam(Transformer):
             proposals.append(proposal)
             _cur += H_ * W_ * D_
         
+        # NOTE: all proposals are in absolute coord space given by largest feature map size
+        #       imp. see how this relates to global decoder layer pos encodings etc.
         # output_proposals: [N_, \sum{D*H*W}, 6]
         output_proposals = torch.cat(proposals, 1)
 

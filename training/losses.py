@@ -580,6 +580,7 @@ class PlainDETR_Set_Loss(nn.Module):
         }
 
         # matching between the outputs of the last layer and the targets
+        # matcher sees pred_logits and pred_boxes
         indices = self.matcher(outputs_without_aux, targets)
 
         # average number of target boxes accross all nodes, for normalization purposes
@@ -600,6 +601,7 @@ class PlainDETR_Set_Loss(nn.Module):
             )
 
         if "aux_outputs" in outputs:
+            # NOTE: supervises intermediate layers (one2one and one2many)
             for i, aux_outputs in enumerate(outputs["aux_outputs"]):
                 indices = self.matcher(aux_outputs, targets)
                 for loss in self.losses:
@@ -617,6 +619,7 @@ class PlainDETR_Set_Loss(nn.Module):
                     losses.update(l_dict)
 
         if "enc_outputs" in outputs:
+            # supervise initial predictions from transformer 2-stage pipeline
             enc_outputs = outputs["enc_outputs"]
             bin_targets = copy.deepcopy(targets)
             for bt in bin_targets:

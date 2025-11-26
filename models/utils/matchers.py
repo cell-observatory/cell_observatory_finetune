@@ -179,6 +179,7 @@ class PlainDETRHungarianMatcher(nn.Module):
         if self.reparam:
             out_delta = outputs["pred_deltas"].flatten(0, 1)
             out_bbox_old = outputs["pred_boxes_old"].flatten(0, 1)
+            #NOTE: supervise deltas between anchors and true boxes
             tgt_delta = bbox2delta(out_bbox_old, tgt_bbox)
             with autocast(enabled=False, device_type="cuda"):
                 cost_bbox = torch.cdist(out_delta.float()[:, None], tgt_delta.float(), p=1).squeeze(1)
@@ -198,6 +199,7 @@ class PlainDETRHungarianMatcher(nn.Module):
         )
         C = C.view(bs, num_queries, -1).cpu()
 
+        # [B,Q, SUM_i T_i] -> [B, Q, T_i] -> [Q,T_i] -> list of B [(index_i, index_j)] for each q in Q
         sizes = [len(v["boxes"]) for v in targets]
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
         return [

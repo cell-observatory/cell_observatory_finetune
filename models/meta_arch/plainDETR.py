@@ -275,7 +275,8 @@ class PlainDETR(nn.Module):
             "aux_outputs": outputs.get("aux_outputs_one2many", []),
         }
 
-        # reparam extras (if present)
+        # NOTE: in reparam branch we need to populate pred_boxes_old and pred_deltas
+        #       for loss computation
         if "pred_boxes_old_one2many" in outputs:
             outputs_one2many["pred_boxes_old"] = outputs["pred_boxes_old_one2many"]
             outputs_one2many["pred_deltas"] = outputs["pred_deltas_one2many"]

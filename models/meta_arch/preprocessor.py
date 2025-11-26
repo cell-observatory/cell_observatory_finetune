@@ -146,6 +146,9 @@ class FinetunePreprocessor(RayPreprocessor):
         if inputs.dtype != self.dtype:
             inputs = inputs.to(self.dtype)
 
+        if self.task == "instance_segmentation":
+            inputs, masks = self._split_inputs_and_masks(inputs)
+
         if self.transforms is not None:
             t0 = time.time()
             for transform in self.transforms:
@@ -193,8 +196,6 @@ class FinetunePreprocessor(RayPreprocessor):
                     "Channel axis 'C' not present in input_format; "
                     "cannot perform instance_segmentation."
                 )
-
-            inputs, masks = self._split_inputs_and_masks(inputs)
 
             # Metadata is keyed by *channel index*, not axis index.
             chan_idx = self.mask_idx if self.mask_idx >= 0 else self.channels + self.mask_idx

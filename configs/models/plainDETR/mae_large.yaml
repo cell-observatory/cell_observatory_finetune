@@ -85,15 +85,19 @@ adapter_args:
 transformer_args:
   d_model: 384 # d_model divisible by 3 (and ideally by 6)
   nheads: 8
-  num_feature_levels: 4
+  num_feature_levels: 1
   two_stage: true
   two_stage_num_proposals: 100
   norm_type: "pre_norm"
   decoder_type: "global_rpe_decomp"
   proposal_feature_levels: 4
-  proposal_in_stride: 16
-  proposal_tgt_strides: [8, 16, 32, 64]
-  proposal_min_size: 50
+  # TODO: recheck strides and min_size
+  # proposal_in_stride: 16
+  # proposal_tgt_strides: [8, 16, 32, 64]
+  proposal_in_stride: 4
+  proposal_tgt_strides: [1, 2, 4, 8]
+  # proposal_min_size: 50
+  proposal_min_size: 2
   # transformer_encoder
   add_transformer_encoder: true
   dim_feedforward: 2048
@@ -105,7 +109,9 @@ transformer_args:
   global_decoder_args:
     hidden_dim: 384
     dropout: 0.0
-    proposal_in_stride: 16
+    # check stride
+    # proposal_in_stride: 16
+    proposal_in_stride: 4
     norm_type: "pre_norm"
     dim_feedforward: 2048
     num_heads: 8
@@ -117,7 +123,6 @@ transformer_args:
     look_forward_twice: true
     rpe_hidden_dim: 512
     rpe_type: "linear"
-    feature_stride: 16
     reparam: true
 
 # criterion
@@ -140,12 +145,14 @@ criterion_args:
 # plainDETR
 backbone_embed_dim: 1024
 num_classes: 2
-num_feature_levels: 4
+num_feature_levels: 1
 aux_loss: true
 with_box_refine: true
 two_stage: true
-num_queries_one2one: 300
-num_queries_one2many: 1500
+# num_queries_one2one: 300
+# num_queries_one2many: 1500
+num_queries_one2one: 100
+num_queries_one2many: 200
 mixed_selection: true
 reparam: true
 k_one2many: 5

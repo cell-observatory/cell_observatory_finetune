@@ -432,6 +432,9 @@ class GlobalDecoder(nn.Module):
 
             if self.return_intermediate:
                 intermediate.append(output_after_norm)
+                # NOTE: with look_forward_twice, we do not use reference_points (deattached)
+                #       and hence output_after_norm contributes to new_reference_points 
+                #       and to tmp in final prediction which impacts gradients in both cases
                 intermediate_reference_points.append(
                     new_reference_points if self.look_forward_twice else reference_points
                 )
