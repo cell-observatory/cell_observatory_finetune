@@ -307,7 +307,10 @@ class PlainDETR(nn.Module):
         else:
             losses = self.loss(outputs, samples['metainfo']["targets"][0])
 
-        losses["step_loss"] = sum(losses.values())
+        losses["step_loss"] = sum(
+            losses[k] * self.loss.weight_dict[k] \
+            for k in losses.keys() if k in self.loss.weight_dict
+        )
 
         return losses, outputs
 

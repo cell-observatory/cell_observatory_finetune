@@ -97,7 +97,7 @@ transformer_args:
   proposal_in_stride: 4
   proposal_tgt_strides: [1, 2, 4, 8]
   # proposal_min_size: 50
-  proposal_min_size: 2
+  proposal_min_size: 16
   # transformer_encoder
   add_transformer_encoder: true
   dim_feedforward: 2048
@@ -146,15 +146,15 @@ criterion_args:
 backbone_embed_dim: 1024
 num_classes: 2
 num_feature_levels: 1
-aux_loss: true
 with_box_refine: true
 two_stage: true
 # num_queries_one2one: 300
 # num_queries_one2many: 1500
-num_queries_one2one: 100
-num_queries_one2many: 200
+aux_loss: false
+num_queries_one2one: 400
+num_queries_one2many: 0
+k_one2many: 0
 mixed_selection: true
 reparam: true
-k_one2many: 5
 lambda_one2many: 1.0
 normalize_pos_encodings: true
