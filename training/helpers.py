@@ -25,7 +25,7 @@ def get_supervised_input_data(model, inputs, mask_generator, device: Optional[to
     return input_data
 
 
-def mask_ids_to_masks(batch_size, spatial_shape, mask_ids_batch, masks, input_format, input_shape, device):
+def mask_ids_to_masks(batch_size, spatial_shape, mask_ids_batch, masks, device):
     """
     Convert per-sample mask IDs to per-sample binary masks.
 

@@ -1,11 +1,21 @@
-_target_: cell_observatory_finetune.models.meta_arch.preprocessor.FinetunePreprocessor
+_target_: cell_observatory_finetune.models.meta_arch.preprocessor.InstanceSegmentationPreprocessor
 
-task: instance_segmentation
 with_masking: false
 mask_generator: null
 dtype: ${quantization}
 
-transforms_list: 
+transforms_list:
+  # 1) Resize to Z=128, Y=256, X=512
+  - _target_: cell_observatory_platform.data.transforms.resize.Resize
+    input_format: ${dataset_layout_order}          # e.g. "ZYXC"
+    target_spatial_shape: [128, 256, 512]         # (Z, Y, X)
+    mode: trilinear
+    align_corners: false
+    dtype: ${quantization}
+    bbox_format: ${datasets.preprocessor.bbox_output_format}
+    crop_to_meta_spatial: true
+
+  # 2) Normalize after resize
   - _target_: cell_observatory_platform.data.transforms.normalize.NormalizeRayWrapper
     input_layout:
       _target_: cell_observatory_platform.data.data_shapes.MULTICHANNEL_HYPERCUBE
@@ -16,10 +26,9 @@ input_format: ${dataset_layout_order}
 input_shape: ${datasets.input_shape}
 
 seed: ${seed}
-ideal_psf_path: null
-na_mask_thresholds: null
-resize_na_masks: null
 mask_idx: -1
 
 bbox_data_format: zyxzyx
 bbox_output_format: cxcyczwhd
+
+# debug_savepath: null

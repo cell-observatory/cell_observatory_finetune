@@ -97,6 +97,11 @@ def convert_bbox_format(bboxes, bbox_input_format, bbox_output_format):
         # zyxzyx -> xyzxyz -> cxcyczwhd
         bboxes = bboxes[:, [2, 1, 0, 5, 4, 3]]
         return box_xyzxyz_to_cxcyczwhd(bboxes)
+    elif bbox_input_format == 'cxcyczwhd' and bbox_output_format == 'zyxzyx':
+        # cxcyczwhd -> xyzxyz -> zyxzyx
+        bboxes = box_cxcyczwhd_to_xyzxyz(bboxes)
+        bboxes = bboxes[:, [2, 1, 0, 5, 4, 3]]
+        return bboxes
     else:
         raise ValueError(f"Unsupported bbox format conversion from {bbox_input_format} to {bbox_output_format}")
 
