@@ -14,17 +14,15 @@ Adapted from:
 # ------------------------------------------------------------------------
 """
 
-import logging
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional
 
-from hydra.utils import instantiate
+from hydra.utils import get_method
 
 import torch
 from torch import nn
 import torch.nn.functional as F
 
 from cell_observatory_finetune.models.layers.layers import LayerNorm3D
-from cell_observatory_finetune.models.adapters.vit_adapter import build_adapter
 
 
 class PlainDETRBackbone(nn.Module):
@@ -36,11 +34,12 @@ class PlainDETRBackbone(nn.Module):
         train_backbone: bool,
         blocks_to_train: Optional[List[str]] = None,
         use_layernorm: bool = True,
-        out_layers: Optional[List[int]] = None,
+        adapter_out_layers: Optional[List[int]] = None,
     ):
         super().__init__()
 
-        self.backbone = build_backbone(backbone_args)
+        BUILD_BACKBONE = get_method(backbone_args["BUILD"])
+        self.backbone = BUILD_BACKBONE(backbone_args)
 
         self.blocks_to_train = blocks_to_train
 
@@ -55,13 +54,14 @@ class PlainDETRBackbone(nn.Module):
 
         if adapter_args is not None:
             self.with_backbone_adapter = True
-            self.adapter = build_adapter(adapter_args)
+            BUILD_ADAPTER = get_method(adapter_args["BUILD"])
+            self.adapter = BUILD_ADAPTER(adapter_args)
         else:
             # TODO: implement logic to handle positional encodings without adapter
             raise NotImplementedError("Backbone adapter must be specified for PlainDETRBackbone.")
             # self.with_backbone_adapter = False
 
-        self.out_layers = out_layers
+        self.adapter_out_layers = adapter_out_layers
 
     def forward(self, data_sample: dict) -> List[dict]:
         features = self.backbone.forward_features(data_sample["data_tensor"])
@@ -78,8 +78,8 @@ class PlainDETRBackbone(nn.Module):
         if self.use_layernorm:
             features_list = [ln(x).contiguous() for ln, x in zip(self.layer_norms, features_list)]
 
-        if self.out_layers is not None:
-            features_list = [features_list[i] for i in self.out_layers]
+        if self.adapter_out_layers is not None:
+            features_list = [features_list[i] for i in self.adapter_out_layers]
 
         out = []
         m = data_sample["metainfo"]["padding_mask"]  # [B, Z, Y, X]
@@ -92,29 +92,11 @@ class PlainDETRBackbone(nn.Module):
         return out
 
 
-def build_backbone(backbone_args: dict) -> PlainDETRBackbone:
-    input_channels = backbone_args.get("input_channels")
-    input_shape = backbone_args.get("input_shape")
-    if input_channels is not None:
-        assert backbone_args["input_fmt"][-1] == "C", \
-            "Input format must end with 'C' when specifying input_channels."
-        backbone_args["input_shape"] = list(input_shape)
-        backbone_args["input_shape"][-1] = input_channels
-        backbone_args["input_shape"] = tuple(backbone_args["input_shape"])
-    
-    backbone_args.pop("input_channels")
+def BUILD(backbone_wrapper_args: dict, adapter_args: Optional[dict]) -> nn.Module:
+    out_layers = backbone_wrapper_args.get("out_layers", None)
+    if out_layers is not None:
+        backbone_wrapper_args["backbone_args"]["out_layers"] = out_layers
 
-    if backbone_args.get("model") == "FinetuneMaskedAutoEncoder":
-        backbone_args["_target_"] = "cell_observatory_finetune.models.meta_arch.maskedautoencoder.FinetuneMaskedAutoEncoder"
-        backbone_args.pop("model")
-        model = instantiate(backbone_args)
-    else:
-        raise NotImplementedError(f"Backbone model {backbone_args.get('model')} not implemented.")
-
-    return model
-
-
-def build_backbone_wrapper(backbone_wrapper_args: dict, adapter_args: Optional[dict]) -> nn.Module:
     model = PlainDETRBackbone(
         backbone_args=backbone_wrapper_args["backbone_args"],
         adapter_args=adapter_args,
@@ -122,6 +104,6 @@ def build_backbone_wrapper(backbone_wrapper_args: dict, adapter_args: Optional[d
         train_backbone=backbone_wrapper_args["train_backbone"],
         blocks_to_train=backbone_wrapper_args.get("blocks_to_train"),
         use_layernorm=backbone_wrapper_args.get("use_layernorm", True),
-        out_layers=backbone_wrapper_args.get("out_layers"),
+        adapter_out_layers=backbone_wrapper_args.get("adapter_out_layers"),
     )
     return model

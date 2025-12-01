@@ -3,6 +3,9 @@ Adapted from:
 https://github.com/facebookresearch/dinov3/blob/main/dinov3/layers/dino_head.py
 """
 
+import inspect
+from typing import Mapping, Any
+
 import torch
 import torch.nn as nn
 from torch.nn.init import trunc_normal_
@@ -73,3 +76,39 @@ def _build_mlp(nlayers,
             layers.append(nn.GELU())
         layers.append(nn.Linear(hidden_dim, bottleneck_dim, bias=bias))
         return nn.Sequential(*layers)
+    
+
+def _extract_model_kwargs(cfg: Mapping[str, Any]) -> dict:
+    cfg = dict(cfg)
+
+    # Mandatory: AutoBench must set input_dim
+    in_dim = cfg.get("input_dim", None)
+    out_dim = cfg.get("output_dim", None)
+    if in_dim is None or out_dim is None:
+        raise ValueError("input_dim must be specified in the config for MaskedPredictor")
+
+    # Map generic `input_dim` to the actual args
+    cfg["in_dim"] = in_dim
+    cfg["output_dim"] = out_dim
+
+    sig = inspect.signature(LinearHead.__init__)
+    allowed = set(sig.parameters.keys()) - {"self"}
+    ignore = {"_target_", "BUILD"}
+
+    kwargs = {}
+    for k, v in cfg.items():
+        if k in ignore or k not in allowed:
+            continue
+        kwargs[k] = v
+    return kwargs
+
+
+def BUILD(cfg: Mapping[str, Any]) -> LinearHead:
+    """
+    Hydra entrypoint for LinearHead.
+
+    Accepts both:
+      - in_dim / nlayers
+      - input_dim / num_layers  (aliased to above)
+    """
+    return LinearHead(**_extract_model_kwargs(cfg))

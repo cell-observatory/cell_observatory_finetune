@@ -1,3 +1,6 @@
+import inspect
+from typing import Mapping, Any
+
 from omegaconf import ListConfig
 
 import torch
@@ -836,16 +839,30 @@ class EncoderAdapter(nn.Module):
         return {"1": f1, "2": f2, "3": f3, "4": f4}
 
 
-def build_adapter(adapter_args: dict):
+def _extract_model_kwargs(cfg: Mapping[str, Any]) -> dict:
+    sig = inspect.signature(EncoderAdapter.__init__)
+    allowed = set(sig.parameters.keys()) - {"self"}
+    ignore = {"_target_", "BUILD", "input_channels"}
+
+    kwargs = {}
+    for k, v in cfg.items():
+        if k in ignore or k not in allowed:
+            continue
+        kwargs[k] = v
+    return kwargs
+
+
+def BUILD(adapter_args: dict):
+    adapter_args = dict(adapter_args)  # make a copy
+
     input_channels = adapter_args.get("input_channels")
     input_shape = adapter_args.get("input_shape")
     if input_channels is not None:
         assert adapter_args["input_format"][-1] == "C", \
             "Input format must end with 'C' when specifying input_channels."
         adapter_args["input_shape"] = list(input_shape)
-        adapter_args["input_shape"][-1] = input_channels
+        adapter_args["input_shape"][-1] = int(input_channels)
         adapter_args["input_shape"] = tuple(adapter_args["input_shape"])
 
     adapter_args.pop("input_channels", None)
-
-    return EncoderAdapter(**adapter_args)
+    return EncoderAdapter(**_extract_model_kwargs(cfg=adapter_args))

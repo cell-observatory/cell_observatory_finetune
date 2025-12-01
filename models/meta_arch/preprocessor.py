@@ -450,7 +450,7 @@ class InstanceSegmentationPreprocessor(BaseFinetunePreprocessor):
         inputs = sample["data_tensor"]
         meta = sample["metainfo"]
         targets = meta.pop("targets")
-
+                
         return self._finalize(
             inputs=inputs,
             meta=meta,

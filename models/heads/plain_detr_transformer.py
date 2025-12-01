@@ -11,6 +11,7 @@ Adapted from:
 """
 
 import math
+from typing import Mapping, Any
 
 import torch
 from torch import nn
@@ -244,13 +245,16 @@ class Transformer(nn.Module):
 
         # out_memory: [bs, c, d, h, w], out_memory_padding_mask: [bs, d, h, w]
         _out_memory = memory.view(bs, d, h, w, c).permute(0, 4, 1, 2, 3)
-        _out_memory_padding_mask = memory_padding_mask.view(bs, d, h, w)
+        _out_memory_padding_mask = memory_padding_mask.view(bs, d, h, w).to(_out_memory.device)
 
         out_memory, out_memory_padding_mask, out_spatial_shapes = [], [], []
         for i in range(self.proposal_feature_levels):
             # project the output memory to the desired feature dimension
             mem = self.enc_output_proj[i](_out_memory)
-            mask = F.interpolate(_out_memory_padding_mask[None].float(), size=mem.shape[-3:]).to(torch.bool)
+            mask = F.interpolate(_out_memory_padding_mask[None].float(), 
+                                 size=mem.shape[-3:],
+                                 mode="nearest",
+                                 align_corners=None,).to(torch.bool)
             out_memory.append(mem)
             out_memory_padding_mask.append(mask.squeeze(0))
             out_spatial_shapes.append(mem.shape[-3:])
@@ -334,6 +338,7 @@ class Transformer(nn.Module):
                 enc_outputs_delta, # (B, Q, Dr)
                 output_proposals, # (B, Q, Dr)
             ) = self.get_reference_points(memory, mask_flatten, spatial_shapes)
+                        
             # NOTE: reference_points and enc_outputs_class main outputs
             init_reference_out = reference_points
             # pos_trans_out: (B, Q, 2C) from proposal_pos_embed -> MLP -> LayerNorm
@@ -485,23 +490,65 @@ class TransformerReParam(Transformer):
         )
 
 
-def build_transformer(args):
-    model_class = Transformer if (not args.reparam) else TransformerReParam
+def BUILD(cfg: Mapping[str, Any]) -> Transformer:
+    """
+    Factory for Transformer / TransformerReParam.
+    Expects:
+      d_model: int
+      nheads: int
+      num_feature_levels: int
+      two_stage: bool
+      two_stage_num_proposals: int (optional; if missing we use num_queries_* sum)
+      norm_type: str
+      decoder_type: str
+      proposal_feature_levels: int
+      proposal_in_stride: int
+      proposal_tgt_strides: list[int]
+      proposal_min_size: int
+      global_decoder_args: Mapping
+      add_transformer_encoder: bool
+      dim_feedforward: int
+      dropout: float
+      activation: str
+      normalize_before: bool
+      num_encoder_layers: int
+
+      # injected by PlainDETR.BUILD
+      reparam: bool
+      num_queries_one2one: int
+      num_queries_one2many: int
+      mixed_selection: bool
+    """
+    reparam = cfg.get("reparam")
+    num_q1 = cfg.get("num_queries_one2one")
+    num_qm = cfg.get("num_queries_one2many")
+
+    two_stage_num_proposals = cfg.get(
+        "two_stage_num_proposals",
+        num_q1 + num_qm,
+    )
+
+    model_class = TransformerReParam if reparam else Transformer
+
     return model_class(
-        d_model=args.d_model,
-        nhead=args.nheads,
-        global_decoder_args=args.global_decoder_args,
-        num_feature_levels=args.num_feature_levels,
-        two_stage=args.two_stage,
-        two_stage_num_proposals=args.num_queries_one2one + args.num_queries_one2many,
-        mixed_selection=args.mixed_selection,
-        norm_type=args.norm_type,
-        decoder_type=args.decoder_type,
-        proposal_feature_levels=args.proposal_feature_levels,
-        proposal_in_stride=args.proposal_in_stride,
-        proposal_tgt_strides=args.proposal_tgt_strides,
-        proposal_min_size=args.proposal_min_size,
-        # transformer_encoder
-        add_transformer_encoder=args.add_transformer_encoder,
-        num_encoder_layers=args.num_encoder_layers,
+        d_model=cfg.get("d_model"),
+        nhead=cfg.get("nheads"),
+        num_feature_levels=cfg.get("num_feature_levels"),
+        two_stage=cfg.get("two_stage"),
+        two_stage_num_proposals=two_stage_num_proposals,
+        mixed_selection=cfg.get("mixed_selection"),
+        norm_type=cfg.get("norm_type"),
+        decoder_type=cfg.get("decoder_type"),
+        proposal_feature_levels=cfg.get("proposal_feature_levels"),
+        proposal_in_stride=cfg.get("proposal_in_stride"),
+        proposal_tgt_strides=cfg.get("proposal_tgt_strides"),
+        proposal_min_size=cfg.get("proposal_min_size"),
+        global_decoder_args=cfg.get("global_decoder_args"),
+        # transformer encoder bits
+        add_transformer_encoder=cfg.get("add_transformer_encoder"),
+        dim_feedforward=cfg.get("dim_feedforward"),
+        dropout=cfg.get("dropout"),
+        activation=cfg.get("activation"),
+        normalize_before=cfg.get("normalize_before"),
+        num_encoder_layers=cfg.get("num_encoder_layers"),
     )

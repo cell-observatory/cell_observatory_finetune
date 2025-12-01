@@ -16,7 +16,10 @@ Adapted from:
 
 import math
 import copy
-from typing import List, Dict
+import inspect
+from typing import Dict, Mapping, Any
+
+from hydra.utils import get_method
 
 import torch
 from torch import nn
@@ -26,62 +29,40 @@ from cell_observatory_finetune.training.helpers import get_clones
 from cell_observatory_finetune.models.layers.layers import inverse_sigmoid, MLP
 from cell_observatory_finetune.models.layers.positional_encodings import PositionalEmbeddingSinCos
 
-from cell_observatory_finetune.training.losses import build_plainDETR_Set_Loss
-from cell_observatory_finetune.models.heads.plain_detr_backbone import build_backbone_wrapper
-from cell_observatory_finetune.models.heads.plain_detr_transformer import build_transformer
 from cell_observatory_finetune.data.structures import box_xyzxyz_to_cxcyczwhd, delta2bbox, box_cxcyczwhd_to_xyzxyz
 
 
 class PlainDETR(nn.Module):
     def __init__(
         self,
-        #backbone
-        backbone_wrapper_args,
-        # adapter
-        adapter_args,
-        # transformer
-        transformer_args,
-        # criterion
-        criterion_args,
+        # pre-built modules
+        backbone: nn.Module,
+        transformer: nn.Module,
+        loss_module: nn.Module,
         # plainDETR args
-        backbone_embed_dim,
-        num_classes,
-        num_feature_levels,
-        aux_loss=True,
-        with_box_refine=False,
-        two_stage=False,
-        num_queries_one2one=300,
-        num_queries_one2many=0,
-        mixed_selection=False,
-        k_one2many=0,
-        lambda_one2many=0.0,
-        reparam=True,
-        normalize_pos_encodings=True,
+        backbone_embed_dim: int,
+        num_classes: int,
+        num_feature_levels: int,
+        aux_loss: bool = True,
+        with_box_refine: bool = False,
+        two_stage: bool = False,
+        num_queries_one2one: int = 300,
+        num_queries_one2many: int = 0,
+        mixed_selection: bool = False,
+        k_one2many: int = 0,
+        lambda_one2many: float = 0.0,
+        reparam: bool = True,
+        normalize_pos_encodings: bool = True,
     ):
         super().__init__()
 
-        # backbone
-        self.backbone = build_backbone_wrapper(backbone_wrapper_args, adapter_args)
-
-        # transformer
-        transformer_args["reparam"] = reparam
-        transformer_args["num_queries_one2one"] = num_queries_one2one
-        transformer_args["num_queries_one2many"] = num_queries_one2many
-        transformer_args["mixed_selection"] = mixed_selection
-        self.transformer = build_transformer(transformer_args)
-
-        # loss
-        self.loss = build_plainDETR_Set_Loss(criterion_args, 
-                                            num_classes=num_classes,
-                                            two_stage=two_stage, 
-                                            reparam=reparam, 
-                                            aux_loss=aux_loss, 
-                                            dec_layers=self.transformer.decoder.num_layers
-        )
+        # store modules built in BUILD()
+        self.backbone = backbone
+        self.transformer = transformer
+        self.loss = loss_module
 
         # plainDETR parameters
         num_queries = num_queries_one2one + num_queries_one2many
-        
         self.num_queries = num_queries
         
         hidden_dim = self.transformer.d_model
@@ -95,13 +76,9 @@ class PlainDETR(nn.Module):
         elif mixed_selection:
             self.query_embed = nn.Embedding(num_queries, hidden_dim)
         
-        self.input_proj = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Conv3d(backbone_embed_dim, hidden_dim, kernel_size=1),
-                    nn.GroupNorm(32, hidden_dim),
-                )
-            ]
+        self.input_proj = nn.Sequential(
+            nn.Conv3d(backbone_embed_dim, hidden_dim, kernel_size=1),
+            nn.GroupNorm(32, hidden_dim),
         )
 
         self.pos_embedding = PositionalEmbeddingSinCos(hidden_dim // 3, normalize=normalize_pos_encodings)
@@ -120,9 +97,10 @@ class PlainDETR(nn.Module):
         
         nn.init.constant_(self.bbox_embed.layers[-1].weight.data, 0)
         nn.init.constant_(self.bbox_embed.layers[-1].bias.data, 0)
-        for proj in self.input_proj:
-            nn.init.xavier_uniform_(proj[0].weight, gain=1)
-            nn.init.constant_(proj[0].bias, 0)
+        for m in self.input_proj.modules():
+            if isinstance(m, nn.Conv3d):
+                nn.init.xavier_uniform_(m.weight, gain=1)
+                nn.init.constant_(m.bias, 0)
 
         # if two-stage, the last class_embed and bbox_embed is for region proposal generation
         num_pred = (self.transformer.decoder.num_layers + 1) if two_stage else self.transformer.decoder.num_layers
@@ -172,7 +150,7 @@ class PlainDETR(nn.Module):
             src, mask = feat["x"], feat["mask"]
             pos = self.pos_embedding(src)
             pos_embeddings_list.append(pos)
-            srcs.append(self.input_proj[layer](src))
+            srcs.append(self.input_proj(src))
             masks.append(mask)
             assert mask is not None, "backbone must provide padding mask"
 
@@ -347,7 +325,7 @@ class PlainDETRReParam(PlainDETR):
             src, mask = feat["x"], feat["mask"]
             pos = self.pos_embedding(src)
             pos_embeddings_list.append(pos)
-            srcs.append(self.input_proj[layer](src))
+            srcs.append(self.input_proj(src))
             masks.append(mask)
             assert mask is not None, "backbone must provide padding mask"
 
@@ -506,3 +484,126 @@ class PlainDETRReParam(PlainDETR):
 
 #         results = [{"scores": s, "labels": l, "boxes": b} for s, l, b in zip(scores, labels, boxes)]
 #         return results
+
+
+def BUILD(cfg: Mapping[str, Any]) -> PlainDETR:
+    """
+    Factory for PlainDETR / PlainDETRReParam.
+
+    Expects a cfg shaped like your mae_large.yaml, i.e.:
+
+      BUILD: cell_observatory_finetune.models.meta_arch.plainDETR.BUILD
+
+      backbone_wrapper_args: {..., BUILD: "path.to.backbone_wrapper.BUILD"}
+      adapter_args:          {..., BUILD: "path.to.adapter.BUILD"}   (optional if wrapper handles it)
+      transformer_args:      {..., BUILD: "path.to.transformer.BUILD"}
+      criterion_args:        {..., BUILD: "path.to.loss_builder"}
+
+      # plus PlainDETR scalar args at top level
+      backbone_embed_dim: int
+      num_classes: int
+      num_feature_levels: int
+      aux_loss: bool
+      with_box_refine: bool
+      two_stage: bool
+      num_queries_one2one: int
+      num_queries_one2many: int
+      mixed_selection: bool
+      k_one2many: int
+      lambda_one2many: float
+      reparam: bool
+      normalize_pos_encodings: bool
+    """
+
+    model_cfg = cfg.models.meta_arch.plainDETR
+
+    # ------------------------------------------------------------------
+    # 1) Build backbone wrapper
+    # ------------------------------------------------------------------
+
+    bw_cfg = model_cfg["backbone_wrapper_args"]
+    build_backbone_wrapper = get_method(bw_cfg.BUILD)
+
+    adapter_cfg = model_cfg.get("adapter_args", None)
+    if adapter_cfg is not None:
+        backbone = build_backbone_wrapper(bw_cfg, adapter_cfg)
+    else:
+        backbone = build_backbone_wrapper(bw_cfg)
+
+    # ------------------------------------------------------------------
+    # 2) Build transformer
+    # ------------------------------------------------------------------
+
+    transformer_cfg = model_cfg["transformer_args"]
+    build_transformer = get_method(transformer_cfg.BUILD)
+
+    # The transformer BUILD reads its own fields (d_model, nheads, etc.)
+    # We still need to inject reparam + query counts so they stay in sync
+    reparam = model_cfg.get("reparam", True)
+    num_queries_one2one = model_cfg.get("num_queries_one2one")
+    num_queries_one2many = model_cfg.get("num_queries_one2many")
+    mixed_selection = model_cfg.get("mixed_selection")
+
+    transformer_build_cfg = dict(transformer_cfg)
+    transformer_build_cfg["reparam"] = reparam
+    transformer_build_cfg["num_queries_one2one"] = num_queries_one2one
+    transformer_build_cfg["num_queries_one2many"] = num_queries_one2many
+    transformer_build_cfg["mixed_selection"] = mixed_selection
+
+    transformer = build_transformer(transformer_build_cfg)
+
+    # ------------------------------------------------------------------
+    # 3) Build loss module (criterion)
+    # ------------------------------------------------------------------
+
+    crit_cfg = model_cfg["criterion_args"]
+    build_loss = get_method(crit_cfg.BUILD)
+
+    num_classes = model_cfg["num_classes"]
+    two_stage = model_cfg.get("two_stage", False)
+    aux_loss = model_cfg.get("aux_loss", True)
+
+    loss_module = build_loss(
+        crit_cfg,
+        num_classes=num_classes,
+        two_stage=two_stage,
+        reparam=reparam,
+        aux_loss=aux_loss,
+        dec_layers=transformer.decoder.num_layers,
+    )
+
+    # ------------------------------------------------------------------
+    # 4) Extract PlainDETR __init__ kwargs from top-level cfg
+    # ------------------------------------------------------------------
+
+    sig = inspect.signature(PlainDETR.__init__)
+    allowed = set(sig.parameters.keys()) - {"self", "backbone", "transformer", "loss_module"}
+
+    ignore_keys = {
+        "_target_",
+        "BUILD",
+        "backbone_wrapper_args",
+        "adapter_args",
+        "transformer_args",
+        "criterion_args",
+    }
+
+    init_kwargs: Dict[str, Any] = {}
+    for k, v in model_cfg.items():
+        if k in ignore_keys:
+            continue
+        if k in allowed:
+            init_kwargs[k] = v
+
+    # ------------------------------------------------------------------
+    # 5) Choose PlainDETR vs PlainDETRReParam and instantiate
+    # ------------------------------------------------------------------
+    
+    cls = PlainDETRReParam if reparam else PlainDETR
+
+    return cls(
+        backbone=backbone,
+        transformer=transformer,
+        loss_module=loss_module,
+        **init_kwargs,
+    )

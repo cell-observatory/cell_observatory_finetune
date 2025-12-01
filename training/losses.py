@@ -8,6 +8,7 @@ import copy
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.functional import interpolate
 
 from cell_observatory_finetune.models.ops.losses import (
     sigmoid_focal_loss, 
