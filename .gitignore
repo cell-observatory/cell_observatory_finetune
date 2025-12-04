@@ -1,14 +1,3 @@
-# Ignore compiled Python files and cache
-__pycache__/
-*.py[cod]
-
-# Ignore compiled ops3d extension
-src/ops3d/_C.*.so
-
-# Ignore VSCode, Jupyter, and system clutter
-.vscode/
-.ipynb_checkpoints/
-.DS_Store
 .idea/
 .DS_Store
 .DS_Store?
@@ -149,7 +138,31 @@ dmypy.json
 *.pclprof
 
 # Data
-dataset/
+/databases
+outputs/
+/databases
 archive/
+logs/
 pretrained_models/
-configs/env
+scaling/olddata/
+scaling/data/
+test_data
+scope_psf
+SyntheticPSFCache/
+*.npy
+examples/DM_State_510nm.csv
+src/pycharm.lnk
+src/LabVIEW_Shortcut.lnk
+src/LV_auto_batch.bat
+login.bat
+*.bat
+/scope_psf
+src/LV_auto_batch.bat_predict_rois
+/SyntheticPSFCache/
+/benchmarks/
+/scaling/
+*.npy
+.testmondata
+/plots/
+.history/
+pytests/
