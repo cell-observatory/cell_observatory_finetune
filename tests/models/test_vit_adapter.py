@@ -1,7 +1,12 @@
 import pytest
 
-import math
 import torch
+
+try:
+    from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
+    MSDEFORM_ATTN_AVAILABLE = True
+except ImportError:
+    MSDEFORM_ATTN_AVAILABLE = False
 
 from cell_observatory_finetune.models.adapters.vit_adapter import (
     ConvFFN,
@@ -9,12 +14,11 @@ from cell_observatory_finetune.models.adapters.vit_adapter import (
     CrossAttention,
     Extractor,
     SpatialPriorModule,
-    EncoderAdapter
+    EncoderAdapter,
 )
 
 
 # --- helpers ----
-
 
 def _prod(tup):
     p = 1
@@ -23,7 +27,7 @@ def _prod(tup):
     return p
 
 
-# --- ---- ----
+# --- CrossAttention --- #
 
 
 @pytest.mark.parametrize("B,Nq,Nk,C,H", [
@@ -38,7 +42,9 @@ def test_cross_attention_shapes(B, Nq, Nk, C, H):
     assert out.shape == (B, Nq, C)
 
 
-# DWConv — 3D and 4D paths
+# --- DWConv — 3D --- #
+
+
 @pytest.mark.parametrize("B,C,grids", [
     (2, 16, [(6, 8, 10), (3, 4, 5), (2, 2, 2)]),
     (1,  8, [(4, 4, 4),  (2, 2, 2), (1, 1, 1)]),
@@ -52,18 +58,9 @@ def test_dwconv_3d_shape(B, C, grids):
     assert y.shape == (B, N, C)
 
 
-# def test_dwconv_4d_shape():
-#     B, C = 1, 8
-#     grids = [(2, 2, 2, 2), (2, 1, 1, 1), (1, 1, 1, 1)]  # (T,Z,Y,X)
-#     offsets = [g[0] * g[1] * g[2] * g[3] for g in grids]
-#     N = sum(offsets)
-#     x = torch.randn(B, N, C)
-#     m = DWConv(dim=4, embed_dim=C, strategy="axial")
-#     y = m(x, grids=grids, offsets=offsets)
-#     assert y.shape == (B, N, C)
+# --- ConvFFN --- #
 
 
-# ConvFFN — shape preservation over tokens
 @pytest.mark.parametrize("dim,offset_grids", [
     (3, [(4,4,4), (2,2,2), (1,1,1)]),
     (3, [(3,5,7), (2,2,2), (1,1,1)]),
@@ -76,143 +73,65 @@ def test_convffn_tokens_shape(dim, offset_grids):
 
     grids = offset_grids
 
-    m = ConvFFN(in_features=C, 
-                dim=dim,
-                hidden_features=C, 
-                out_features=C, 
-                drop=0.0, 
-                strategy="axial"
+    m = ConvFFN(
+        in_features=C,
+        dim=dim,
+        hidden_features=C,
+        out_features=C,
+        drop=0.0,
+        strategy="axial",
     )
     y = m(x, query_level_shapes=grids, query_offsets=offsets)
     assert y.shape == (B, N, C)
 
 
-# def test_convffn_4d():
-#     B, C = 1, 16
-#     grids = [(2, 2, 2, 2), (1, 2, 2, 2), (1, 1, 1, 1)]
-#     offsets = [_prod(g) for g in grids]
-#     N = sum(offsets)
-#     x = torch.randn(B, N, C)
-#     m = ConvFFN(in_features=C, dim=4, hidden_features=C, out_features=C, drop=0.0, strategy="axial")
-#     y = m(x, grids=grids, offsets=offsets)
-#     assert y.shape == (B, N, C)
+# --- Extractor — CrossAttention branch (no deformable) --- #
 
 
-# Extractor — CrossAttention branch (no deformable)
 @pytest.mark.parametrize("B, Nk, C, num_heads, grids", [
     (2, 256, 48, 6, [(4,4,4), (4,4,2), (4,4,2)]),  # 64+32+32=128
     (1,  64,  32, 4, [(4,4,2), (4,2,2), (4,2,2)]), # 32+16+16=64
 ])
 def test_extractor_cross_attention_shapes(B, Nk, C, num_heads, grids):
-    m = Extractor(embed_dim=C, dim=3, use_deform_attention=False,
-                  num_heads=num_heads, with_cffn=True, cffn_ratio=0.5,
-                  strategy="axial")
+    m = Extractor(
+        embed_dim=C,
+        dim=3,
+        use_deform_attention=False,
+        num_heads=num_heads,
+        with_cffn=True,
+        cffn_ratio=0.5,
+        strategy="axial",
+    )
 
     offsets = [_prod(g) for g in grids]
     Nq = sum(offsets)
 
     query = torch.randn(B, Nq, C)
-    feat  = torch.randn(B, Nk, C)
+    feat = torch.randn(B, Nk, C)
 
-
-    out = m(query, feat,
-            reference_points=None, spatial_shapes=None, level_start_index=None,
-            query_level_shapes=grids, query_offsets=offsets)
+    out = m(
+        query=query,
+        features=feat,
+        reference_points=None,
+        spatial_shapes=None,
+        level_start_index=None,
+        query_level_shapes=grids,
+        query_offsets=offsets,
+    )
     assert out.shape == (B, Nq, C)
 
 
-# --- 4D Extractor —---
+# --- SpatialPriorModule — 3D --- #
 
 
-# @pytest.mark.parametrize("B,C,num_heads,grids", [
-#     (2, 48, 6, [(2, 2, 2, 2), (1, 2, 2, 1), (1, 1, 1, 1)]),  # 16 + 4 + 1 = 21
-#     (1, 32, 4, [(3, 2, 2, 1), (1, 2, 1, 1), (1, 1, 1, 1)]),  # 12 + 2 + 1 = 15
-# ])
-# def test_extractor_cross_attention_only_4d(B, C, num_heads, grids):
-#     dim = 4
-#     m = Extractor(
-#         embed_dim=C,
-#         dim=dim,
-#         use_deform_attention=False,
-#         num_heads=num_heads,
-#         with_cffn=False,
-#         cffn_ratio=0.5,
-#         strategy="axial",
-#     )
-
-#     def _prod(t):
-#         p = 1
-#         for v in t: p *= int(v)
-#         return p
-
-#     offsets = [_prod(g) for g in grids]
-#     Nq = sum(offsets)
-#     Nk = max(Nq // 2, 1)
-
-#     query = torch.randn(B, Nq, C)
-#     feat  = torch.randn(B, Nk, C)
-
-#     out = m(
-#         query=query,
-#         features=feat,
-#         reference_points=None,
-#         spatial_shapes=None,
-#         level_start_index=None,
-#         grids=grids,
-#         offsets=offsets,
-#     )
-#     assert out.shape == (B, Nq, C)
-
-
-# @pytest.mark.parametrize("B,C,num_heads,grids", [
-#     (2, 48, 6, [(2, 4, 4, 2), (1, 2, 2, 2), (1, 1, 1, 1)]),  # 64 + 8 + 1 = 73
-#     (1, 32, 4, [(3, 2, 2, 2), (1, 2, 1, 1), (1, 1, 1, 1)]),  # 24 + 2 + 1 = 27
-# ])
-# def test_extractor_cross_attention_shapes_4d_with_ffn(B, C, num_heads, grids):
-#     dim = 4
-#     m = Extractor(
-#         embed_dim=C,
-#         dim=dim,
-#         use_deform_attention=False,
-#         num_heads=num_heads,
-#         with_cffn=True,
-#         cffn_ratio=0.5,
-#         strategy="axial",
-#     )
-
-#     def _prod(t):
-#         p = 1
-#         for v in t: p *= int(v)
-#         return p
-
-#     offsets = [_prod(g) for g in grids]
-#     Nq = sum(offsets)
-#     Nk = max(Nq // 2, 1)
-
-#     query = torch.randn(B, Nq, C)
-#     feat  = torch.randn(B, Nk, C)
-
-#     out = m(
-#         query=query,
-#         features=feat,
-#         reference_points=None,
-#         spatial_shapes=None,
-#         level_start_index=None,
-#         grids=grids,
-#         offsets=offsets,
-#     )
-#     assert out.shape == (B, Nq, C)
-
-
-# SpatialPriorModule — 3D and 4D exact shapes
 @pytest.mark.parametrize(
     "B,in_ch,inplanes,embed_dim,ZYX",
     [
-        (2, 2, 16, 32, (32, 48, 64)),  # divisible by 16
-        (1, 3,  8, 16, (64, 64, 80)),  # divisible by 16
+        (2, 2, 16, 32, (32, 48, 64)),
+        (1, 3,  8, 16, (64, 64, 80)),
     ],
 )
-def test_spatial_prior_module_3d_simple_shapes(B, in_ch, inplanes, embed_dim, ZYX):
+def test_spatial_prior_module_3d(B, in_ch, inplanes, embed_dim, ZYX):
     Z, Y, X = ZYX
     x = torch.randn(B, in_ch, Z, Y, X)
     m = SpatialPriorModule(
@@ -224,6 +143,7 @@ def test_spatial_prior_module_3d_simple_shapes(B, in_ch, inplanes, embed_dim, ZY
     # out = floor((n + 2*pad - kernel)/stride + 1). For our blocks: k=3, pad=1.
     def step(n, stride):
         return (n - 1) // stride + 1
+
     def to_zyx(val):
         return (val, val, val) if isinstance(val, int) else val
 
@@ -240,146 +160,98 @@ def test_spatial_prior_module_3d_simple_shapes(B, in_ch, inplanes, embed_dim, ZY
     z2, y2, x2 = sizes_after["stage2"]
     z3, y3, x3 = sizes_after["stage3"]
     z4, y4, x4 = sizes_after["stage4"]
-    
+
     assert c1.shape == (B, z1 * y1 * x1, embed_dim)
     assert c2.shape == (B, z2 * y2 * x2, embed_dim)
     assert c3.shape == (B, z3 * y3 * x3, embed_dim)
     assert c4.shape == (B, z4 * y4 * x4, embed_dim)
 
 
-# @pytest.mark.parametrize(
-#     "B,in_ch,inplanes,embed_dim,TZYX",
-#     [
-#         (1, 2, 16, 32, (4, 32, 48, 64)),  # Z/Y/X divisible by 16
-#         (2, 3,  8, 24, (3, 48, 64, 80)),  # Z/Y/X divisible by 16
-#     ],
-# )
-# def test_spatial_prior_module_4d_simple_shapes(B, in_ch, inplanes, embed_dim, TZYX):
-#     T, Z, Y, X = TZYX
-#     x = torch.randn(B, T, Z, Y, X, in_ch)
-#     m = SpatialPriorModule(
-#         in_ch=in_ch, inplanes=inplanes, embed_dim=embed_dim, dim=4, strategy="axial"
-#     )
-#     out = m(x)
-#     c1, c2, c3, c4 = out
-
-#     # Temporal length preserved; spatial downsamples /2, /4, /8, /16
-#     z1, y1, x1 = Z // 2,  Y // 2,  X // 2
-#     z2, y2, x2 = Z // 4,  Y // 4,  X // 4
-#     z3, y3, x3 = Z // 8,  Y // 8,  X // 8
-#     z4, y4, x4 = Z // 16, Y // 16, X // 16
-#     # Shapes are (B, T, C, Z, Y, X) after the projection/reshape path
-#     assert c1.shape == (B, T, embed_dim, z1, y1, x1)
-#     assert c2.shape == (B, T, embed_dim, z2, y2, x2)
-#     assert c3.shape == (B, T, embed_dim, z3, y3, x3)
-#     assert c4.shape == (B, T, embed_dim, z4, y4, x4)
+# --- EncoderAdapter — metadata helpers --- #
 
 
-# EncoderAdapter (ViT Adapter) — metadata helpers & forward
-
-
-@pytest.mark.parametrize("dim,input_format,input_shape,patch", [
-    (3, "ZYXC",   (2, 32, 32, 32, 2), (None, 8, 8, )),   # temporal_patch ignored
-    # (4, "TZYXC",  (1, 4, 16, 16, 16, 2), (2, 8, 8)),     # Tp=2, Zp=8, YXp=8
+@pytest.mark.parametrize("B, dim, input_format, spatial_shape, patch", [
+    # Z, Y, X, C
+    (2, 3, "ZYXC",   (32, 32, 32, 2), (None, 8, 8)),
 ])
-def test_encoder_adapter_metadata_shapes(dim, input_format, input_shape, patch):
-    in_ch = input_shape[-1]
+def test_encoder_adapter_metadata_shapes(B, dim, input_format, spatial_shape, patch):
+    Z, Y, X, Cin = spatial_shape
+
     if dim == 3:
+        # patch_shape is (Zp, Yp, Xp, None) for 3D case
         patch_shape = (patch[1], patch[1], patch[1], None)
     else:
-        raise NotImplementedError("4D not implemented yet.")
+        raise NotImplementedError("Only 3D is implemented in this test.")
 
     adapter = EncoderAdapter(
         dim=dim,
-        in_channels=in_ch,
-        backbone_embed_dim=48,
-        input_shape=input_shape,
-        input_format=input_format,
-        dtype="float32",
+        input_shape=(Z, Y, X, Cin),
         patch_shape=patch_shape,
+        backbone_embed_dim=48,
+        input_format=input_format,
         use_deform_attention=False,
         deform_num_heads=6,
         strategy="axial",
     )
 
-    def _prod(tup):
-        p = 1
-        for v in tup:
-            p *= int(v)
-        return p
+    dummy_x = torch.randn(B, Z, Y, X, Cin)
+    ref, spatial_shapes, lsi, vr = adapter._get_deformable_and_ffn_metadata(dummy_x)
 
-    dummy_x = torch.randn(*input_shape)
-    md = adapter._get_deformable_and_ffn_metadata(dummy_x)
-    if dim == 3:
-        (ref, spatial_shapes, lsi, vr) = md
-        assert ref.shape[-1] == 3
-    # else:
-    #     (ref, spatial_shapes, lsi, vr, grids, offsets) = md
-    #     assert ref is None and spatial_shapes is None
-    #     assert len(grids) == 3 and len(offsets) == 3
+    # spatial_shapes should describe a single 3D patch grid
+    assert spatial_shapes.shape == (1, 3)
+    assert tuple(spatial_shapes[0].tolist()) == adapter.spatial_patchified_shape
 
+    # valid_ratios: [B, 1, 3]
+    assert vr.shape == (B, 1, 3)
 
-# def test_encoder_adapter_forward():
-#     B, T, Z, Y, X, Cin = 1, 16, 128, 128, 128, 2
-#     embed_dim = 48
-#     Tp, Zp, YXp = 2, 16, 16
-#     adapter = EncoderAdapter(
-#         dim=4,
-#         in_channels=Cin,
-#         backbone_embed_dim=embed_dim,
-#         input_shape=(B, T, Z, Y, X, Cin),
-#         input_format="TZYX",
-#         dtype="float32",
-#         axial_patch_size=Zp,
-#         lateral_patch_size=YXp,
-#         temporal_patch_size=Tp,
-#         use_deform_attention=False,
-#         deform_num_heads=6,
-#         strategy="axial",
-#     )
-#     Tp_, Zp_, Yp_, Xp_ = (T // Tp), (Z // Zp), (Y // YXp), (X // YXp)
-#     base = (Tp_, Zp_, Yp_, Xp_)  # (2, 2, 2, 2)
-#     pyr = [
-#         (base[0], base[1] * 2, base[2] * 2, base[3] * 2), 
-#         base, 
-#         (base[0], max(1, base[1] // 2), max(1, base[2] // 2), 
-#          max(1, base[3] // 2))
-#     ]
-#     N = _prod(base)
-#     features = [torch.randn(B, N, embed_dim) for _ in range(4)]
-#     x = torch.randn(B, T, Z, Y, X, Cin)
-#     y = adapter(x, features)
-#     f1, f2, f3, f4 = y
-#     assert f1.shape == (B,embed_dim, T, Z // 2, Y // 2, X // 2)
-#     assert f2.shape == (B,embed_dim, T // 2, Z // 8, Y // 8, X // 8)
-#     assert f3.shape == (B,embed_dim, T // 2, Z // 16, Y // 16, X // 16)
-#     assert f4.shape == (B,embed_dim, T // 2, Z // 32, Y // 32, X // 32)
+    # reference_points: [B, Len_q, 1, 3] where Len_q is sum over c2–c4 token counts
+    q_shapes = adapter.query_level_shapes[1:]  # skip c1
+    len_q = sum(_prod(s) for s in q_shapes)
+    assert ref.shape == (B, len_q, 1, 3)
+    assert ref.shape[-1] == 3
 
+@pytest.mark.skipif(
+    not MSDEFORM_ATTN_AVAILABLE,
+    reason="FlashDeformAttn3D (MSDEFORM_ATTN_AVAILABLE) is not installed.",
+)
+def test_encoder_adapter_forward_deform_attn():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA is required to run deformable attention test.")
 
-def test_encoder_adapter_forward():
-    B, Z, Y, X, Cin = 1, 128, 128, 128, 2
+    device = torch.device("cuda")
+
+    B, Z, Y, X, Cin = 1, 64, 64, 64, 2
     embed_dim = 48
-    Tp, Zp, YXp = 1, 16, 16
+    Zp, YXp = 8, 8  # patch size
+
     adapter = EncoderAdapter(
-         dim=3,
-         in_channels=Cin,
-         backbone_embed_dim=embed_dim,
-         input_shape=(Z, Y, X, Cin),
-         input_format="ZYXC",
-         dtype="float32",
-         patch_shape=(Zp, YXp, YXp, None),
-         use_deform_attention=False,
-         deform_num_heads=6,
-         strategy="axial",
-     )
+        dim=3,
+        input_shape=(Z, Y, X, Cin),
+        patch_shape=(Zp, YXp, YXp, None),
+        backbone_embed_dim=embed_dim,
+        input_format="ZYXC",
+        use_deform_attention=True,
+        deform_num_heads=6,
+        strategy="axial",
+        dtype="bfloat16",
+    ).to(device)
+
+    # ViT patch grid shape
     Zp_, Yp_, Xp_ = (Z // Zp), (Y // YXp), (X // YXp)
-    base = (Zp_, Yp_, Xp_)
-    N = _prod(base)
-    features = [torch.randn(B, N, embed_dim) for _ in range(4)]
-    x = torch.randn(B, Z, Y, X, Cin)
-    y = adapter(x, features)
-    f1, f2, f3, f4 = y
-    assert f1.shape == (B,embed_dim, Z // 2, Y // 2, X // 2)
-    assert f2.shape == (B,embed_dim, Z // 8, Y // 8, X // 8)
-    assert f3.shape == (B,embed_dim, Z // 16, Y // 16, X // 16)
-    assert f4.shape == (B,embed_dim, Z // 32, Y // 32, X // 32)
+    base = (Zp_, Yp_, Xp_)       # e.g. (8, 8, 8)
+    N = _prod(base)              # number of tokens per feature map
+
+    # ViT backbone features: four feature maps with N tokens each
+    features = [torch.randn(B, N, embed_dim, device=device) for _ in range(4)]
+
+    x = torch.randn(B, Z, Y, X, Cin, device=device)
+    y = adapter(x, features)  # dict {"1": f1, "2": f2, "3": f3, "4": f4}
+
+    f1, f2, f3, f4 = y["1"], y["2"], y["3"], y["4"]
+
+    # Expected pyramid shapes given SPM strides:
+    # c1 ~ Z/2,  c2 ~ Z/8, c3 ~ Z/16, c4 ~ Z/32
+    assert f1.shape == (B, embed_dim, Z // 2,  Y // 2,  X // 2)
+    assert f2.shape == (B, embed_dim, Z // 8,  Y // 8,  X // 8)
+    assert f3.shape == (B, embed_dim, Z // 16, Y // 16, X // 16)
+    assert f4.shape == (B, embed_dim, Z // 32, Y // 32, X // 32)

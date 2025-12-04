@@ -1,6 +1,9 @@
-name: linear
-decoder_with_bn: False
-decoder_num_layers: 3
-decoder_hidden_dim: 2048
-decoder_bottleneck_dim: 256
-decoder_mlp_bias: True
+BUILD: cell_observatory_finetune.models.heads.linear_head.BUILD
+
+in_dim: null
+output_dim: null
+use_bn: false
+nlayers: 3
+hidden_dim: 2048
+bottleneck_dim: 256
+mlp_bias: true

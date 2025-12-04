@@ -1,6 +1,0 @@
-name: dense_predictor
-decoder_use_bn: False
-decoder_feature_map_channels: [256, 256, 256, 256]
-decoder_strategy: "axial"
-decoder_embed_dim: 256
-encoder_out_layers: [6, 12, 18, 23]

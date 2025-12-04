@@ -10,7 +10,7 @@ from torch.autograd.function import once_differentiable
 try:
     from ops3d import _C
 except ImportError:
-    print("3D NMS op failed to load. Please compile ops3d if needed.")
+    print("ops3D failed to load. Please compile ops3d if needed.")
 
 def factors(N):
     res = []
@@ -62,7 +62,7 @@ def findspec_bwd(B, Q, G, C, max_tpb=256, max_mult=64):
 
 class FlashDeformAttnFunction(Function):
     @staticmethod
-    @torch.autocast("cuda", enabled=True, dtype=torch.float16)
+    # @torch.autocast("cuda", enabled=True, dtype=torch.float16)
     def forward(
         ctx, 
         value, 

@@ -10,6 +10,7 @@ import math
 import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from cell_observatory_finetune.models.layers.layers import Conv3d, MLP
 from cell_observatory_finetune.models.layers.utils import c2_xavier_fill
@@ -27,7 +28,17 @@ class SelfAttentionLayer(nn.Module):
                  normalize_before=False
     ):
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+
+        assert d_model % nhead == 0, "d_model must be divisible by nhead"
+        self.d_model = d_model
+        self.num_heads = nhead
+        self.d_head = d_model // nhead
+        self.attn_drop = dropout
+
+        self.q_proj = nn.Linear(d_model, d_model)
+        self.k_proj = nn.Linear(d_model, d_model)
+        self.v_proj = nn.Linear(d_model, d_model)
+        # self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
 
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
@@ -44,6 +55,31 @@ class SelfAttentionLayer(nn.Module):
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
+    
+    # (B, L, C) -> (B, H, L, d_head)
+    def split_heads(self, x: Tensor) -> Tensor:
+        B, L, C = x.shape
+        x = x.view(B, L, self.num_heads, self.d_head)
+        return x.permute(0, 2, 1, 3)  # (B, H, L, d_head)
+
+    # (B, H, L, d_head) -> (B, L, C)
+    def combine_heads(self, x: Tensor) -> Tensor:
+        B, H, L, d = x.shape
+        return x.permute(0, 2, 1, 3).reshape(B, L, H * d)
+    
+    def _build_attn_mask(
+        self,
+        tgt_mask: Optional[Tensor],
+        device: torch.device,
+    ) -> Optional[Tensor]:
+        attn_mask = None
+        if tgt_mask is not None:
+            m = tgt_mask.to(device)
+            if m.dtype != torch.bool and not torch.is_floating_point(m):
+                m = m.bool()
+            # (L, L) -> (1, 1, L, L) so it broadcasts over batch & heads
+            attn_mask = m.unsqueeze(0).unsqueeze(0)  # (1, 1, L, L)
+        return attn_mask
 
     def forward_post(
         self,
@@ -52,12 +88,41 @@ class SelfAttentionLayer(nn.Module):
         tgt_key_padding_mask: Optional[Tensor] = None,
         query_pos: Optional[Tensor] = None,
     ):
-        q = k = self.with_pos_embed(tgt, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask, 
-                              key_padding_mask=tgt_key_padding_mask)[0]
-        tgt = tgt + self.dropout(tgt2)
+        device = tgt.device
+
+        # (L, B, C) -> (B, L, C)
+        target = tgt.transpose(0, 1)
+        query_pos = query_pos.transpose(0, 1) if query_pos is not None else None
+
+        q_in = self.with_pos_embed(target, query_pos)
+        k_in = q_in
+        v_in = target
+
+        q = self.split_heads(self.q_proj(q_in))  # (B, H, L, d)
+        k = self.split_heads(self.k_proj(k_in))  # (B, H, L, d)
+        v = self.split_heads(self.v_proj(v_in))  # (B, H, L, d)
+
+        attn_mask = self._build_attn_mask(
+            tgt_mask=tgt_mask,
+            device=device,
+        )
+
+        with sdpa_kernel(
+            [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]
+        ):
+            attn_out = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=attn_mask,
+                dropout_p=self.attn_drop if self.training else 0.0,
+                is_causal=False,
+            )  # (B, H, L, d)
+
+        attn_out = self.combine_heads(attn_out)  # (B, L, C)
+        tgt = target + self.dropout(attn_out)
         tgt = self.norm(tgt)
-        return tgt
+        return tgt.transpose(0, 1)
 
     def forward_pre(
         self,
@@ -66,12 +131,67 @@ class SelfAttentionLayer(nn.Module):
         tgt_key_padding_mask: Optional[Tensor] = None,
         query_pos: Optional[Tensor] = None,
     ):
-        tgt2 = self.norm(tgt)
-        q = k = self.with_pos_embed(tgt2, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask, 
-                              key_padding_mask=tgt_key_padding_mask)[0]
-        tgt = tgt + self.dropout(tgt2)
-        return tgt
+        device = tgt.device
+        target = tgt.transpose(0, 1)
+        query_pos = query_pos.transpose(0, 1) if query_pos is not None else None
+        tgt2 = self.norm(target)
+
+        q_in = self.with_pos_embed(tgt2, query_pos)
+        k_in = q_in
+        v_in = tgt2
+
+        q = self.split_heads(self.q_proj(q_in))  # (B, H, L, d)
+        k = self.split_heads(self.k_proj(k_in))  # (B, H, L, d)
+        v = self.split_heads(self.v_proj(v_in))  # (B, H, L, d)
+
+        attn_mask = self._build_attn_mask(
+            tgt_mask=tgt_mask,
+            device=device,
+        )
+
+        with sdpa_kernel(
+            [SDPBackend.FLASH_ATTENTION, SDPBackend.MATH, SDPBackend.EFFICIENT_ATTENTION]
+        ):
+            attn_out = F.scaled_dot_product_attention(
+                q,
+                k,
+                v,
+                attn_mask=attn_mask,
+                dropout_p=self.attn_drop if self.training else 0.0,
+                is_causal=False,
+            )  # (B, H, L, d)
+
+        attn_out = self.combine_heads(attn_out)
+        tgt = target + self.dropout(attn_out)
+        return tgt.transpose(0, 1)
+
+    # def forward_post(
+    #     self,
+    #     tgt,
+    #     tgt_mask: Optional[Tensor] = None,
+    #     tgt_key_padding_mask: Optional[Tensor] = None,
+    #     query_pos: Optional[Tensor] = None,
+    # ):
+    #     q = k = self.with_pos_embed(tgt, query_pos)
+    #     tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask, 
+    #                           key_padding_mask=tgt_key_padding_mask)[0]
+    #     tgt = tgt + self.dropout(tgt2)
+    #     tgt = self.norm(tgt)
+    #     return tgt
+
+    # def forward_pre(
+    #     self,
+    #     tgt,
+    #     tgt_mask: Optional[Tensor] = None,
+    #     tgt_key_padding_mask: Optional[Tensor] = None,
+    #     query_pos: Optional[Tensor] = None,
+    # ):
+    #     tgt2 = self.norm(tgt)
+    #     q = k = self.with_pos_embed(tgt2, query_pos)
+    #     tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask, 
+    #                           key_padding_mask=tgt_key_padding_mask)[0]
+    #     tgt = tgt + self.dropout(tgt2)
+    #     return tgt
 
     def forward(
         self,

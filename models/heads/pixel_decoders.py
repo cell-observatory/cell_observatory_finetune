@@ -23,6 +23,7 @@ from cell_observatory_finetune.models.layers.positional_encodings import Positio
 from cell_observatory_finetune.models.layers.utils import compute_unmasked_ratio, get_reference_points
 
 from cell_observatory_platform.models.norm import get_norm
+from cell_observatory_platform.data.data_types import TORCH_DTYPES
 from cell_observatory_platform.models.activation import get_activation
 
 
@@ -182,8 +183,7 @@ class MSDeformAttnTransformerEncoder(nn.Module):
                                        level_start_index, 
                                        valid_ratios, 
                                        positional_embeddings, 
-                                       masks_flattened
-                                       )
+                                       masks_flattened)
 
         return memory, feature_shapes, level_start_index
 
@@ -191,7 +191,7 @@ class MSDeformAttnTransformerEncoder(nn.Module):
 class MaskDINOEncoder(nn.Module):
     def __init__(
         self,
-        input_shape: Dict,
+        input_shape_metadata: Dict,
         # deformable transformer encoder args
         transformer_in_features: List[str],
         target_min_stride: int,
@@ -203,20 +203,11 @@ class MaskDINOEncoder(nn.Module):
         conv_dim: int,
         mask_dim: int,
         norm: Callable = None,
+        dtype: str = "bfloat16"
     ):
-        """
-        Args:
-            input_shape: shapes (channels and stride) of the input features
-            transformer_dropout: dropout probability in transformer
-            transformer_nheads: number of heads in transformer
-            transformer_dim_feedforward: dimension of feedforward network
-            transformer_enc_layers: number of transformer encoder layers
-            conv_dims: number of output channels for the intermediate conv layers.
-            mask_dim: number of output channels for the final conv layer.
-            norm (callable): normalization for all conv layers
-            total_num_feature_levels: total feature scales used (including downsampled features).
-        """
         super().__init__()
+
+        self.dtype = TORCH_DTYPES[dtype].value if isinstance(dtype, str) else dtype
 
         # MaskDINOEncoder:
         # 1. Backbone inputs : len(transformer_in_features)
@@ -228,7 +219,7 @@ class MaskDINOEncoder(nn.Module):
         # 7. Mask head : single 1×1 conv on coarsest FPN map
 
         # determine shapes of input features
-        input_shapes = {k: v for k, v in input_shape.items() if k in transformer_in_features}
+        input_shapes = {k: v for k, v in input_shape_metadata.items() if k in transformer_in_features}
         # sort feature shapes from high to low resolution
         input_shapes_sorted = sorted(input_shapes.items(), key=lambda x: -x[1]["stride"])
         
@@ -239,9 +230,9 @@ class MaskDINOEncoder(nn.Module):
 
         # note that this is not sorted in high resolution -> low resolution order
         # this will be important for order in which we iterate for FPN lateral fusion   
-        input_shape = sorted(input_shape.items(), key = lambda x: x[1]["stride"])
+        input_shape_metadata = sorted(input_shape_metadata.items(), key = lambda x: x[1]["stride"])
         self.full_feature_map_set, _, self.full_feature_set_channels = zip(*[(k, v["stride"], v["channels"]) \
-                                                                             for k, v in input_shape])
+                                                                             for k, v in input_shape_metadata])
         self.total_num_feature_levels = total_num_feature_levels
 
         # define modules:
@@ -251,7 +242,13 @@ class MaskDINOEncoder(nn.Module):
         # 3. position embedding (sine positional encoding)
         # 4. mask feature conv layer (1x1 conv to reduce channels for mask prediction)
         # 5. FPN layers (lateral and output convs for top-down fusion)
-        
+
+        assert conv_dim % 32 == 0 and conv_dim % 3 == 0, \
+            "conv_dim must be divisible by 32 and 3!"
+
+        assert (conv_dim / transformer_encoder_num_heads) % 8 == 0, \
+            "conv_dim / transformer_encoder_num_heads must be divisible by 8!"
+
         if self.num_feature_levels > 1:
             channel_align_blocks = []
             # align all feature maps to have the same channel dim
@@ -345,7 +342,7 @@ class MaskDINOEncoder(nn.Module):
         # encode feature maps with deformable attention transformer encoder
         # features_list: List[Tensor[B, C, D, H, W]] ordered
         # masks: List[Tensor[B, D, H, W]] ordered
-        # retuns:
+        # returns:
         # transformer_features: Tensor[B, sum(D*H*W), C], shapes: List[(D, H, W)], level_start_index: Tensor[num_levels]
         transformer_features, shapes, level_start_index = self.transformer_encoder(features_list, masks, pos_embeddings_list)
         

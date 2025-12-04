@@ -1,3 +1,8 @@
+import inspect
+from typing import Mapping, Any
+
+from omegaconf import ListConfig
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -5,7 +10,7 @@ import torch.nn.functional as F
 from timm.layers.drop import DropPath
 
 try:
-    from cell_observatory_finetune.models.ops.flash_deform_attn import MSDeformAttn
+    from cell_observatory_finetune.models.ops.flash_deform_attn import FlashDeformAttn3D
     MSDEFORM_ATTN_AVAILABLE = True
 except ImportError:
     MSDEFORM_ATTN_AVAILABLE = False
@@ -97,7 +102,7 @@ class DWConv(nn.Module):
                 y = feature_map.transpose(1,2).reshape(B,C,Z,Y,X)
                 y = self.spatial_conv(y).flatten(2).transpose(1,2)
             else:
-                raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
+                raise ValueError(f"Only Dim=3 with axial strategy is supported, "
                                  f"got dim={self.dim}, strategy={self.strategy}.")
 
             out.append(y)
@@ -159,12 +164,12 @@ class Extractor(nn.Module):
         if use_deform_attention:
             assert dim == 3, "Deformable attention kernel is only supported in 3D currently."
             self.with_deform_attention = True
-            self.attn = MSDeformAttn(
+            self.attn = FlashDeformAttn3D(
                 d_model=embed_dim, 
                 n_levels=n_levels, 
                 n_heads=num_heads, 
                 n_points=n_points, 
-                ratio=deform_ratio
+                # ratio=deform_ratio
             )
         else:
             self.with_deform_attention = False
@@ -191,11 +196,11 @@ class Extractor(nn.Module):
     ):
         if self.with_deform_attention:
             attn = self.attn(
-                self.query_norm(query), 
-                reference_points, 
-                self.feat_norm(features), 
-                spatial_shapes, 
-                level_start_index, 
+                self.query_norm(query),
+                reference_points,
+                self.feat_norm(features),
+                spatial_shapes,
+                level_start_index,
                 None
             )
         else:
@@ -208,7 +213,6 @@ class Extractor(nn.Module):
         return query
 
 
-
 class InteractionBlock(nn.Module):
     def __init__(
         self,
@@ -218,6 +222,7 @@ class InteractionBlock(nn.Module):
         use_deform_attention=False,
         num_heads=6,
         n_points=4,
+        n_levels=1,
         norm_layer="LayerNorm",
         drop=0.0,
         drop_path=0.0,
@@ -234,7 +239,7 @@ class InteractionBlock(nn.Module):
             dim=dim,
             embed_dim=embed_dim,
             use_deform_attention=use_deform_attention,
-            n_levels=1,
+            n_levels=n_levels,
             num_heads=num_heads,
             n_points=n_points,
             norm_layer=norm_layer,
@@ -280,6 +285,9 @@ class InteractionBlock(nn.Module):
                 query_level_shapes, 
                 query_offsets
     ):
+        assert query.shape[1] == reference_points.shape[1]  # Len_q match
+        assert spatial_shapes.prod(1).sum().item() == features.shape[1]  # Len_v match
+
         c = self.extractor(
             query=query,
             reference_points=reference_points,
@@ -411,19 +419,18 @@ class EncoderAdapter(nn.Module):
     def __init__(
         self,
         dim,
-        in_channels,
-        backbone_embed_dim,
         input_shape,
+        patch_shape,
+        backbone_embed_dim,
         input_format,
-        dtype="bfloat16",
-        patch_shape=(4,16,16,16),
-        interaction_indexes=[9, 19, 29, 39],
+        num_backbone_features=4,
         add_vit_feature=True,
         # Spatial Prior Module parameters
         conv_inplane=64,
         # deformable attention parameters
         use_deform_attention=False,
         n_points=4,
+        n_levels=1,
         deform_num_heads=16,
         drop_path_rate=0.3,
         init_values=0.0,
@@ -440,19 +447,19 @@ class EncoderAdapter(nn.Module):
             "stage2": (2,2,2),
             "stage3": (2,2,2),
             "stage4": (2,2,2),
-        }
+        },
+        dtype: str = "bfloat16",
     ):
         super(EncoderAdapter, self).__init__()
 
         self.strategy = strategy
 
+        self.dim = dim
+
         self.dtype = TORCH_DTYPES[dtype].value if isinstance(dtype, str) else dtype
 
-        self.dim = dim
-        self.in_channels = in_channels
-
         self.add_vit_feature = add_vit_feature
-        self.interaction_indexes = interaction_indexes
+        self.num_backbone_features = num_backbone_features
 
         self.use_deform_attention = use_deform_attention
         if use_deform_attention and not MSDEFORM_ATTN_AVAILABLE:
@@ -478,6 +485,9 @@ class EncoderAdapter(nn.Module):
             self.spatial_shape = (axis_to_value.get("Z", None),
                                 axis_to_value.get("Y", None),
                                 axis_to_value.get("X", None))
+
+        self.in_channels = axis_to_value.get("C", None)
+        assert self.in_channels is not None, "Input format must contain 'C' channel."
 
         self.spatial_patchified_shape = self._get_spatial_patchified_shape(
             self.spatial_shape, 
@@ -521,6 +531,7 @@ class EncoderAdapter(nn.Module):
                     use_deform_attention=self.use_deform_attention,
                     num_heads=deform_num_heads,
                     n_points=n_points,
+                    n_levels=n_levels,
                     init_values=init_values,
                     drop_path=drop_path_rate,
                     norm_layer="LayerNorm",
@@ -528,19 +539,19 @@ class EncoderAdapter(nn.Module):
                     cffn_ratio=cffn_ratio,
                     deform_ratio=deform_ratio,
                     extra_extractor=(
-                        (True if i == len(self.interaction_indexes) - 1 else False) \
+                        (True if i == self.num_backbone_features - 1 else False) \
                             and use_extra_extractor
                     ),
                     strategy=self.strategy
                 )
-                for i in range(len(self.interaction_indexes))
+                for i in range(self.num_backbone_features)
             ]
         )
 
         if self.dim == 3 and self.strategy == 'axial':
             self.up_spatial = nn.ConvTranspose3d(self.embed_dim, self.embed_dim, 2, 2)
         else:
-            raise ValueError(f"Only Dim=3 or Dim=4 with axial strategy is supported, "
+            raise ValueError(f"Only Dim=3 with axial strategy is supported, "
                              f"got dim={self.dim}, strategy={self.strategy}.")
 
         self.norm1 = nn.SyncBatchNorm(self.embed_dim)
@@ -551,12 +562,11 @@ class EncoderAdapter(nn.Module):
         if self.use_deform_attention:
             self.apply(self._init_deform_weights)
 
-
     def _get_stride(self, key: str, val):
         if isinstance(val, int):
             if self.dim == 3:
                 return (1, val, val, val)
-        if isinstance(val, tuple):
+        if isinstance(val, (tuple, list, ListConfig)):
             if len(val) == 3:
                 z, y, x = val
                 return (1, z, y, x)
@@ -631,7 +641,7 @@ class EncoderAdapter(nn.Module):
             raise ValueError(f"Unsupported input format: {input_format}")
 
     def _init_deform_weights(self, m):
-        if isinstance(m, MSDeformAttn):
+        if isinstance(m, FlashDeformAttn3D):
             m._reset_parameters()
 
     def _add_level_embed(self, c2, c3, c4):
@@ -655,7 +665,7 @@ class EncoderAdapter(nn.Module):
 
         # NOTE: we are not really using valid ratios here, but need to pass them to MSDeformAttn
         num_levels = len(patch_sizes)
-        valid_ratios = torch.ones((B, num_levels, 3), dtype=torch.float32, device=device)
+        valid_ratios = torch.ones((B, num_levels, 3), dtype=self.dtype, device=device)
 
         if self.dim == 3:
             # in DINOV3 they generate 1 level of reference points with three levels
@@ -674,18 +684,56 @@ class EncoderAdapter(nn.Module):
         reference_points = get_reference_points(feat_level_list, valid_ratios, device)
         return reference_points, spatial_shapes, level_start_index, valid_ratios
     
-    def _get_deformable_and_ffn_metadata(self, x):
+    # def _get_deformable_and_ffn_metadata(self, x):
+    #     device = x.device
+    #     B = x.shape[0]
+
+    #     if self.dim == 3:
+    #         grids = [self.spatial_patchified_shape]
+    #         reference_points, spatial_shapes, level_start_index, valid_ratios = \
+    #             self._get_deformable_attention_metadata(device, B, grids)
+    #         return reference_points, spatial_shapes, level_start_index, valid_ratios
+        
+    #     else:
+    #         raise ValueError(f"Unsupported dim: {self.dim}")
+
+    def _get_deformable_and_ffn_metadata(self, x: torch.Tensor):
+        if self.dim != 3:
+            raise ValueError(f"Unsupported dim: {self.dim}")
+
         device = x.device
         B = x.shape[0]
 
-        if self.dim == 3:
-            grids = [self.spatial_patchified_shape]
-            reference_points, spatial_shapes, level_start_index, valid_ratios = \
-                self._get_deformable_attention_metadata(device, B, grids)
-            return reference_points, spatial_shapes, level_start_index, valid_ratios
-        
-        else:
-            raise ValueError(f"Unsupported dim: {self.dim}")
+        Zp, Yp, Xp = self.spatial_patchified_shape
+        spatial_shapes = torch.as_tensor(
+            [(Zp, Yp, Xp)], dtype=torch.long, device=device
+        )
+        level_start_index = spatial_shapes.new_zeros((1,))
+        valid_ratios = torch.ones((B, 1, 3), dtype=self.dtype, device=device)
+
+        level_shapes = self.query_level_shapes[1:]  # c2–c4
+
+        ref_list = []
+        for (Z, Y, X) in level_shapes:
+            z_lin = torch.linspace(
+                0.5, Z - 0.5, Z, device=device, dtype=self.dtype
+            ) / float(Z)
+            y_lin = torch.linspace(
+                0.5, Y - 0.5, Y, device=device, dtype=self.dtype
+            ) / float(Y)
+            x_lin = torch.linspace(
+                0.5, X - 0.5, X, device=device, dtype=self.dtype
+            ) / float(X)
+
+            zz, yy, xx = torch.meshgrid(z_lin, y_lin, x_lin, indexing="ij")
+            ref = torch.stack([zz, yy, xx], dim=-1)      # (Z, Y, X, 3), bf16
+            ref = ref.reshape(1, -1, 1, 3)               # (1, Z*Y*X, 1, 3)
+            ref_list.append(ref)
+
+        reference_points = torch.cat(ref_list, dim=1)           # (1, Len_q, 1, 3)
+        reference_points = reference_points.expand(B, -1, -1, -1)
+        reference_points = reference_points * valid_ratios[:, None, :, :]
+        return reference_points, spatial_shapes, level_start_index, valid_ratios
 
     def _upsample_spatial_3d(self, x: torch.Tensor, spatial_size, align_corners=False):
         if tuple(x.shape[-3:]) == tuple(spatial_size):
@@ -788,4 +836,33 @@ class EncoderAdapter(nn.Module):
         f3 = self.norm3(c3)
         f4 = self.norm4(c4)
 
-        return f1, f2, f3, f4
+        return {"1": f1, "2": f2, "3": f3, "4": f4}
+
+
+def _extract_model_kwargs(cfg: Mapping[str, Any]) -> dict:
+    sig = inspect.signature(EncoderAdapter.__init__)
+    allowed = set(sig.parameters.keys()) - {"self"}
+    ignore = {"_target_", "BUILD", "input_channels"}
+
+    kwargs = {}
+    for k, v in cfg.items():
+        if k in ignore or k not in allowed:
+            continue
+        kwargs[k] = v
+    return kwargs
+
+
+def BUILD(adapter_args: dict):
+    adapter_args = dict(adapter_args)  # make a copy
+
+    input_channels = adapter_args.get("input_channels")
+    input_shape = adapter_args.get("input_shape")
+    if input_channels is not None:
+        assert adapter_args["input_format"][-1] == "C", \
+            "Input format must end with 'C' when specifying input_channels."
+        adapter_args["input_shape"] = list(input_shape)
+        adapter_args["input_shape"][-1] = int(input_channels)
+        adapter_args["input_shape"] = tuple(adapter_args["input_shape"])
+
+    adapter_args.pop("input_channels", None)
+    return EncoderAdapter(**_extract_model_kwargs(cfg=adapter_args))

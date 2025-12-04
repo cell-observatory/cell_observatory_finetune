@@ -4,6 +4,8 @@ https://github.com/DepthAnything/Depth-Anything-V2/blob/main/depth_anything_v2/u
 https://github.com/DepthAnything/Depth-Anything-V2/blob/main/depth_anything_v2/dpt.py#L118
 """
 
+import inspect
+from typing import Mapping, Any
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -481,3 +483,38 @@ class DPTHead(nn.Module):
         )
 
         return out
+    
+
+def _extract_model_kwargs(cfg: Mapping[str, Any]) -> dict:
+    sig = inspect.signature(DPTHead.__init__)
+    allowed = set(sig.parameters.keys()) - {"self"}
+    ignore = {"_target_", "BUILD"}
+
+    kwargs = {}
+    for k, v in cfg.items():
+        if k in ignore or k not in allowed:
+            continue
+        kwargs[k] = v
+    return kwargs
+
+
+def BUILD(cfg: Mapping[str, Any]) -> DPTHead:
+    """
+    Hydra entrypoint for DPTHead.
+
+    Example cfg:
+
+      decoder_args:
+        _target_: cell_observatory_finetune.models.heads.dense_predictor_head.BUILD
+        input_channels: 768   # usually embed_dim of backbone
+        output_channels: 2
+        input_format: TZYXC
+        input_shape: [16, 128, 128, 128, 2]
+        patch_shape: [4, 16, 16, 16]
+        features: 256
+        use_bn: true
+        feature_map_channels: [256, 512, 1024, 1024]
+        strategy: axial
+
+    """
+    return DPTHead(**_extract_model_kwargs(cfg))

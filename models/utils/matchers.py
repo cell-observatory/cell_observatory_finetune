@@ -1,38 +1,8 @@
 """
+Adapted from:
 https://github.com/pytorch/vision/blob/309bd7a1512ad9ff0e9729fbdad043cb3472e4cb/torchvision/models/detection/_utils.py#L317
 https://github.com/IDEA-Research/MaskDINO/blob/main/maskdino/modeling/matcher.py
-
-BSD 3-Clause License
-
-Copyright (c) Soumith Chintala 2016, 
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-* Redistributions of source code must retain the above copyright notice, this
-  list of conditions and the following disclaimer.
-
-* Redistributions in binary form must reproduce the above copyright notice,
-  this list of conditions and the following disclaimer in the documentation
-  and/or other materials provided with the distribution.
-
-* Neither the name of the copyright holder nor the names of its
-  contributors may be used to endorse or promote products derived from
-  this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
 """
-
 
 from scipy.optimize import linear_sum_assignment
 
@@ -41,8 +11,11 @@ from torch import nn
 from torch.amp import autocast
 
 from cell_observatory_finetune.models.layers.utils import point_sample
-from cell_observatory_finetune.data.structures.boxes import generalized_box_iou, box_cxcyczwhd_to_xyzxyz
-from cell_observatory_finetune.training.losses import batch_sigmoid_ce_loss, batch_sigmoid_ce_loss_jit, batch_dice_loss, batch_dice_loss_jit
+from cell_observatory_finetune.models.ops.losses import (
+    batch_dice_loss,
+    batch_sigmoid_ce_loss,
+)
+from cell_observatory_finetune.data.structures import generalized_box_iou, box_cxcyczwhd_to_xyzxyz, bbox2delta
 
 
 class HungarianMatcher(nn.Module):
@@ -107,10 +80,11 @@ class HungarianMatcher(nn.Module):
         for batch_idx in range(batch_size):
             predicted_bboxes = outputs["pred_boxes"][batch_idx]
             if 'box' in costs:
-                target_bboxes = targets[batch_idx].boxes.tensor
+                target_bboxes = targets[batch_idx]["boxes"]
                 # calculates the p-norm (p=1) distance between each pair of the
                 # two collections of tensors
-                cost_bbox = torch.cdist(predicted_bboxes, target_bboxes, p=1)
+                with autocast(enabled=False, device_type="cuda"):
+                    cost_bbox = torch.cdist(predicted_bboxes.float(), target_bboxes.float(), p=1)
                 # we omit constant terms in the cost function, so we can just use the negative of the generalized box iou
                 cost_box_giou = -generalized_box_iou(box_cxcyczwhd_to_xyzxyz(predicted_bboxes), box_cxcyczwhd_to_xyzxyz(target_bboxes))
             else:
@@ -119,22 +93,22 @@ class HungarianMatcher(nn.Module):
 
             # predicted_logits: [num_queries, num_classes]
             predicted_logits = outputs["pred_logits"][batch_idx].sigmoid()  
-            targets_labels = targets[batch_idx].labels.tensor
+            targets_labels = targets[batch_idx]["labels"]
             
-            # focal loss
+            # focal loss (TODO: use existing helpers)
             negative_cost_classification = (1 - alpha) * (predicted_logits ** gamma) * (-(1 - predicted_logits + 1e-8).log())
             positive_cost_classification = alpha * ((1 - predicted_logits) ** gamma) * (-(predicted_logits + 1e-8).log())
             cost_classification = positive_cost_classification[:, targets_labels] - negative_cost_classification[:, targets_labels]
 
             # compute classification cost, contrary to the loss computation, we don't use the NLL
-            # but approximate it as: 1 - proba[target class]
+            # but approximate it as: 1 - prob[target class]
             # since constants don't change optimization, we set cost_class = -out_prob[:, target_labels]
-            if 'mask' in costs:
+            if 'mask' in costs and self.num_points > 0:
                 # predicted_masks/target_masks: [num_queries, 1, D_pred, H_pred, W_pred]
                 predicted_masks = outputs["pred_masks"][batch_idx].unsqueeze(1) 
                 # NOTE: gt masks are already padded when preparing targets
-                target_masks = (targets[batch_idx].masks.tensor.unsqueeze(1)).to(predicted_masks)
-                
+                target_masks = (targets[batch_idx]["masks"].unsqueeze(1)).to(predicted_masks)
+
                 # all masks share the same set of points for efficient matching
                 # point_ccords: (1, num_points, 3)
                 point_coords = torch.rand(1, self.num_points, 3, device=predicted_masks.device)
@@ -153,13 +127,9 @@ class HungarianMatcher(nn.Module):
 
                 with autocast(enabled=False, device_type="cuda"):
                     predicted_masks, target_masks = predicted_masks.float(), target_masks.float()
-                    if predicted_masks.shape[0] == 0 or target_masks.shape[0] == 0:
-                        # returns: (N, 0) if we have N predictions or (0, M) if we have M targets
-                        cost_mask = batch_sigmoid_ce_loss(predicted_masks, target_masks)
-                        cost_mask_dice = batch_dice_loss(predicted_masks, target_masks)
-                    else:
-                        cost_mask = batch_sigmoid_ce_loss_jit(predicted_masks, target_masks)
-                        cost_mask_dice = batch_dice_loss_jit(predicted_masks, target_masks)
+                    # returns: (N, 0) if we have N predictions or (0, M) if we have M targets
+                    cost_mask = batch_sigmoid_ce_loss(predicted_masks, target_masks)
+                    cost_mask_dice = batch_dice_loss(predicted_masks, target_masks)
 
             else:
                 cost_mask = torch.tensor(0).to(predicted_bboxes)
@@ -180,3 +150,68 @@ class HungarianMatcher(nn.Module):
             (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
             for i, j in matched_masks
         ]
+
+
+class PlainDETRHungarianMatcher(nn.Module):
+    def __init__(self, cost_class: float, cost_bbox: float, cost_giou: float, reparam: bool):
+        super().__init__()
+        self.cost_class = cost_class
+        self.cost_bbox = cost_bbox
+        self.cost_giou = cost_giou
+        self.reparam = reparam
+
+    @torch.no_grad()
+    def forward(self, outputs, targets):
+        bs, num_queries = outputs["pred_logits"].shape[:2]
+        out_prob = outputs["pred_logits"].flatten(0, 1).sigmoid()
+        out_bbox = outputs["pred_boxes"].flatten(0, 1)
+
+        tgt_ids = torch.cat([v["labels"] for v in targets])
+        tgt_bbox = torch.cat([v["boxes"] for v in targets])
+
+        # focal class cost (same as official)
+        alpha, gamma = 0.25, 2.0
+        neg = (1 - alpha) * (out_prob ** gamma) * (-(1 - out_prob + 1e-8).log())
+        pos = alpha * ((1 - out_prob) ** gamma) * (-(out_prob + 1e-8).log())
+        cost_class = pos[:, tgt_ids] - neg[:, tgt_ids]
+
+        # bbox cost
+        if self.reparam:
+            out_delta = outputs["pred_deltas"].flatten(0, 1)
+            out_bbox_old = outputs["pred_boxes_old"].flatten(0, 1)
+            #NOTE: supervise deltas between anchors and true boxes
+            tgt_delta = bbox2delta(out_bbox_old, tgt_bbox)
+            with autocast(enabled=False, device_type="cuda"):
+                cost_bbox = torch.cdist(out_delta.float()[:, None], tgt_delta.float(), p=1).squeeze(1)
+        else:
+            with autocast(enabled=False, device_type="cuda"):
+                cost_bbox = torch.cdist(out_bbox.float(), tgt_bbox.float(), p=1)
+
+        cost_giou = -generalized_box_iou(
+            box_cxcyczwhd_to_xyzxyz(out_bbox),
+            box_cxcyczwhd_to_xyzxyz(tgt_bbox),
+        )
+
+        C = (
+            self.cost_bbox * cost_bbox
+            + self.cost_class * cost_class
+            + self.cost_giou * cost_giou
+        )
+        C = C.view(bs, num_queries, -1).cpu()
+
+        # [B,Q, SUM_i T_i] -> [B, Q, T_i] -> [Q,T_i] -> list of B [(index_i, index_j)] for each q in Q
+        sizes = [len(v["boxes"]) for v in targets]
+        indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
+        return [
+            (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
+            for i, j in indices
+        ]
+
+
+def build_plain_detr_matcher(args):
+    return PlainDETRHungarianMatcher(
+        cost_class=args.cost_class,
+        cost_bbox=args.cost_bbox,
+        cost_giou=args.cost_giou,
+        reparam=(getattr(args, "cost_bbox_type", "l1") == "reparam"),
+    )
